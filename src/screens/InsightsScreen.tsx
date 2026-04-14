@@ -1,431 +1,299 @@
 /**
- * Insights Screen - Analytics and Visualizations
- * Shows charts with outage statistics and uptime data
+ * Insights Screen
+ * Matches SRD Dark Theme: Analytics dashboard with wavy line charts and stability scores
  */
 
 import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
+  ScrollView,
   Dimensions,
   RefreshControl,
-  FlatList,
-  TouchableOpacity,
 } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
-import {
-  VictoryLine,
-  VictoryChart,
-  VictoryAxis,
-  VictoryBar,
-} from "victory-native";
+import { LineChart } from "react-native-chart-kit";
 import AuthService from "../services/authService";
 import { useUserDevices, useInsights } from "../hooks/useDeviceData";
-import {
-  StatCard,
-  Loading,
-  ErrorMessage,
-  SectionHeader,
-} from "../components/UIComponents";
-import { Colors, GlobalStyles, Spacing } from "../styles/theme";
-import { generateMockOutages } from "../utils/helpers";
+import { Loading, ErrorMessage } from "../components/UIComponents";
 
-const { width: screenWidth } = Dimensions.get("screen");
-const chartWidth = screenWidth - Spacing.lg * 2;
+const { width: screenWidth } = Dimensions.get("window");
+
+// Exact SRD Dark Theme Colors
+const THEME = {
+  background: "#12141D",
+  cardBg: "#1E202B",
+  textPrimary: "#FFFFFF",
+  textSecondary: "#8E92A4",
+  success: "#00E676",
+  error: "#FF3B30",
+  border: "#2C2F3F",
+};
 
 const InsightsScreen: React.FC = () => {
   const [userId, setUserId] = useState<string | null>(null);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch user
+  // 1. Get User
   useEffect(() => {
     const getUser = async () => {
       const session = await AuthService.getCurrentSession();
-      if (session) {
-        setUserId(session.user.id);
-      }
+      if (session) setUserId(session.user.id);
     };
     getUser();
   }, []);
 
-  // Fetch devices
+  // 2. Get Devices (We will use the first device for the global insights view)
+  const { devices, loading: devicesLoading } = useUserDevices(userId || "");
+  const mainDeviceId = devices.length > 0 ? devices[0].id : "";
+
+  // 3. Get Real-Time Analytics from our Supabase Function
   const {
-    devices,
-    loading: devicesLoading,
-    error: devicesError,
-  } = useUserDevices(userId || "");
-
-  // Set first device as selected
-  useEffect(() => {
-    if (devices.length > 0 && !selectedDeviceId) {
-      setSelectedDeviceId(devices[0].id);
-    }
-  }, [devices, selectedDeviceId]);
-
-  // Fetch insights for selected device
-  const { insights, loading: insightsLoading } = useInsights(
-    selectedDeviceId || "",
-  );
+    insights,
+    loading: insightsLoading,
+    error,
+  } = useInsights(mainDeviceId);
 
   const onRefresh = async () => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  if (!userId) {
+  if (devicesLoading || insightsLoading) {
     return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
+      <View style={[styles.container, styles.center]}>
         <Loading />
       </View>
     );
   }
 
-  if (devicesLoading) {
+  if (error && !insights) {
     return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
-        <Loading />
+      <View style={[styles.container, styles.center]}>
+        <ErrorMessage message="Unable to load analytics at this time." />
       </View>
     );
   }
 
-  if (devicesError) {
-    return (
-      <View style={GlobalStyles.container}>
-        <ErrorMessage message={devicesError} />
-      </View>
-    );
-  }
+  // --- Chart Data (Using mock trend data to match the UI since 7-day history doesn't exist yet!) ---
+  const uptimeChartData = {
+    labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    datasets: [{ data: [18, 22, 14, 20, 24, 19, 23] }],
+  };
 
-  if (devices.length === 0) {
-    return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
-        <MaterialIcons
-          name="analytics"
-          size={64}
-          color={Colors.text.tertiary}
-        />
-        <Text
-          style={[
-            GlobalStyles.h3,
-            { marginTop: Spacing.lg, color: Colors.text.secondary },
-          ]}
-        >
-          No Data Available
-        </Text>
-      </View>
-    );
-  }
-
-  // Generate mock chart data for visualization (in production, fetch from Supabase)
-  const sevenDayUptimeData = Array.from({ length: 7 }).map((_, i) => ({
-    x: i + 1,
-    y: 85 + Math.random() * 15,
-  }));
-
-  const thirtyDayOutageData = Array.from({ length: 30 }).map((_, i) => ({
-    x: i + 1,
-    y: Math.floor(Math.random() * 4),
-  }));
-
-  const lastSevenDaysOutages = generateMockOutages(7);
+  const outageChartData = {
+    labels: ["Wk 1", "Wk 2", "Wk 3", "Wk 4"],
+    datasets: [{ data: [12, 5, 18, 8] }],
+  };
 
   return (
     <ScrollView
-      style={GlobalStyles.container}
+      style={styles.container}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={THEME.success}
+        />
       }
     >
-      {/* Device Selection */}
-      {devices.length > 1 && (
-        <View style={styles.deviceSelectionSection}>
-          <SectionHeader title="Select Device" />
-          <FlatList
-            data={devices}
-            keyExtractor={(item) => item.id}
-            horizontal
-            scrollEnabled={false}
-            contentContainerStyle={{ paddingHorizontal: Spacing.lg }}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.deviceButton,
-                  selectedDeviceId === item.id && styles.deviceButtonActive,
-                ]}
-                onPress={() => setSelectedDeviceId(item.id)}
-              >
-                <Text
-                  style={[
-                    styles.deviceButtonText,
-                    selectedDeviceId === item.id &&
-                      styles.deviceButtonTextActive,
-                  ]}
-                >
-                  {item.device_id}
-                </Text>
-              </TouchableOpacity>
-            )}
-          />
-        </View>
-      )}
-
-      {/* Summary Stats */}
-      {insightsLoading ? (
-        <View style={[GlobalStyles.center, { paddingVertical: Spacing.xxl }]}>
-          <Loading size={40} />
-        </View>
-      ) : insights ? (
-        <>
-          <SectionHeader title="This Week" />
-          <View style={styles.statsGrid}>
-            <StatCard
-              label="Total Outage"
-              value={insights.week_total_outage_hours}
-              unit="hrs"
-              icon="timer-off"
-              color={Colors.error}
-            />
-            <StatCard
-              label="Longest Outage"
-              value={
-                insights.longest_outage_minutes < 60
-                  ? Math.round(insights.longest_outage_minutes)
-                  : (insights.longest_outage_minutes / 60).toFixed(1)
-              }
-              unit={insights.longest_outage_minutes < 60 ? "min" : "hrs"}
-              icon="trending-up"
-              color={Colors.warning}
-            />
-          </View>
-
-          <View style={styles.statsGrid}>
-            <StatCard
-              label="Avg Uptime"
-              value={insights.avg_daily_uptime_percentage}
-              unit="%"
-              icon="check-circle"
-              color={Colors.success}
-            />
-            <StatCard
-              label="Stability"
-              value={insights.stability_score}
-              unit="/100"
-              icon="star"
-              color={Colors.primary}
-            />
-          </View>
-        </>
-      ) : (
-        <Text
-          style={[
-            GlobalStyles.body,
-            { color: Colors.text.secondary, margin: Spacing.lg },
-          ]}
-        >
-          No insights available
-        </Text>
-      )}
-
-      {/* 7-Day Uptime Chart */}
-      <View style={styles.chartSection}>
-        <SectionHeader title="7-Day Uptime Trend" />
-        <View style={styles.chartContainer}>
-          <VictoryChart
-            width={chartWidth}
-            height={250}
-            domain={{ y: [0, 100] }}
-            domainPadding={20}
-          >
-            <VictoryAxis
-              tickCount={8}
-              style={{
-                tickLabels: { fontSize: 10, fill: Colors.text.secondary },
-                grid: { stroke: Colors.border },
-              }}
-            />
-            <VictoryAxis
-              dependentAxis
-              tickCount={5}
-              style={{
-                tickLabels: { fontSize: 10, fill: Colors.text.secondary },
-              }}
-            />
-            <VictoryLine
-              data={sevenDayUptimeData}
-              style={{
-                data: { stroke: Colors.success, strokeWidth: 2 },
-              }}
-              interpolation="natural"
-            />
-          </VictoryChart>
-        </View>
-        <Text
-          style={[
-            GlobalStyles.caption,
-            { marginLeft: Spacing.lg, marginTop: Spacing.sm },
-          ]}
-        >
-          Power availability percentage over the last 7 days
-        </Text>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Insights</Text>
       </View>
 
-      {/* 30-Day Outage Frequency Chart */}
-      <View style={styles.chartSection}>
-        <SectionHeader title="30-Day Outage Frequency" />
-        <View style={styles.chartContainer}>
-          <VictoryChart
-            width={chartWidth}
-            height={250}
-            domain={{ y: [0, 5] }}
-            domainPadding={20}
-          >
-            <VictoryAxis
-              tickCount={8}
-              style={{
-                tickLabels: { fontSize: 8, fill: Colors.text.secondary },
-                grid: { stroke: Colors.border },
-              }}
-            />
-            <VictoryAxis
-              dependentAxis
-              tickFormat={(d) => `${d}`}
-              style={{
-                tickLabels: { fontSize: 10, fill: Colors.text.secondary },
-              }}
-            />
-            <VictoryBar
-              data={thirtyDayOutageData}
-              style={{
-                data: { fill: Colors.error },
-              }}
-            />
-          </VictoryChart>
+      {/* Top Stats Grid */}
+      <View style={styles.statsGrid}>
+        {/* Total Outages */}
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>TOTAL OUTAGES</Text>
+          <Text style={styles.statValue}>
+            {insights?.week_total_outage_hours || 0}{" "}
+            <Text style={styles.statUnit}>hrs</Text>
+          </Text>
         </View>
-        <Text
-          style={[
-            GlobalStyles.caption,
-            { marginLeft: Spacing.lg, marginTop: Spacing.sm },
-          ]}
-        >
-          Number of outage events per day over the last 30 days
-        </Text>
+
+        {/* Longest Outage */}
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>LONGEST OUTAGE</Text>
+          <Text style={styles.statValue}>
+            {insights?.longest_outage_minutes || 0}{" "}
+            <Text style={styles.statUnit}>mins</Text>
+          </Text>
+        </View>
+
+        {/* Avg Daily Power */}
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>AVG DAILY POWER</Text>
+          <Text style={[styles.statValue, { color: THEME.success }]}>
+            {insights?.avg_daily_uptime_percentage || 100}%
+          </Text>
+        </View>
+
+        {/* Stability Score */}
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>STABILITY</Text>
+          <View style={styles.scoreBadge}>
+            <Text style={styles.scoreText}>
+              {insights?.stability_score || 100}
+            </Text>
+          </View>
+        </View>
       </View>
 
-      {/* Outage Timeline */}
-      <View style={styles.timelineSection}>
-        <SectionHeader title="Recent Outages" />
-        <FlatList
-          data={lastSevenDaysOutages}
-          keyExtractor={(item, index) => index.toString()}
-          scrollEnabled={false}
-          renderItem={({ item, index }) => (
-            <View
-              key={item.id}
-              style={[
-                styles.timelineItem,
-                index !== lastSevenDaysOutages.length - 1 &&
-                  styles.timelineItemBorder,
-              ]}
-            >
-              <View style={styles.timelineMarker}>
-                <View style={styles.timelineMarkerDot} />
-                {index !== lastSevenDaysOutages.length - 1 && (
-                  <View style={styles.timelineMarkerLine} />
-                )}
-              </View>
-              <View style={styles.timelineContent}>
-                <Text style={GlobalStyles.label}>
-                  {new Date(item.started_at).toLocaleDateString()}
-                </Text>
-                <Text style={[GlobalStyles.body, { marginTop: Spacing.xs }]}>
-                  Duration: {Math.round(item.duration_minutes)} minutes
-                </Text>
-              </View>
-            </View>
-          )}
+      {/* Chart 1: Daily Hours of Power */}
+      <View style={styles.chartContainer}>
+        <View style={styles.chartHeader}>
+          <Text style={styles.chartTitle}>Daily Hours of Power</Text>
+          <Text style={styles.chartSubtitle}>This Week</Text>
+        </View>
+        <LineChart
+          data={uptimeChartData}
+          width={screenWidth - 32} // padding
+          height={180}
+          chartConfig={{
+            backgroundColor: THEME.cardBg,
+            backgroundGradientFrom: THEME.cardBg,
+            backgroundGradientTo: THEME.cardBg,
+            decimalPlaces: 0,
+            color: (opacity = 1) => `rgba(0, 230, 118, ${opacity})`, // THEME.success
+            labelColor: (opacity = 1) => `rgba(142, 146, 164, ${opacity})`,
+            style: { borderRadius: 16 },
+            propsForDots: { r: "4", strokeWidth: "2", stroke: THEME.cardBg },
+          }}
+          bezier // Makes the line wavy!
+          style={styles.chartStyle}
+          withVerticalLines={false}
+          withHorizontalLines={false}
         />
       </View>
 
-      <View style={{ height: Spacing.xl }} />
+      {/* Chart 2: Outage Events */}
+      <View style={styles.chartContainer}>
+        <View style={styles.chartHeader}>
+          <Text style={styles.chartTitle}>Outage Events - 30 Days</Text>
+          <Text style={[styles.chartSubtitle, { color: THEME.error }]}>
+            ↑ 12%
+          </Text>
+        </View>
+        <LineChart
+          data={outageChartData}
+          width={screenWidth - 32}
+          height={180}
+          chartConfig={{
+            backgroundColor: THEME.cardBg,
+            backgroundGradientFrom: THEME.cardBg,
+            backgroundGradientTo: THEME.cardBg,
+            decimalPlaces: 0,
+            color: (opacity = 1) => `rgba(255, 59, 48, ${opacity})`, // THEME.error
+            labelColor: (opacity = 1) => `rgba(142, 146, 164, ${opacity})`,
+            style: { borderRadius: 16 },
+            propsForDots: { r: "4", strokeWidth: "2", stroke: THEME.cardBg },
+          }}
+          bezier // Wavy line
+          style={styles.chartStyle}
+          withVerticalLines={false}
+          withHorizontalLines={false}
+        />
+      </View>
+
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  deviceSelectionSection: {
-    marginVertical: Spacing.lg,
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
   },
-  deviceButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginRight: Spacing.md,
-    borderRadius: 20,
-    backgroundColor: Colors.backgroundDark,
-    borderWidth: 2,
-    borderColor: Colors.border,
+  center: {
+    justifyContent: "center",
+    alignItems: "center",
   },
-  deviceButtonActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+  header: {
+    alignItems: "center",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
   },
-  deviceButtonText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: Colors.text.primary,
-  },
-  deviceButtonTextActive: {
-    color: "white",
+  headerTitle: {
+    color: THEME.textPrimary,
+    fontSize: 18,
+    fontWeight: "bold",
   },
   statsGrid: {
     flexDirection: "row",
-    paddingHorizontal: Spacing.sm,
-    marginVertical: Spacing.sm,
+    flexWrap: "wrap",
+    padding: 16,
+    justifyContent: "space-between",
   },
-  chartSection: {
-    marginVertical: Spacing.xl,
+  statCard: {
+    width: "48%",
+    backgroundColor: THEME.cardBg,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  statLabel: {
+    color: THEME.textSecondary,
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  statValue: {
+    color: THEME.textPrimary,
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+  statUnit: {
+    fontSize: 14,
+    fontWeight: "normal",
+    color: THEME.textSecondary,
+  },
+  scoreBadge: {
+    backgroundColor: THEME.success,
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  scoreText: {
+    color: THEME.cardBg,
+    fontSize: 20,
+    fontWeight: "bold",
   },
   chartContainer: {
-    backgroundColor: Colors.backgroundDark,
-    borderRadius: 12,
-    marginHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 24,
+    backgroundColor: THEME.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    paddingTop: 16,
   },
-  timelineSection: {
-    marginVertical: Spacing.xl,
-  },
-  timelineItem: {
+  chartHeader: {
     flexDirection: "row",
-    marginHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
-  timelineItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+  chartTitle: {
+    color: THEME.textPrimary,
+    fontSize: 15,
+    fontWeight: "600",
   },
-  timelineMarker: {
-    width: 40,
-    alignItems: "center",
+  chartSubtitle: {
+    color: THEME.success,
+    fontSize: 13,
+    fontWeight: "500",
   },
-  timelineMarkerDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: Colors.primary,
-  },
-  timelineMarkerLine: {
-    width: 2,
-    flex: 1,
-    backgroundColor: Colors.border,
-    marginTop: -20,
-  },
-  timelineContent: {
-    flex: 1,
-    paddingLeft: Spacing.md,
-    justifyContent: "center",
+  chartStyle: {
+    borderRadius: 16,
+    paddingRight: 16,
   },
 });
 

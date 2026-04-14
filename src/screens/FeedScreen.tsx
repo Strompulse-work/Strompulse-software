@@ -1,51 +1,50 @@
 /**
  * Feed Screen - Main Dashboard
- * Shows real-time power status with live duration counter and recent outage history
+ * Matches SRD Dark Theme: Global Activity Feed of power events across Ibadan
  */
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-  Dimensions,
   FlatList,
+  RefreshControl,
+  TouchableOpacity,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
-import {
-  useUserDevices,
-  useDeviceOutages,
-  useDeviceStatusPolling,
-} from "../hooks/useDeviceData";
-import {
-  PowerStatusIndicator,
-  DeviceCard,
-  Loading,
-  ErrorMessage,
-  OutageEventItem,
-  SectionHeader,
-} from "../components/UIComponents";
-import { Colors, GlobalStyles, Spacing } from "../styles/theme";
-import {
-  formatDuration,
-  formatTimestamp,
-  getRelativeTime,
-} from "../utils/helpers";
-import { Device, Outage } from "../types";
+import { useUserDevices } from "../hooks/useDeviceData";
+import { Loading, ErrorMessage } from "../components/UIComponents";
 
-const { width: screenWidth } = Dimensions.get("screen");
+// Extracted exact colors from your SRD image
+const THEME = {
+  background: "#12141D",
+  cardBg: "#1E202B",
+  textPrimary: "#FFFFFF",
+  textSecondary: "#8E92A4",
+  success: "#00E676", // Bright Green
+  error: "#FF3B30", // Bright Red
+  warning: "#FFCC00", // Yellow
+  border: "#2C2F3F",
+};
+
+// Quick helper to format "mins ago"
+const getRelativeTime = (dateString: string) => {
+  const now = new Date();
+  const past = new Date(dateString);
+  const diffInMinutes = Math.floor((now.getTime() - past.getTime()) / 60000);
+
+  if (diffInMinutes < 1) return "Just now";
+  if (diffInMinutes < 60) return `${diffInMinutes} mins ago`;
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `${diffInHours} hrs ago`;
+  return "1 day ago";
+};
 
 const FeedScreen: React.FC = () => {
   const [userId, setUserId] = useState<string | null>(null);
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [outageStartTime, setOutageStartTime] = useState<string | null>(null);
-  const [durationText, setDurationText] = useState("");
-  const durationInterval = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch initial user
   useEffect(() => {
@@ -58,97 +57,21 @@ const FeedScreen: React.FC = () => {
     getUser();
   }, []);
 
-  // Fetch user devices
+  // Fetch all devices for the user
   const {
     devices,
     loading: devicesLoading,
     error: devicesError,
   } = useUserDevices(userId || "");
 
-  // Set initial selected device
-  useEffect(() => {
-    if (devices.length > 0 && !selectedDevice) {
-      setSelectedDevice(devices[0]);
-    }
-  }, [devices, selectedDevice]);
-
-  // Fetch outages and status for selected device
-  const { outages, loading: outagesLoading } = useDeviceOutages(
-    selectedDevice?.id || "",
-    5,
-  );
-
-  // Directly grab the real-time updated device from our live devices array
-  const currentDevice =
-    devices.find((d) => d.id === selectedDevice?.id) || selectedDevice;
-
-  // Calculate duration for active outage
-  useEffect(() => {
-    if (currentDevice?.status === "OFF") {
-      const calculateDuration = () => {
-        if (!outageStartTime) {
-          // Get start time from last outage
-          const lastOutage = outages?.[0];
-          if (lastOutage) {
-            setOutageStartTime(lastOutage.started_at);
-          }
-        }
-
-        if (outageStartTime) {
-          const startDate = new Date(outageStartTime);
-          const now = new Date();
-          const diffMs = now.getTime() - startDate.getTime();
-          const diffMinutes = Math.floor(diffMs / 60000);
-          const diffHours = Math.floor(diffMinutes / 60);
-          const diffDays = Math.floor(diffHours / 24);
-
-          let text = "";
-          if (diffDays > 0) {
-            text = `Power has been OFF for ${diffDays}d ${diffHours % 24}h`;
-          } else if (diffHours > 0) {
-            text = `Power has been OFF for ${diffHours}h ${diffMinutes % 60}m`;
-          } else {
-            text = `Power has been OFF for ${diffMinutes}m`;
-          }
-
-          setDurationText(text);
-        }
-      };
-
-      calculateDuration();
-      durationInterval.current = setInterval(calculateDuration, 60000); // Update every minute
-
-      return () => {
-        if (durationInterval.current) {
-          clearInterval(durationInterval.current);
-        }
-      };
-    } else {
-      setDurationText("");
-      setOutageStartTime(null);
-      if (durationInterval.current) {
-        clearInterval(durationInterval.current);
-      }
-    }
-  }, [currentDevice?.status, outages, outageStartTime]);
-
   const onRefresh = async () => {
     setRefreshing(true);
-    // Trigger data refetch
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  if (!userId) {
+  if (devicesLoading && devices.length === 0) {
     return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
-        <Loading />
-      </View>
-    );
-  }
-
-  if (devicesLoading) {
-    return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
+      <View style={[styles.container, styles.center]}>
         <Loading />
       </View>
     );
@@ -156,229 +79,176 @@ const FeedScreen: React.FC = () => {
 
   if (devicesError) {
     return (
-      <View style={GlobalStyles.container}>
+      <View style={[styles.container, styles.center]}>
         <ErrorMessage message={devicesError} />
       </View>
     );
   }
 
-  if (devices.length === 0) {
-    return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
-        <MaterialIcons name="devices" size={64} color={Colors.text.tertiary} />
-        <Text
-          style={[
-            GlobalStyles.h3,
-            { marginTop: Spacing.lg, color: Colors.text.secondary },
-          ]}
-        >
-          No Devices Found
-        </Text>
-        <Text
-          style={[
-            GlobalStyles.body,
-            { color: Colors.text.tertiary, marginTop: Spacing.md },
-          ]}
-        >
-          Add a device to get started monitoring your electricity status
-        </Text>
-      </View>
-    );
-  }
+  // Sort devices by who was "last seen" to make it act like a chronological timeline feed
+  const feedItems = [...devices].sort(
+    (a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
+  );
 
   return (
-    <ScrollView
-      style={GlobalStyles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      {/* Main Status Display */}
-      <View style={styles.statusSection}>
-        <View style={styles.statusCard}>
-          <PowerStatusIndicator
-            status={currentDevice?.status || "OFFLINE"}
-            size="large"
-            showLabel={true}
-          />
-
-          {durationText && (
-            <Text style={[styles.durationText, { marginTop: Spacing.lg }]}>
-              {durationText}
-            </Text>
-          )}
-
-          {currentDevice?.last_seen && (
-            <Text style={[GlobalStyles.caption, { marginTop: Spacing.md }]}>
-              Last seen {getRelativeTime(currentDevice.last_seen)}
-            </Text>
-          )}
-        </View>
+    <View style={styles.container}>
+      {/* Header Area to match SRD Top Navigation vibe */}
+      <View style={styles.header}>
+        <View style={styles.headerIndicator} />
+        <Text style={styles.headerTitle}>Live Feed</Text>
       </View>
 
-      {/* Device Selection */}
-      {devices.length > 1 && (
-        <View style={styles.deviceSelectionSection}>
-          <SectionHeader title="Your Devices" />
-          <FlatList
-            data={devices}
-            keyExtractor={(item) => item.id}
-            horizontal
-            scrollEnabled={false}
-            contentContainerStyle={{ paddingHorizontal: Spacing.lg }}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.deviceSelector,
-                  selectedDevice?.id === item.id && styles.deviceSelectorActive,
-                ]}
-                onPress={() => {
-                  setSelectedDevice(item);
-                  setOutageStartTime(null);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.deviceSelectorText,
-                    selectedDevice?.id === item.id &&
-                      styles.deviceSelectorTextActive,
-                  ]}
-                >
-                  {item.device_id}
-                </Text>
-              </TouchableOpacity>
-            )}
+      {feedItems.length === 0 ? (
+        <View style={[styles.container, styles.center]}>
+          <MaterialIcons
+            name="notifications-none"
+            size={64}
+            color={THEME.textSecondary}
           />
+          <Text style={{ color: THEME.textSecondary, marginTop: 16 }}>
+            No recent activity.
+          </Text>
         </View>
-      )}
-
-      {/* Recent Outages */}
-      <View style={styles.outagesSection}>
-        <SectionHeader title="Recent Outages" />
-        {outagesLoading ? (
-          <Loading size={40} />
-        ) : outages.length > 0 ? (
-          <FlatList
-            data={outages}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-            renderItem={({ item }) => (
-              <OutageEventItem
-                duration={formatDuration(item.duration_minutes)}
-                startTime={formatTimestamp(item.started_at, "MMM dd, HH:mm")}
-                endTime={
-                  item.ended_at
-                    ? formatTimestamp(item.ended_at, "MMM dd, HH:mm")
-                    : "Ongoing"
-                }
-              />
-            )}
-          />
-        ) : (
-          <View style={styles.emptyState}>
-            <MaterialIcons
-              name="check-circle"
-              size={40}
-              color={Colors.success}
+      ) : (
+        <FlatList
+          data={feedItems}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={THEME.success}
             />
-            <Text
-              style={[
-                GlobalStyles.body,
-                { color: Colors.text.secondary, marginTop: Spacing.md },
-              ]}
-            >
-              No recent outages - Great!
-            </Text>
-          </View>
-        )}
+          }
+          renderItem={({ item }) => <FeedCard device={item} />}
+        />
+      )}
+    </View>
+  );
+};
+
+/**
+ * Individual Activity Notification Card
+ */
+const FeedCard: React.FC<{ device: any }> = ({ device }) => {
+  const isOnline = device.status === "ON";
+
+  // Dynamic styling based on power status
+  const cardConfig = isOnline
+    ? {
+        color: THEME.success,
+        bgColor: "rgba(0, 230, 118, 0.1)",
+        icon: "power",
+        title: `Power Restored in ${device.address}`,
+        subtitle: `Power is back in ${device.address}. Confidence: 98%`,
+      }
+    : {
+        color: THEME.error,
+        bgColor: "rgba(255, 59, 48, 0.1)",
+        icon: "power-off",
+        title: `Outage in ${device.address}`,
+        subtitle: `Power outage detected in ${device.address}. Confidence: 95%`,
+      };
+
+  return (
+    <TouchableOpacity style={styles.card} activeOpacity={0.8}>
+      {/* Left Icon */}
+      <View
+        style={[styles.iconContainer, { backgroundColor: cardConfig.bgColor }]}
+      >
+        <MaterialIcons
+          name={cardConfig.icon as any}
+          size={24}
+          color={cardConfig.color}
+        />
       </View>
 
-      {/* Device Info */}
-      {currentDevice && (
-        <View style={styles.infoSection}>
-          <SectionHeader title="Device Information" />
-          <View style={[GlobalStyles.card, { marginHorizontal: Spacing.lg }]}>
-            <View style={GlobalStyles.rowBetween}>
-              <Text style={GlobalStyles.label}>Device ID</Text>
-              <Text style={GlobalStyles.body}>{currentDevice.device_id}</Text>
-            </View>
-            <View
-              style={[
-                GlobalStyles.rowBetween,
-                {
-                  marginTop: Spacing.md,
-                  borderTopWidth: 1,
-                  borderTopColor: Colors.border,
-                  paddingTop: Spacing.md,
-                },
-              ]}
-            >
-              <Text style={GlobalStyles.label}>Address</Text>
-              <Text
-                style={[
-                  GlobalStyles.body,
-                  { flex: 1, textAlign: "right", marginLeft: Spacing.md },
-                ]}
-              >
-                {currentDevice.address}
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      <View style={{ height: Spacing.xl }} />
-    </ScrollView>
+      {/* Right Content */}
+      <View style={styles.contentContainer}>
+        <Text style={[styles.title, { color: cardConfig.color }]}>
+          {cardConfig.title}
+        </Text>
+        <Text style={styles.subtitle} numberOfLines={2}>
+          {cardConfig.subtitle}
+        </Text>
+        <Text style={styles.timestamp}>
+          {getRelativeTime(device.last_seen)}
+        </Text>
+      </View>
+    </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
-  statusSection: {
-    paddingVertical: Spacing.xxl,
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
+  },
+  center: {
+    justifyContent: "center",
     alignItems: "center",
   },
-  statusCard: {
+  header: {
+    flexDirection: "row",
     alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
   },
-  durationText: {
+  headerIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: THEME.success,
+    marginRight: 12,
+  },
+  headerTitle: {
+    color: THEME.textPrimary,
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  listContainer: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  card: {
+    flexDirection: "row",
+    backgroundColor: THEME.cardBg,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
+  },
+  contentContainer: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  title: {
     fontSize: 16,
     fontWeight: "600",
-    color: Colors.error,
-    textAlign: "center",
+    marginBottom: 4,
   },
-  deviceSelectionSection: {
-    marginVertical: Spacing.xl,
+  subtitle: {
+    color: THEME.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
   },
-  deviceSelector: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginRight: Spacing.md,
-    borderRadius: 20,
-    backgroundColor: Colors.backgroundDark,
-    borderWidth: 2,
-    borderColor: Colors.border,
-  },
-  deviceSelectorActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  deviceSelectorText: {
-    fontSize: 14,
+  timestamp: {
+    color: THEME.textSecondary,
+    fontSize: 11,
     fontWeight: "500",
-    color: Colors.text.primary,
-  },
-  deviceSelectorTextActive: {
-    color: "white",
-  },
-  outagesSection: {
-    marginVertical: Spacing.xl,
-  },
-  emptyState: {
-    alignItems: "center",
-    paddingVertical: Spacing.xxl,
-  },
-  infoSection: {
-    marginVertical: Spacing.xl,
   },
 });
 

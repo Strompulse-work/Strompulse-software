@@ -2,6 +2,7 @@
   "expo": {
     "name": "Ibadan Power",
     "slug": "ibadan-power",
+    "scheme": "ibadanpower",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,9 +14,7 @@
     "updates": {
       "fallbackToCacheTimeout": 0
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "bundleIdentifier": "com.ibadanpower.app"
     },
@@ -25,7 +24,8 @@
     "plugins": [
       "expo-location",
       "expo-notifications",
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
     "scheme": "ibadanpower"
   }

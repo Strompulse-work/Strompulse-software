@@ -1,83 +1,214 @@
 /**
- * Map Screen - Device Location Visualization
- * Shows all devices on a map with real-time status indicators
+ * Map Screen - Dark Mode Grid & Geographic Webs
+ * Matches SRD: Shows colored polygonal webs for communities based on real-time power status
  */
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   View,
   StyleSheet,
   Text,
   TouchableOpacity,
-  Modal,
   Dimensions,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, Polygon } from "react-native-maps";
 import { MaterialIcons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useUserDevices } from "../hooks/useDeviceData";
 import { Loading, ErrorMessage } from "../components/UIComponents";
-import { Colors, GlobalStyles, Spacing } from "../styles/theme";
-import { getStatusColor, formatAddress } from "../utils/helpers";
 import { Device } from "../types";
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get("screen");
+const { width: screenWidth } = Dimensions.get("screen");
+
+// Exact SRD Dark Theme Colors
+const THEME = {
+  background: "#12141D",
+  cardBg: "#1E202B",
+  textPrimary: "#FFFFFF",
+  textSecondary: "#8E92A4",
+  success: "#00E676",
+  error: "#FF3B30",
+  warning: "#FFCC00", // Unstable
+  border: "#2C2F3F",
+};
 
 // Default map center (Ibadan, Nigeria)
 const DEFAULT_LATITUDE = 7.3775;
 const DEFAULT_LONGITUDE = 3.9465;
-const DEFAULT_LATITUDE_DELTA = 0.0922;
-const DEFAULT_LONGITUDE_DELTA = 0.0421;
+const DEFAULT_LATITUDE_DELTA = 0.15;
+const DEFAULT_LONGITUDE_DELTA = 0.15;
 
-interface SelectedMarker {
-  device: Device;
-}
+// Custom Google Maps Dark Theme (Hides labels & POIs for a clean grid look)
+const darkMapStyle = [
+  { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
+  {
+    featureType: "administrative.country",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#4b6878" }],
+  },
+  {
+    featureType: "administrative.land_parcel",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#64779e" }],
+  },
+  {
+    featureType: "administrative.province",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#4b6878" }],
+  },
+  {
+    featureType: "landscape.man_made",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#334e87" }],
+  },
+  {
+    featureType: "landscape.natural",
+    elementType: "geometry",
+    stylers: [{ color: "#023e58" }],
+  },
+  {
+    featureType: "poi",
+    elementType: "geometry",
+    stylers: [{ color: "#283d6a" }],
+  },
+  {
+    featureType: "poi",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#6f9ba5" }],
+  },
+  {
+    featureType: "poi",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#1d2c4d" }],
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#304a7d" }],
+  },
+  {
+    featureType: "road",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#98a5be" }],
+  },
+  {
+    featureType: "road",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#1d2c4d" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#2c6675" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#255763" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#b0d5ce" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#023e58" }],
+  },
+  {
+    featureType: "transit",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#98a5be" }],
+  },
+  {
+    featureType: "transit",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#1d2c4d" }],
+  },
+  {
+    featureType: "transit.line",
+    elementType: "geometry.fill",
+    stylers: [{ color: "#283d6a" }],
+  },
+  {
+    featureType: "transit.station",
+    elementType: "geometry",
+    stylers: [{ color: "#3a4762" }],
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#0e1626" }],
+  },
+  {
+    featureType: "water",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#4e6d70" }],
+  },
+];
+
+/**
+ * Math helper to generate a polygonal "web" around a coordinate
+ * We use the index to vary the shape so the webs look organic and unique
+ */
+const generateWebPolygon = (lat: number, lng: number, index: number) => {
+  const radius = 0.015; // Roughly 1.5km spread
+  const points = [];
+  const sides = 5 + (index % 3); // Create 5, 6, or 7-sided webs
+
+  for (let i = 0; i < sides; i++) {
+    // Add deterministic variance based on index so the shape doesn't jiggle on refresh
+    const angle = (i * 2 * Math.PI) / sides + index;
+    const variance = 0.7 + ((i * index) % 5) / 10;
+
+    points.push({
+      latitude: lat + radius * variance * Math.cos(angle),
+      longitude: lng + radius * variance * 1.1 * Math.sin(angle), // 1.1 adjusts for map projection aspect ratio
+    });
+  }
+  return points;
+};
 
 const MapScreen: React.FC = () => {
   const [userId, setUserId] = useState<string | null>(null);
-  const [selectedMarker, setSelectedMarker] = useState<SelectedMarker | null>(
-    null,
-  );
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const mapRef = useRef<MapView>(null);
 
   // Fetch user
   useEffect(() => {
     const getUser = async () => {
       const session = await AuthService.getCurrentSession();
-      if (session) {
-        setUserId(session.user.id);
-      }
+      if (session) setUserId(session.user.id);
     };
     getUser();
   }, []);
 
-  // Fetch devices
+  // Fetch devices (Real-time hook)
   const { devices, loading, error } = useUserDevices(userId || "");
 
-  // Center map on first device or Ibadan
-  useEffect(() => {
-    if (mapRef.current && devices.length > 0) {
-      const region = {
-        latitude: devices[0].latitude,
-        longitude: devices[0].longitude,
-        latitudeDelta: DEFAULT_LATITUDE_DELTA * 2,
-        longitudeDelta: DEFAULT_LONGITUDE_DELTA * 2,
-      };
-      mapRef.current.animateToRegion(region, 1000);
-    }
-  }, [devices]);
+  // Generate the polygon coordinates once per device so they don't redraw unnecessarily
+  const deviceWebs = useMemo(() => {
+    return devices.map((d, index) => ({
+      ...d,
+      polygon: generateWebPolygon(d.latitude, d.longitude, index),
+    }));
+  }, [devices.length]); // Only re-calculate if the number of devices changes, not on status change
 
-  if (!userId) {
-    return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
-        <Loading />
-      </View>
-    );
-  }
+  // Map Real-time Status to colors
+  const getDeviceColors = (status: string) => {
+    if (status === "ON")
+      return { border: THEME.success, fill: "rgba(0, 230, 118, 0.2)" };
+    if (status === "OFF")
+      return { border: THEME.error, fill: "rgba(255, 59, 48, 0.2)" };
+    return { border: THEME.warning, fill: "rgba(255, 204, 0, 0.2)" }; // Unstable/Unknown
+  };
 
-  if (loading) {
+  if (!userId || loading) {
     return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
+      <View style={[styles.container, styles.center]}>
         <Loading />
       </View>
     );
@@ -85,278 +216,214 @@ const MapScreen: React.FC = () => {
 
   if (error) {
     return (
-      <View style={GlobalStyles.container}>
+      <View style={styles.container}>
         <ErrorMessage message={error} />
       </View>
     );
   }
 
-  if (devices.length === 0) {
-    return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
-        <MaterialIcons
-          name="location-off"
-          size={64}
-          color={Colors.text.tertiary}
-        />
-        <Text
-          style={[
-            GlobalStyles.h3,
-            { marginTop: Spacing.lg, color: Colors.text.secondary },
-          ]}
-        >
-          No Devices to Display
-        </Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={GlobalStyles.container}>
+    <View style={styles.container}>
+      {/* NOTE: We intentionally omit PROVIDER_GOOGLE here so it uses Apple Maps on iOS 
+        and the default Google map on Android seamlessly without needing an API key for Expo Go. 
+      */}
       <MapView
         ref={mapRef}
         style={styles.map}
+        customMapStyle={darkMapStyle}
         initialRegion={{
           latitude: DEFAULT_LATITUDE,
           longitude: DEFAULT_LONGITUDE,
           latitudeDelta: DEFAULT_LATITUDE_DELTA,
           longitudeDelta: DEFAULT_LONGITUDE_DELTA,
         }}
-        showsUserLocation={false}
-        showsMyLocationButton={true}
       >
-        {devices.map((device) => (
-          <Marker
-            key={device.id}
-            coordinate={{
-              latitude: device.latitude,
-              longitude: device.longitude,
-            }}
-            title={device.device_id}
-            description={device.address}
-            onPress={() => setSelectedMarker({ device })}
-          >
-            <View style={styles.markerContainer}>
-              <View
-                style={[
-                  styles.markerCircle,
-                  {
-                    backgroundColor: getStatusColor(device.status),
-                  },
-                ]}
+        {devices.map((device, index) => {
+          const colors = getDeviceColors(device.status);
+          const webPolygon = deviceWebs[index]?.polygon || [];
+
+          return (
+            <React.Fragment key={device.id}>
+              {/* The Geographic Web */}
+              <Polygon
+                coordinates={webPolygon}
+                strokeColor={colors.border}
+                fillColor={colors.fill}
+                strokeWidth={2}
+                tappable={true}
+                onPress={() => setSelectedDevice(device)}
+              />
+
+              {/* The Area Label Tag */}
+              <Marker
+                coordinate={{
+                  latitude: device.latitude,
+                  longitude: device.longitude,
+                }}
+                onPress={() => setSelectedDevice(device)}
               >
-                <MaterialIcons
-                  name={
-                    device.status === "ON"
-                      ? "check"
-                      : device.status === "OFF"
-                        ? "close"
-                        : "signal-cellular-off"
-                  }
-                  size={16}
-                  color="white"
-                />
-              </View>
-            </View>
-          </Marker>
-        ))}
-      </MapView>
-
-      {/* Marker Details Modal */}
-      <Modal
-        visible={!!selectedMarker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSelectedMarker(null)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            {selectedMarker && (
-              <>
-                <View
-                  style={[
-                    GlobalStyles.rowBetween,
-                    { marginBottom: Spacing.lg },
-                  ]}
-                >
-                  <Text style={GlobalStyles.h2}>
-                    {selectedMarker.device.device_id}
+                <View style={[styles.labelTag, { borderColor: colors.border }]}>
+                  <Text style={styles.labelText}>
+                    {device.address.split(",")[0]}
                   </Text>
-                  <TouchableOpacity onPress={() => setSelectedMarker(null)}>
-                    <MaterialIcons
-                      name="close"
-                      size={24}
-                      color={Colors.text.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.detailRow}>
-                  <Text style={GlobalStyles.label}>Status</Text>
                   <View
                     style={[
-                      styles.statusBadge,
-                      {
-                        backgroundColor: getStatusColor(
-                          selectedMarker.device.status,
-                        ),
-                      },
+                      styles.labelDot,
+                      { backgroundColor: colors.border },
                     ]}
-                  >
-                    <Text style={styles.statusBadgeText}>
-                      {selectedMarker.device.status}
-                    </Text>
-                  </View>
+                  />
                 </View>
+              </Marker>
+            </React.Fragment>
+          );
+        })}
+      </MapView>
 
-                <View style={styles.detailRow}>
-                  <Text style={GlobalStyles.label}>Address</Text>
-                  <Text
-                    style={[
-                      GlobalStyles.body,
-                      { flex: 1, textAlign: "right", marginLeft: Spacing.md },
-                    ]}
-                  >
-                    {formatAddress(selectedMarker.device.address)}
-                  </Text>
-                </View>
-
-                <View style={styles.detailRow}>
-                  <Text style={GlobalStyles.label}>Last Seen</Text>
-                  <Text style={GlobalStyles.body}>
-                    {new Date(selectedMarker.device.last_seen).toLocaleString()}
-                  </Text>
-                </View>
-
-                <View style={styles.detailRow}>
-                  <Text style={GlobalStyles.label}>Coordinates</Text>
-                  <Text style={GlobalStyles.body}>
-                    {selectedMarker.device.latitude.toFixed(4)},{" "}
-                    {selectedMarker.device.longitude.toFixed(4)}
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={GlobalStyles.buttonPrimary}
-                  onPress={() => setSelectedMarker(null)}
-                >
-                  <Text style={{ color: "white", fontWeight: "600" }}>
-                    Close
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
+      {/* Selected Area Info Card (Replaces the generic Modal) */}
+      {selectedDevice && (
+        <View style={styles.floatingCard}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>
+              {selectedDevice.address.split(",")[0]}
+            </Text>
+            <TouchableOpacity onPress={() => setSelectedDevice(null)}>
+              <MaterialIcons
+                name="close"
+                size={24}
+                color={THEME.textSecondary}
+              />
+            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
 
-      {/* Legend */}
-      <View style={styles.legend}>
-        <View style={styles.legendItem}>
-          <View
-            style={[styles.legendDot, { backgroundColor: Colors.status.on }]}
-          />
-          <Text style={styles.legendLabel}>Online</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View
-            style={[styles.legendDot, { backgroundColor: Colors.status.off }]}
-          />
-          <Text style={styles.legendLabel}>Offline</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View
+          <View style={styles.cardRow}>
+            <Text style={styles.cardLabel}>Status:</Text>
+            <Text
+              style={[
+                styles.cardStatusText,
+                {
+                  color:
+                    selectedDevice.status === "ON"
+                      ? THEME.success
+                      : THEME.error,
+                },
+              ]}
+            >
+              {selectedDevice.status === "ON"
+                ? "Power Restored"
+                : "Power Outage"}
+            </Text>
+          </View>
+
+          <View style={styles.cardRow}>
+            <Text style={styles.cardLabel}>Confidence:</Text>
+            <Text style={styles.cardValue}>95%</Text>
+          </View>
+
+          <TouchableOpacity
             style={[
-              styles.legendDot,
-              { backgroundColor: Colors.status.offline },
+              styles.actionButton,
+              {
+                backgroundColor:
+                  selectedDevice.status === "ON" ? THEME.success : THEME.error,
+              },
             ]}
-          />
-          <Text style={styles.legendLabel}>Dead</Text>
+          >
+            <Text style={styles.actionButtonText}>View Community</Text>
+          </TouchableOpacity>
         </View>
-      </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
+  },
+  center: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   map: {
     flex: 1,
   },
-  markerContainer: {
+  labelTag: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: THEME.cardBg,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
   },
-  markerCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 3,
-    borderColor: "white",
+  labelText: {
+    color: THEME.textPrimary,
+    fontSize: 12,
+    fontWeight: "bold",
+    marginRight: 6,
+  },
+  labelDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  floatingCard: {
+    position: "absolute",
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: THEME.cardBg,
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: THEME.border,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 10,
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: Colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.lg,
-    paddingBottom: Spacing.xxl,
-    maxHeight: screenHeight * 0.7,
-  },
-  detailRow: {
+  cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    marginBottom: 16,
   },
-  statusBadge: {
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    borderRadius: 20,
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: THEME.textPrimary,
   },
-  statusBadgeText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  legend: {
-    position: "absolute",
-    bottom: Spacing.lg,
-    left: Spacing.lg,
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
-    borderRadius: 12,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    flexDirection: "row",
-    gap: Spacing.md,
-  },
-  legendItem: {
+  cardRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.xs,
+    marginBottom: 8,
   },
-  legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  cardLabel: {
+    color: THEME.textSecondary,
+    fontSize: 14,
+    width: 90,
   },
-  legendLabel: {
-    fontSize: 12,
-    color: Colors.text.primary,
+  cardValue: {
+    color: THEME.textPrimary,
+    fontSize: 14,
     fontWeight: "500",
+  },
+  cardStatusText: {
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  actionButton: {
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  actionButtonText: {
+    color: "#000000", // Dark text on bright colored button per SRD
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });
 

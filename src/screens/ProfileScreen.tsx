@@ -1,3 +1,8 @@
+/**
+ * Profile Screen
+ * Matches SRD Dark Theme: User settings, linked devices, and notification preferences
+ */
+
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -7,28 +12,34 @@ import {
   Alert,
   TouchableOpacity,
   Switch,
-  FlatList,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
-
-// Assuming these are your local imports based on the code
-import { Colors, GlobalStyles, Spacing, Typography } from "../styles/theme";
-import {
-  Loading,
-  ErrorMessage,
-  SectionHeader,
-  DeviceCard,
-} from "../components/UIComponents";
 import { useUserDevices } from "../hooks/useDeviceData";
-import { User } from "../types"; // Adjust path if needed
+import { Loading, ErrorMessage } from "../components/UIComponents";
+import { User } from "../types";
+
+// Exact SRD Dark Theme Colors
+const THEME = {
+  background: "#12141D",
+  cardBg: "#1E202B",
+  textPrimary: "#FFFFFF",
+  textSecondary: "#8E92A4",
+  success: "#00E676",
+  error: "#FF3B30",
+  warning: "#FFCC00",
+  border: "#2C2F3F",
+  primary: "#00E676", // Using the bright green as the primary accent
+};
 
 const ProfileScreen: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Notification States
   const [outageAlerts, setOutageAlerts] = useState(true);
   const [restorationAlerts, setRestorationAlerts] = useState(true);
-  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [emailNotifications, setEmailNotifications] = useState(false);
   const [pushNotifications, setPushNotifications] = useState(true);
 
   // Fetch user info
@@ -56,11 +67,10 @@ const ProfileScreen: React.FC = () => {
       { text: "Cancel", onPress: () => {}, style: "cancel" },
       {
         text: "Logout",
+        style: "destructive",
         onPress: async () => {
           const result = await AuthService.logout();
-          if (result.success) {
-            // Navigation will be handled by the auth state change
-          } else {
+          if (!result.success) {
             Alert.alert("Error", result.error || "Failed to logout");
           }
         },
@@ -90,7 +100,7 @@ const ProfileScreen: React.FC = () => {
 
   if (loading) {
     return (
-      <View style={[GlobalStyles.container, GlobalStyles.center]}>
+      <View style={[styles.container, styles.center]}>
         <Loading />
       </View>
     );
@@ -98,201 +108,180 @@ const ProfileScreen: React.FC = () => {
 
   if (!user) {
     return (
-      <View style={GlobalStyles.container}>
+      <View style={[styles.container, styles.center]}>
         <ErrorMessage message="Unable to load user profile" />
       </View>
     );
   }
 
   return (
-    <ScrollView style={GlobalStyles.container}>
-      {/* User Header */}
-      <View style={styles.userHeader}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 40 }}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Profile & Settings</Text>
+      </View>
+
+      {/* User Info Card */}
+      <View style={styles.userCard}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
-            {user.full_name?.charAt(0).toUpperCase()}
+            {user.full_name?.charAt(0).toUpperCase() || "U"}
           </Text>
         </View>
         <View style={styles.userInfo}>
-          <Text style={GlobalStyles.h2}>{user.full_name}</Text>
-          <Text style={[GlobalStyles.bodySmall, { marginTop: Spacing.xs }]}>
-            {user.email || user.phone || "No contact info"}
-          </Text>
-          <View
-            style={[
-              styles.roleBadge,
-              {
-                backgroundColor:
-                  user.role === "community_admin"
-                    ? Colors.primary
-                    : Colors.info,
-              },
-            ]}
-          >
+          <Text style={styles.userName}>{user.full_name || "User"}</Text>
+          <Text style={styles.userEmail}>{user.email}</Text>
+          <View style={styles.roleBadge}>
             <Text style={styles.roleBadgeText}>
               {user.role === "community_admin"
                 ? "Community Admin"
-                : "Regular User"}
+                : "Premium Member"}
             </Text>
           </View>
         </View>
       </View>
 
-      {/* Linked Devices */}
+      {/* Linked Devices Section */}
       <View style={styles.section}>
-        <SectionHeader
-          title="Linked Devices"
-          subtitle={`${devices?.length || 0} devices`}
-        />
-        {devices && devices.length > 0 ? (
-          <FlatList
-            data={devices}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-            renderItem={({ item }) => (
-              <DeviceCard
-                deviceId={item.device_id}
-                address={item.address}
-                status={item.status}
-                lastSeen={item.last_seen}
-                additionalInfo={`Added ${new Date(item.created_at).toLocaleDateString()}`}
-              />
-            )}
-          />
-        ) : (
-          <View style={styles.emptyState}>
-            <Text style={[GlobalStyles.body, { color: Colors.text.secondary }]}>
-              No devices linked yet
-            </Text>
-          </View>
-        )}
+        <Text style={styles.sectionTitle}>LINKED DEVICES</Text>
+        <View style={styles.cardBlock}>
+          {devices && devices.length > 0 ? (
+            devices.map((device, index) => (
+              <View
+                key={device.id}
+                style={[
+                  styles.deviceRow,
+                  index !== devices.length - 1 && styles.borderBottom,
+                ]}
+              >
+                <View style={styles.deviceRowLeft}>
+                  <MaterialIcons
+                    name="router"
+                    size={24}
+                    color={THEME.textPrimary}
+                  />
+                  <View style={{ marginLeft: 12 }}>
+                    <Text style={styles.deviceTitle}>{device.device_id}</Text>
+                    <Text style={styles.deviceSub}>
+                      {device.address.split(",")[0]}
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={[
+                    styles.statusDot,
+                    {
+                      backgroundColor:
+                        device.status === "ON" ? THEME.success : THEME.error,
+                    },
+                  ]}
+                />
+              </View>
+            ))
+          ) : (
+            <View style={{ padding: 16, alignItems: "center" }}>
+              <Text style={{ color: THEME.textSecondary }}>
+                No devices linked yet
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* Notification Preferences */}
       <View style={styles.section}>
-        <SectionHeader title="Notifications" />
-        <View
-          style={[
-            GlobalStyles.card,
-            { marginHorizontal: Spacing.lg, marginVertical: Spacing.sm },
-          ]}
-        >
+        <Text style={styles.sectionTitle}>NOTIFICATIONS</Text>
+        <View style={styles.cardBlock}>
           <NotificationRow
-            icon="notifications"
+            icon="notifications-active"
             label="Outage Alerts"
-            description="Notify me when power goes off"
             value={outageAlerts}
             onValueChange={setOutageAlerts}
           />
           <NotificationRow
-            icon="check-circle"
+            icon="power"
             label="Restoration Alerts"
-            description="Notify me when power is restored"
             value={restorationAlerts}
             onValueChange={setRestorationAlerts}
             borderTop
           />
           <NotificationRow
-            icon="mail"
-            label="Email Notifications"
-            description="Receive email updates"
+            icon="email"
+            label="Email Summaries"
             value={emailNotifications}
             onValueChange={setEmailNotifications}
             borderTop
           />
-          <NotificationRow
-            icon="notifications"
-            label="Push Notifications"
-            description="Receive app notifications"
-            value={pushNotifications}
-            onValueChange={setPushNotifications}
-            borderTop
-          />
         </View>
       </View>
 
-      {/* Account Settings */}
+      {/* Account Actions */}
       <View style={styles.section}>
-        <SectionHeader title="Account" />
-        <TouchableOpacity
-          style={[
-            GlobalStyles.card,
-            { marginHorizontal: Spacing.lg, marginVertical: Spacing.sm },
-          ]}
-          onPress={handleChangePassword}
-        >
-          <View style={GlobalStyles.rowBetween}>
-            <View style={GlobalStyles.rowCenter}>
-              <MaterialIcons name="lock" size={20} color={Colors.primary} />
-              <Text style={[GlobalStyles.body, { marginLeft: Spacing.md }]}>
-                Change Password
-              </Text>
+        <Text style={styles.sectionTitle}>ACCOUNT</Text>
+        <View style={styles.cardBlock}>
+          <TouchableOpacity
+            style={styles.actionRow}
+            onPress={handleChangePassword}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <MaterialIcons
+                name="lock-outline"
+                size={22}
+                color={THEME.textPrimary}
+              />
+              <Text style={styles.actionText}>Change Password</Text>
             </View>
             <MaterialIcons
               name="chevron-right"
               size={24}
-              color={Colors.text.tertiary}
+              color={THEME.textSecondary}
             />
-          </View>
-        </TouchableOpacity>
-      </View>
+          </TouchableOpacity>
 
-      {/* Danger Zone */}
-      <View style={styles.section}>
-        <SectionHeader title="Actions" />
-        <TouchableOpacity
-          style={[
-            GlobalStyles.card,
-            { marginHorizontal: Spacing.lg, marginVertical: Spacing.sm },
-            styles.logoutButton,
-          ]}
-          onPress={handleLogout}
-        >
-          <View style={GlobalStyles.center}>
-            <MaterialIcons name="logout" size={20} color={Colors.error} />
-            <Text
-              style={[
-                GlobalStyles.body,
-                { color: Colors.error, marginTop: Spacing.xs },
-              ]}
-            >
-              Logout
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* App Info */}
-      <View style={styles.section}>
-        <View
-          style={[
-            GlobalStyles.card,
-            { marginHorizontal: Spacing.lg, marginVertical: Spacing.sm },
-          ]}
-        >
-          <View style={GlobalStyles.center}>
-            <Text style={[GlobalStyles.label, { color: Colors.primary }]}>
-              Ibadan Power v1.0.0
-            </Text>
-            <Text style={[GlobalStyles.caption, { marginTop: Spacing.xs }]}>
-              Real-Time Electricity Monitoring Platform
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={[styles.actionRow, styles.borderTop]}
+            onPress={handleLogout}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <MaterialIcons name="logout" size={22} color={THEME.error} />
+              <Text style={[styles.actionText, { color: THEME.error }]}>
+                Log Out
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
       </View>
 
-      <View style={{ height: Spacing.xl }} />
+      {/* App Info */}
+      <View style={{ alignItems: "center", marginTop: 32 }}>
+        <Text
+          style={{
+            color: THEME.textSecondary,
+            fontSize: 12,
+            fontWeight: "bold",
+          }}
+        >
+          BYTES POWER MONITOR
+        </Text>
+        <Text
+          style={{ color: THEME.textSecondary, fontSize: 12, marginTop: 4 }}
+        >
+          Version 1.0.0
+        </Text>
+      </View>
     </ScrollView>
   );
 };
 
 /**
- * Notification row component
+ * Custom Notification Row Component
  */
 interface NotificationRowProps {
   icon: string;
   label: string;
-  description: string;
   value: boolean;
   onValueChange: (value: boolean) => void;
   borderTop?: boolean;
@@ -301,91 +290,175 @@ interface NotificationRowProps {
 const NotificationRow: React.FC<NotificationRowProps> = ({
   icon,
   label,
-  description,
   value,
   onValueChange,
   borderTop,
 }) => {
   return (
-    <View
-      style={[
-        GlobalStyles.rowBetween,
-        { paddingVertical: Spacing.md },
-        borderTop && {
-          borderTopWidth: 1,
-          borderTopColor: Colors.border,
-          paddingTop: Spacing.md,
-        },
-      ]}
-    >
-      <View style={GlobalStyles.rowCenter}>
-        {/* Type assertion needed for dynamic icon names in older @expo/vector-icons */}
-        <MaterialIcons name={icon as any} size={20} color={Colors.primary} />
-        <View style={{ marginLeft: Spacing.md, flex: 1 }}>
-          <Text style={GlobalStyles.body}>{label}</Text>
-          <Text style={[GlobalStyles.caption, { marginTop: Spacing.xs }]}>
-            {description}
-          </Text>
-        </View>
+    <View style={[styles.notificationRow, borderTop && styles.borderTop]}>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <MaterialIcons name={icon as any} size={22} color={THEME.textPrimary} />
+        <Text style={styles.notificationText}>{label}</Text>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: Colors.border, true: Colors.primary }}
-        thumbColor={value ? Colors.primary : Colors.text.tertiary}
+        trackColor={{ false: THEME.border, true: THEME.success }}
+        thumbColor={"#FFFFFF"}
+        ios_backgroundColor={THEME.border}
       />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  userHeader: {
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
+  },
+  center: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  header: {
+    alignItems: "center",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
+  },
+  headerTitle: {
+    color: THEME.textPrimary,
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  userCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: Spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    backgroundColor: THEME.cardBg,
+    margin: 16,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.primary,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(0, 230, 118, 0.2)", // Light green tint
     alignItems: "center",
     justifyContent: "center",
-    marginRight: Spacing.lg,
+    marginRight: 16,
+    borderWidth: 1,
+    borderColor: THEME.success,
   },
   avatarText: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: "bold",
-    color: "white",
+    color: THEME.success,
   },
   userInfo: {
     flex: 1,
   },
+  userName: {
+    color: THEME.textPrimary,
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  userEmail: {
+    color: THEME.textSecondary,
+    fontSize: 14,
+    marginTop: 2,
+  },
   roleBadge: {
-    marginTop: Spacing.md,
+    marginTop: 8,
     alignSelf: "flex-start",
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    borderRadius: 12,
+    backgroundColor: THEME.border,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
   },
   roleBadgeText: {
-    color: "white",
-    fontSize: 12,
+    color: THEME.textSecondary,
+    fontSize: 11,
     fontWeight: "600",
+    textTransform: "uppercase",
   },
   section: {
-    marginTop: Spacing.md,
+    marginTop: 24,
+    paddingHorizontal: 16,
   },
-  emptyState: {
-    padding: Spacing.xl,
-    alignItems: "center",
-    justifyContent: "center",
+  sectionTitle: {
+    color: THEME.textSecondary,
+    fontSize: 12,
+    fontWeight: "bold",
+    letterSpacing: 1,
+    marginBottom: 8,
+    marginLeft: 8,
   },
-  logoutButton: {
-    borderColor: Colors.error,
+  cardBlock: {
+    backgroundColor: THEME.cardBg,
+    borderRadius: 16,
     borderWidth: 1,
+    borderColor: THEME.border,
+    overflow: "hidden",
+  },
+  borderTop: {
+    borderTopWidth: 1,
+    borderTopColor: THEME.border,
+  },
+  borderBottom: {
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
+  },
+  deviceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+  },
+  deviceRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  deviceTitle: {
+    color: THEME.textPrimary,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  deviceSub: {
+    color: THEME.textSecondary,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  notificationRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+  },
+  notificationText: {
+    color: THEME.textPrimary,
+    fontSize: 16,
+    fontWeight: "500",
+    marginLeft: 12,
+  },
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+  },
+  actionText: {
+    color: THEME.textPrimary,
+    fontSize: 16,
+    fontWeight: "500",
+    marginLeft: 12,
   },
 });
 

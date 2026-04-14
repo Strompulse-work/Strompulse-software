@@ -1,7 +1,7 @@
 /**
  * Signup Screen
- * Allows new users to create an account with email and password
- * Form validation, error handling, and loading states included
+ * Modern Cinematic Theme: Full-bleed background, glassy inputs, cursive header
+ * Supports Email, Phone (Auto E.164 Formatting), and Google OAuth
  */
 
 import React, { useState } from "react";
@@ -17,490 +17,454 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  ImageBackground,
+  StatusBar,
+  Dimensions,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { MaterialIcons } from "@expo/vector-icons";
+import { MaterialIcons, AntDesign } from "@expo/vector-icons";
 import { AuthStackParamList } from "../navigation/AuthNavigator";
 import AuthService from "../services/authService";
-import { isValidEmail } from "../utils/helpers";
+import { useFonts } from "expo-font";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Signup">;
 
+const { width, height } = Dimensions.get("window");
+
+const THEME = {
+  success: "#00E676",
+  textPrimary: "#FFFFFF",
+  textSecondary: "rgba(255, 255, 255, 0.7)",
+  glassBg: "rgba(18, 20, 29, 0.75)",
+  glassBorder: "rgba(255, 255, 255, 0.1)",
+  error: "#FF3B30",
+  warning: "#FFCC00",
+};
+
+// Helper to auto-format Nigerian numbers for Twilio
+const formatToE164 = (phone: string) => {
+  let cleaned = phone.replace(/[^\d+]/g, "");
+  if (cleaned.startsWith("+")) return cleaned;
+  if (cleaned.startsWith("0") && cleaned.length === 11)
+    return "+234" + cleaned.substring(1);
+  if (cleaned.startsWith("234") && cleaned.length === 13) return "+" + cleaned;
+  return "+" + cleaned;
+};
+
 const SignupScreen: React.FC<Props> = ({ navigation }) => {
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const [fontsLoaded] = useFonts({
+    Hiatus: require("../../assets/fonts/Hiatus.ttf"),
+  });
+
+  const isPhone = /^\d+$/.test(identifier.replace(/[\s\-\+]/g, ""));
 
   const handleSignup = async () => {
-    // Validation
-    if (!fullName.trim()) {
-      Alert.alert("Validation Error", "Please enter your full name");
-      return;
-    }
-
-    if (!email.trim()) {
-      Alert.alert("Validation Error", "Please enter your email address");
-      return;
-    }
-
-    if (!isValidEmail(email)) {
-      Alert.alert("Validation Error", "Please enter a valid email address");
-      return;
-    }
-
-    if (!password) {
-      Alert.alert("Validation Error", "Please enter a password");
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert(
-        "Validation Error",
-        "Password must be at least 6 characters long",
+    if (!fullName.trim())
+      return Alert.alert("Validation", "Please enter your full name");
+    if (!identifier.trim())
+      return Alert.alert(
+        "Validation",
+        "Please enter your email or phone number",
       );
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert("Validation Error", "Passwords do not match");
-      return;
-    }
+    if (!password) return Alert.alert("Validation", "Please enter a password");
+    if (password.length < 6)
+      return Alert.alert(
+        "Validation",
+        "Password must be at least 6 characters",
+      );
+    if (password !== confirmPassword)
+      return Alert.alert("Validation", "Passwords do not match");
 
     setLoading(true);
     try {
+      const submitIdentifier = isPhone
+        ? formatToE164(identifier.trim())
+        : identifier.trim();
+
       const result = await AuthService.signupWithEmail(
-        email.trim(),
+        submitIdentifier,
         password,
         fullName.trim(),
       );
 
-      // Handle error case
       if (!result.success) {
         Alert.alert("Signup Failed", result.error || "An error occurred");
         return;
       }
 
-      // SUCCESS CASE 1: User was auto-logged in (no email verification required)
+      // Auto-login successful (Confirmations OFF)
       if (result.success && result.data) {
         Alert.alert(
           "Account Created",
-          "Welcome! Your account has been created successfully. You are now logged in.",
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                // Navigation will be handled by auth state change in RootNavigator
-                // User will be automatically logged in
-              },
-            },
-          ],
+          "Welcome! Your account has been created successfully.",
+          [{ text: "OK" }],
         );
         return;
       }
 
-      // SUCCESS CASE 2: Email verification required (session is null)
-      // result.success = true, but result.data = undefined
+      // OTP generated and sent (Confirmations ON) -> Push to Verify Screen
       if (result.success && !result.data) {
-        Alert.alert(
-          "Check Your Email!",
-          "We sent you a verification link. Please check your inbox and click the link to confirm your email address before logging in.",
-          [
-            {
-              text: "Got It",
-              onPress: () => {
-                // Navigate to Login screen after user acknowledges the message
-                navigation.replace("Login");
-              },
-            },
-          ],
-        );
+        Alert.alert("Check Your Device!", "We sent you a verification code.", [
+          {
+            text: "Enter Code",
+            onPress: () =>
+              navigation.navigate("Verify", { identifier: submitIdentifier }),
+          },
+        ]);
         return;
       }
     } catch (error) {
       Alert.alert("Error", "An unexpected error occurred. Please try again.");
-      console.error("Signup error:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleBackPress = () => {
-    navigation.navigate("Welcome");
+  const handleGoogleAuth = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await AuthService.loginWithGoogle();
+      if (!result.success && result.error !== "Google sign-in was cancelled.") {
+        Alert.alert(
+          "Google Auth Error",
+          result.error || "Could not connect to Google.",
+        );
+      }
+    } catch (error) {
+      Alert.alert("Google Auth Error", "An unexpected error occurred.");
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   const isFormValid =
     fullName.trim() &&
-    email.trim() &&
+    identifier.trim() &&
     password &&
-    confirmPassword &&
     password === confirmPassword &&
-    password.length >= 6 &&
-    isValidEmail(email);
+    password.length >= 6;
+
+  if (!fontsLoaded)
+    return <View style={{ flex: 1, backgroundColor: "#12141D" }} />;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.keyboardAvoidingView}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContainer}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
+    <ImageBackground
+      source={require("../../assets/images/welcome-bg.png")}
+      style={styles.backgroundImage}
+      resizeMode="cover"
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
+      <View style={styles.overlay} />
+
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.keyboardAvoidingView}
         >
-          {/* Header with back button */}
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={handleBackPress}
-              style={styles.backButton}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <MaterialIcons name="arrow-back" size={24} color="#4CAF50" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Create Account</Text>
-            <View style={{ width: 24 }} />
-          </View>
+          <ScrollView
+            contentContainerStyle={styles.scrollContainer}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <View style={styles.header}>
+              <TouchableOpacity
+                onPress={() => navigation.navigate("Welcome")}
+                style={styles.backButton}
+                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              >
+                <MaterialIcons
+                  name="arrow-back-ios"
+                  size={22}
+                  color={THEME.textPrimary}
+                />
+              </TouchableOpacity>
+            </View>
 
-          <View style={styles.container}>
-            {/* Subtitle */}
-            <Text style={styles.subtitle}>
-              Join Ibadan Power to monitor your electricity in real-time
-            </Text>
+            <View style={styles.contentContainer}>
+              <View style={styles.titleContainer}>
+                <Text style={styles.cursiveTitle}>Join Ibadan</Text>
+                <Text style={styles.subtitle}>
+                  Create an account to monitor the grid.
+                </Text>
+              </View>
 
-            {/* Form inputs */}
-            <View style={styles.formContainer}>
-              {/* Full Name Input */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Full Name</Text>
+              <View style={styles.formContainer}>
                 <View style={styles.inputWrapper}>
                   <MaterialIcons
-                    name="person"
-                    size={20}
-                    color="#717171"
+                    name="person-outline"
+                    size={22}
+                    color={THEME.textSecondary}
                     style={styles.inputIcon}
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="John Doe"
-                    placeholderTextColor="#424242"
+                    placeholder="Full Name"
+                    placeholderTextColor={THEME.textSecondary}
                     value={fullName}
                     onChangeText={setFullName}
                     editable={!loading}
-                    maxLength={100}
                   />
                 </View>
-              </View>
 
-              {/* Email Input */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Email Address</Text>
                 <View style={styles.inputWrapper}>
                   <MaterialIcons
-                    name="email"
-                    size={20}
-                    color="#717171"
+                    name={isPhone ? "phone" : "mail-outline"}
+                    size={22}
+                    color={THEME.textSecondary}
                     style={styles.inputIcon}
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="you@example.com"
-                    placeholderTextColor="#424242"
-                    value={email}
-                    onChangeText={(text) => setEmail(text.toLowerCase())}
+                    placeholder="Email or Phone Number"
+                    placeholderTextColor={THEME.textSecondary}
+                    value={identifier}
+                    onChangeText={(text) => setIdentifier(text.toLowerCase())}
                     editable={!loading}
-                    keyboardType="email-address"
+                    keyboardType="default"
                     autoCapitalize="none"
-                    maxLength={100}
                   />
                 </View>
-              </View>
 
-              {/* Password Input */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Password</Text>
                 <View style={styles.inputWrapper}>
                   <MaterialIcons
-                    name="lock"
-                    size={20}
-                    color="#717171"
+                    name="lock-outline"
+                    size={22}
+                    color={THEME.textSecondary}
                     style={styles.inputIcon}
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="At least 6 characters"
-                    placeholderTextColor="#424242"
+                    placeholder="Password (min 6 chars)"
+                    placeholderTextColor={THEME.textSecondary}
                     value={password}
                     onChangeText={setPassword}
                     editable={!loading}
                     secureTextEntry={!showPassword}
-                    maxLength={50}
                   />
                   <TouchableOpacity
                     onPress={() => setShowPassword(!showPassword)}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <MaterialIcons
                       name={showPassword ? "visibility" : "visibility-off"}
-                      size={20}
-                      color="#717171"
-                      style={styles.visibilityIcon}
+                      size={22}
+                      color={THEME.textSecondary}
                     />
                   </TouchableOpacity>
                 </View>
-              </View>
 
-              {/* Confirm Password Input */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Confirm Password</Text>
                 <View style={styles.inputWrapper}>
                   <MaterialIcons
-                    name="lock"
-                    size={20}
-                    color="#717171"
+                    name="lock-outline"
+                    size={22}
+                    color={THEME.textSecondary}
                     style={styles.inputIcon}
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="Re-enter your password"
-                    placeholderTextColor="#424242"
+                    placeholder="Confirm Password"
+                    placeholderTextColor={THEME.textSecondary}
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
                     editable={!loading}
                     secureTextEntry={!showConfirmPassword}
-                    maxLength={50}
                   />
-                  <TouchableOpacity
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <MaterialIcons
-                      name={
-                        showConfirmPassword ? "visibility" : "visibility-off"
-                      }
-                      size={20}
-                      color="#717171"
-                      style={styles.visibilityIcon}
-                    />
-                  </TouchableOpacity>
                 </View>
+
+                {confirmPassword && password !== confirmPassword && (
+                  <Text style={styles.errorText}>Passwords do not match</Text>
+                )}
               </View>
 
-              {/* Password match indicator */}
-              {confirmPassword && password !== confirmPassword && (
-                <View style={styles.errorIndicator}>
-                  <MaterialIcons
-                    name="error-outline"
-                    size={16}
-                    color="#EF5350"
-                  />
-                  <Text style={styles.errorText}>Passwords do not match</Text>
-                </View>
-              )}
-
-              {password && password.length < 6 && (
-                <View style={styles.errorIndicator}>
-                  <MaterialIcons
-                    name="error-outline"
-                    size={16}
-                    color="#FFA726"
-                  />
-                  <Text style={styles.warningText}>
-                    Password must be at least 6 characters
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Create Account Button */}
-            <TouchableOpacity
-              style={[
-                styles.createButton,
-                !isFormValid && styles.createButtonDisabled,
-              ]}
-              onPress={handleSignup}
-              disabled={!isFormValid || loading}
-              activeOpacity={0.85}
-            >
-              {loading ? (
-                <View style={styles.buttonLoadingContainer}>
-                  <ActivityIndicator size="small" color="#121212" />
-                  <Text style={styles.createButtonText}>
-                    Creating Account...
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.createButtonText}>Create Account</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Sign In Link */}
-            <View style={styles.signInContainer}>
-              <Text style={styles.signInText}>Already have an account? </Text>
               <TouchableOpacity
-                onPress={() => navigation.navigate("Login")}
-                disabled={loading}
+                style={[
+                  styles.createButton,
+                  !isFormValid && styles.createButtonDisabled,
+                ]}
+                onPress={handleSignup}
+                disabled={!isFormValid || loading || googleLoading}
+                activeOpacity={0.8}
               >
-                <Text style={styles.signInLink}>Sign In</Text>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#000000" />
+                ) : (
+                  <Text style={styles.createButtonText}>Create Account</Text>
+                )}
               </TouchableOpacity>
+
+              <View style={styles.dividerContainer}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <TouchableOpacity
+                style={styles.googleButton}
+                onPress={handleGoogleAuth}
+                disabled={loading || googleLoading}
+                activeOpacity={0.8}
+              >
+                {googleLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <AntDesign
+                      name="google"
+                      size={20}
+                      color="#FFFFFF"
+                      style={{ marginRight: 12 }}
+                    />
+                    <Text style={styles.googleButtonText}>
+                      Continue with Google
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <View style={styles.signInContainer}>
+                <Text style={styles.signInText}>Already have an account? </Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("Login")}
+                  disabled={loading}
+                >
+                  <Text style={styles.signInLink}>Log in</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#121212",
+  backgroundImage: { flex: 1, width: width, height: height },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-  scrollContainer: {
-    flexGrow: 1,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#121212",
-    borderBottomWidth: 1,
-    borderBottomColor: "#242424",
-  },
+  safeArea: { flex: 1 },
+  keyboardAvoidingView: { flex: 1 },
+  scrollContainer: { flexGrow: 1 },
+  header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 10 },
   backButton: {
-    padding: 8,
-    marginLeft: -8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingLeft: 6,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#FFFFFF",
+  contentContainer: {
     flex: 1,
-    textAlign: "center",
+    paddingHorizontal: 32,
+    justifyContent: "center",
+    paddingBottom: 40,
   },
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 24,
+  titleContainer: { marginBottom: 32, alignItems: "flex-start" },
+  cursiveTitle: {
+    fontFamily: "Hiatus",
+    fontSize: 72,
+    color: THEME.textPrimary,
+    letterSpacing: 1,
+    marginBottom: -10,
   },
-  subtitle: {
-    fontSize: 14,
-    color: "#B0BEC5",
-    marginBottom: 28,
-    lineHeight: 20,
-    fontWeight: "500",
-  },
-  formContainer: {
-    marginBottom: 24,
-    gap: 16,
-  },
-  inputGroup: {
-    marginBottom: 8,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#E0E0E0",
-    marginBottom: 8,
-  },
+  subtitle: { fontSize: 15, color: THEME.textSecondary, fontWeight: "500" },
+  formContainer: { gap: 16, marginBottom: 24 },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1E1E1E",
-    borderRadius: 10,
+    backgroundColor: THEME.glassBg,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#303030",
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderColor: THEME.glassBorder,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
   },
-  inputIcon: {
-    marginRight: 10,
-  },
+  inputIcon: { marginRight: 12 },
   input: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "500",
-    color: "#FFFFFF",
+    color: THEME.textPrimary,
     padding: 0,
   },
-  visibilityIcon: {
-    marginLeft: 10,
-  },
-  errorIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(239, 83, 80, 0.1)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 8,
-    marginTop: -4,
-  },
   errorText: {
+    color: THEME.error,
     fontSize: 13,
-    color: "#EF5350",
     fontWeight: "500",
-  },
-  warningText: {
-    fontSize: 13,
-    color: "#FFA726",
-    fontWeight: "500",
+    marginTop: -8,
+    marginLeft: 4,
   },
   createButton: {
-    backgroundColor: "#4CAF50",
-    paddingVertical: 14,
-    borderRadius: 10,
-    justifyContent: "center",
+    backgroundColor: THEME.success,
+    width: "100%",
+    paddingVertical: 18,
+    borderRadius: 16,
     alignItems: "center",
-    marginTop: 8,
-    shadowColor: "#4CAF50",
+    justifyContent: "center",
+    shadowColor: THEME.success,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
   },
   createButtonDisabled: {
-    backgroundColor: "#757575",
-    opacity: 0.6,
+    backgroundColor: "rgba(0, 230, 118, 0.4)",
     shadowOpacity: 0,
     elevation: 0,
   },
-  createButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#121212",
-    letterSpacing: 0.5,
+  createButtonText: { fontSize: 18, fontWeight: "bold", color: "#000000" },
+  dividerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 24,
   },
-  buttonLoadingContainer: {
+  dividerLine: { flex: 1, height: 1, backgroundColor: THEME.glassBorder },
+  dividerText: {
+    color: THEME.textSecondary,
+    paddingHorizontal: 16,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  googleButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderWidth: 1,
+    borderColor: THEME.glassBorder,
+    width: "100%",
+    paddingVertical: 18,
+    borderRadius: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+  },
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: THEME.textPrimary,
   },
   signInContainer: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 20,
+    marginTop: 32,
   },
-  signInText: {
-    fontSize: 14,
-    color: "#90A4AE",
-    fontWeight: "500",
-  },
-  signInLink: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#4CAF50",
-  },
+  signInText: { fontSize: 15, color: THEME.textSecondary, fontWeight: "500" },
+  signInLink: { fontSize: 15, fontWeight: "bold", color: THEME.success },
 });
 
 export default SignupScreen;

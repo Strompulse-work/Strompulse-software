@@ -1,11 +1,21 @@
 /**
  * Authentication Service
- * Handles user authentication, session management, and secure token storage
+ * Handles user authentication, session management, and secure token storage.
+ * Updated to support Unified Auth (Email/Phone) and Google OAuth via WebBrowser.
  */
 
 import supabase from "../config/supabase";
-import { User, AuthSession, ApiResponse } from "../types";
+import { User, AuthSession, ApiResponse } from "../types"; // Keeps your custom type exactly as is
 import * as SecureStore from "expo-secure-store";
+import * as WebBrowser from "expo-web-browser";
+import { Alert } from "react-native";
+import * as ExpoAuthSession from "expo-auth-session"; // <-- Added 'Expo' to the name here!
+
+// Tells the browser to close itself automatically once auth is done
+WebBrowser.maybeCompleteAuthSession();
+
+// Tells the browser to close itself automatically once auth is done
+WebBrowser.maybeCompleteAuthSession();
 
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
@@ -13,17 +23,55 @@ const USER_KEY = "user_data";
 
 export class AuthService {
   /**
-   * Sign up with email and password
+   * Helper to determine if an identifier is a phone number or email
+   */
+  private static isPhoneNumber(identifier: string): boolean {
+    return /^\d+$/.test(identifier.replace(/[\s\-\+]/g, ""));
+  }
+
+  /**
+   * Automatically formats local Nigerian numbers into global E.164 format
+   */
+  private static formatPhoneNumber(phone: string): string {
+    // Remove all spaces, dashes, or weird characters
+    let cleaned = phone.replace(/[^\d+]/g, "");
+
+    // If they already included the '+', trust them and send it as-is
+    if (cleaned.startsWith("+")) return cleaned;
+
+    // If they typed a standard local Nigerian number (e.g., 09059259175)
+    // We remove the first '0' and add '+234'
+    if (cleaned.startsWith("0") && cleaned.length === 11) {
+      return "+234" + cleaned.substring(1);
+    }
+
+    // If they typed the country code but forgot the '+' (e.g., 2349059259175)
+    if (cleaned.startsWith("234") && cleaned.length === 13) {
+      return "+" + cleaned;
+    }
+
+    // Fallback: just add a plus and hope for the best
+    return "+" + cleaned;
+  }
+
+  /**
+   * Sign up with Email OR Phone Number + Password
    */
   static async signupWithEmail(
-    email: string,
+    identifier: string,
     password: string,
     fullName: string,
   ): Promise<ApiResponse<AuthSession>> {
     try {
+      const isPhone = this.isPhoneNumber(identifier);
+
+      // Dynamically set either the email or phone key
+      const credentials = isPhone
+        ? { phone: identifier, password }
+        : { email: identifier, password };
+
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
+        ...credentials,
         options: {
           data: {
             full_name: fullName,
@@ -65,17 +113,22 @@ export class AuthService {
   }
 
   /**
-   * Login with email and password
+   * Login with Email OR Phone Number + Password
    */
   static async loginWithEmail(
-    email: string,
+    identifier: string,
     password: string,
   ): Promise<ApiResponse<AuthSession>> {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const isPhone = this.isPhoneNumber(identifier);
+
+      // Dynamically set either the email or phone key
+      const credentials = isPhone
+        ? { phone: identifier, password }
+        : { email: identifier, password };
+
+      const { data, error } =
+        await supabase.auth.signInWithPassword(credentials);
 
       if (error) {
         return { success: false, error: error.message };
@@ -101,7 +154,73 @@ export class AuthService {
   }
 
   /**
-   * Login with phone number OTP (future feature)
+   * Login/Sign up with Google OAuth via WebBrowser
+   */
+  static async loginWithGoogle(): Promise<ApiResponse<AuthSession>> {
+    try {
+      // 1. Get the custom teleport link for your Expo app
+      const redirectUrl = ExpoAuthSession.makeRedirectUri();
+
+      // 2. Ask Supabase to generate the specific Google login page URL
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true, // We are handling the browser manually below
+        },
+      });
+
+      if (error) return { success: false, error: error.message };
+      if (!data?.url) return { success: false, error: "No URL returned" };
+
+      // 3. Open the secure in-app browser to the Google login page
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.url,
+        redirectUrl,
+      );
+
+      // 4. When the user successfully logs in and comes back to the app...
+      if (result.type === "success") {
+        // Extract the secure tokens from the URL that Google sent back
+        const params = result.url.split("#")[1];
+        if (!params) return { success: false, error: "No tokens returned" };
+
+        // Parse the URL parameters
+        const urlParams = new URLSearchParams(params);
+        const accessToken = urlParams.get("access_token");
+        const refreshToken = urlParams.get("refresh_token");
+
+        if (accessToken && refreshToken) {
+          // Tell Supabase to officially log the user in with these tokens
+          const { data: sessionData, error: sessionError } =
+            await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+          if (sessionError) throw sessionError;
+
+          if (sessionData.session) {
+            const appSession: AuthSession = {
+              user: this.mapAuthUser(sessionData.session.user),
+              access_token: sessionData.session.access_token,
+              refresh_token: sessionData.session.refresh_token || "",
+            };
+
+            await this.storeSession(appSession);
+            return { success: true, data: appSession };
+          }
+        }
+      }
+
+      return { success: false, error: "Google sign-in was cancelled." };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Login with phone number OTP (future feature/fallback)
    */
   static async loginWithPhoneOTP(
     phone: string,

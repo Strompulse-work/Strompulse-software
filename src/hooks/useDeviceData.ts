@@ -66,7 +66,7 @@ export const useAsync = <T>(
 };
 
 /**
- * Hook to fetch and subscribe to user devices with real-time updates
+ * Hook to fetch and subscribe to user devices with real-time updates AND silent sync
  */
 export const useUserDevices = (userId: string) => {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -80,63 +80,42 @@ export const useUserDevices = (userId: string) => {
       return;
     }
 
-    const fetchAndSubscribe = async () => {
+    const fetchDevices = async () => {
       try {
-        // Fetch initial data
         const response = await DeviceService.getUserDevices(userId);
-
         if (response.success && response.data) {
           setDevices(response.data);
-
-          // Wrap subscriptions in a try/catch so channel collisions don't crash the UI
-          try {
-            response.data.forEach((device) => {
-              const subId = RealtimeService.subscribeToDeviceStatus(
-                device.id,
-                (payload) => {
-                  if (payload.new) {
-                    setDevices((prev) =>
-                      prev.map((d) =>
-                        d.id === payload.new.id ? payload.new : d,
-                      ),
-                    );
-                  }
-                },
-              );
-              subscriptionIds.current.push(subId);
-            });
-
-            const userDevicesSub = RealtimeService.subscribeToUserDevices(
-              userId,
-              (payload) => {
-                if (payload.eventType === "INSERT" && payload.new) {
-                  setDevices((prev) => [...prev, payload.new]);
-                } else if (payload.eventType === "DELETE" && payload.old?.id) {
-                  setDevices((prev) =>
-                    prev.filter((d) => d.id !== payload.old?.id),
-                  );
-                }
-              },
-            );
-            subscriptionIds.current.push(userDevicesSub);
-          } catch (subErr) {
-            console.warn(
-              "Realtime channel already active on another screen, skipping duplicate subscription.",
-            );
-          }
-        } else {
-          setError(response.error || "Failed to fetch devices");
+        } else if (response.error) {
+          setError(response.error);
         }
       } catch (err) {
-        setError(String(err));
+        console.error(err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchAndSubscribe();
+    // Initial Fetch
+    fetchDevices();
+
+    // The Real-Time Attempt
+    try {
+      const userDevicesSub = RealtimeService.subscribeToUserDevices(
+        userId,
+        (payload) => {
+          fetchDevices(); // Refetch perfectly on any change
+        },
+      );
+      subscriptionIds.current.push(userDevicesSub);
+    } catch (subErr) {
+      console.warn("Realtime channel occupied. Relying on silent sync.");
+    }
+
+    // THE FIX: Silent Background Sync every 5 seconds for tabs that missed the websocket
+    const syncInterval = setInterval(fetchDevices, 5000);
 
     return () => {
+      clearInterval(syncInterval);
       subscriptionIds.current.forEach((id) => RealtimeService.unsubscribe(id));
     };
   }, [userId]);
@@ -282,7 +261,7 @@ export const useCommunities = () => {
 };
 
 /**
- * Hook to fetch community statistics with real-time updates
+ * Hook to fetch community statistics with silent background sync
  */
 export const useCommunityStats = (communityId: string) => {
   const [stats, setStats] = useState<CommunityStats | null>(null);
@@ -296,38 +275,38 @@ export const useCommunityStats = (communityId: string) => {
       return;
     }
 
-    const fetchAndSubscribe = async () => {
+    const fetchStats = async () => {
       try {
         const response = await CommunityService.getCommunityStats(communityId);
         if (response.success && response.data) {
           setStats(response.data);
-
-          // Subscribe to device changes in community
-          const subId = RealtimeService.subscribeToCommunityDevices(
-            communityId,
-            (payload) => {
-              // Refetch stats when devices change
-              CommunityService.getCommunityStats(communityId).then((res) => {
-                if (res.success) {
-                  setStats(res.data || null);
-                }
-              });
-            },
-          );
-          subscriptionIds.current.push(subId);
-        } else {
-          setError(response.error || "Failed to fetch stats");
         }
       } catch (err) {
-        setError(String(err));
+        console.error(err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchAndSubscribe();
+    // Initial fetch
+    fetchStats();
+
+    // The Real-Time Attempt
+    try {
+      const subId = RealtimeService.subscribeToCommunityDevices(
+        communityId,
+        () => fetchStats(),
+      );
+      subscriptionIds.current.push(subId);
+    } catch (err) {
+      // Ignore collision
+    }
+
+    // THE FIX: Silent Background Sync every 5 seconds
+    const syncInterval = setInterval(fetchStats, 5000);
 
     return () => {
+      clearInterval(syncInterval);
       subscriptionIds.current.forEach((id) => RealtimeService.unsubscribe(id));
     };
   }, [communityId]);

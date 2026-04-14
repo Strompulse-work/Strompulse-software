@@ -1,7 +1,7 @@
 /**
  * Welcome Screen
- * First screen unauthenticated users see - landing page with app branding
- * Routes to Login or Signup
+ * Matches Aspen App Reference: Full-screen background, cursive top header,
+ * left-aligned bottom typography, and a single wide button.
  */
 
 import React from "react";
@@ -10,20 +10,31 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
-  Image,
+  ImageBackground,
   Dimensions,
-  ScrollView,
+  SafeAreaView,
+  StatusBar,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { MaterialIcons } from "@expo/vector-icons";
 import { AuthStackParamList } from "../navigation/AuthNavigator";
+import { useFonts } from "expo-font";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Welcome">;
 
 const { width, height } = Dimensions.get("window");
 
+// Exact SRD Dark Theme Colors
+const THEME = {
+  success: "#00E676", // Bright Green for the main button
+  textPrimary: "#FFFFFF",
+};
+
 const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
+  // Load ONLY the custom cursive font
+  const [fontsLoaded] = useFonts({
+    Hiatus: require("../../assets/fonts/Hiatus.ttf"),
+  });
+
   const handleGetStarted = () => {
     navigation.navigate("Signup");
   };
@@ -32,235 +43,126 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
     navigation.navigate("Login");
   };
 
+  // Wait for fonts to load before rendering to prevent visual glitches
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: "#12141D" }} />;
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.container}>
-          {/* Header spacer */}
-          <View style={styles.headerSpacer} />
+    <ImageBackground
+      source={require("../../assets/images/welcome-bg.png")}
+      style={styles.backgroundImage}
+      resizeMode="cover"
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
 
-          {/* Logo section */}
-          <View style={styles.logoContainer}>
-            <View style={styles.logoCircle}>
-              <MaterialIcons name="flash-on" size={64} color="#4CAF50" />
-            </View>
-            <Text style={styles.appTitle}>Ibadan Power</Text>
-            <Text style={styles.tagline}>Real-Time Electricity Monitoring</Text>
-          </View>
+      {/* Dark gradient/overlay so white text is readable over any background */}
+      <View style={styles.overlay} />
 
-          {/* Feature descriptions */}
-          <View style={styles.featuresContainer}>
-            <FeatureCard
-              icon="trending-up"
-              title="Live Monitoring"
-              description="Track power consumption in real-time with precision"
-            />
-            <FeatureCard
-              icon="location-on"
-              title="Community Insights"
-              description="Compare usage patterns with your community"
-            />
-            <FeatureCard
-              icon="security"
-              title="Secure & Private"
-              description="Your data is encrypted and fully protected"
-            />
-          </View>
-
-          {/* Buttons section */}
-          <View style={styles.buttonsContainer}>
-            {/* Primary button - Get Started */}
-            <TouchableOpacity
-              style={styles.buttonPrimary}
-              onPress={handleGetStarted}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.buttonTextPrimary}>Get Started</Text>
-              <MaterialIcons
-                name="arrow-forward"
-                size={20}
-                color="#121212"
-                style={{ marginLeft: 8 }}
-              />
-            </TouchableOpacity>
-
-            {/* Secondary button - Log In */}
-            <TouchableOpacity
-              style={styles.buttonSecondary}
-              onPress={handleLogIn}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.buttonTextSecondary}>Log In</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Footer text */}
-          <Text style={styles.footerText}>
-            By continuing, you agree to our Terms of Service and Privacy Policy
-          </Text>
+      <SafeAreaView style={styles.safeArea}>
+        {/* TOP SECTION: Massive Cursive Title (Like "Aspen") */}
+        <View style={styles.topSection}>
+          <Text style={styles.cursiveTitle}>Ibadan</Text>
+          <Text style={styles.cursiveTitle}> Power</Text>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+
+        {/* BOTTOM SECTION: Left-aligned text & button */}
+        <View style={styles.bottomSection}>
+          <Text style={styles.subTextLight}>monitor your</Text>
+          <Text style={styles.subTextBold}>Real-Time Grid</Text>
+
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleGetStarted}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.primaryButtonText}>Get Started</Text>
+          </TouchableOpacity>
+
+          {/* Minimalist Login Link */}
+          <TouchableOpacity onPress={handleLogIn} style={styles.loginLink}>
+            <Text style={styles.loginText}>
+              Already have an account? Log in
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </ImageBackground>
   );
 };
 
-/**
- * Feature Card Component
- * Reusable card for displaying app features
- */
-interface FeatureCardProps {
-  icon: keyof typeof MaterialIcons.glyphMap;
-  title: string;
-  description: string;
-}
-
-const FeatureCard: React.FC<FeatureCardProps> = ({
-  icon,
-  title,
-  description,
-}) => (
-  <View style={styles.featureCard}>
-    <View style={styles.featureIconContainer}>
-      <MaterialIcons name={icon} size={24} color="#4CAF50" />
-    </View>
-    <View style={styles.featureTextContainer}>
-      <Text style={styles.featureTitle}>{title}</Text>
-      <Text style={styles.featureDescription}>{description}</Text>
-    </View>
-  </View>
-);
-
 const styles = StyleSheet.create({
+  backgroundImage: {
+    flex: 1,
+    width: width,
+    height: height,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.35)", // Darkens the image slightly for text contrast
+  },
   safeArea: {
     flex: 1,
-    backgroundColor: "#121212",
+    justifyContent: "space-between", // Pushes title up, button down
   },
-  scrollContainer: {
-    flexGrow: 1,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: "#121212",
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    justifyContent: "space-between",
-    minHeight: height * 0.95,
-  },
-  headerSpacer: {
-    height: 20,
-  },
-  logoContainer: {
+  topSection: {
     alignItems: "center",
-    marginBottom: 40,
+    marginTop: height * 0.1, // Pushes it down a bit from the very top edge
   },
-  logoCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: "rgba(76, 175, 80, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: "#4CAF50",
+  cursiveTitle: {
+    fontFamily: "Hiatus",
+    fontSize: 90, // Massive size to match the "Aspen" script
+    color: THEME.textPrimary,
+    letterSpacing: 2,
   },
-  appTitle: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    marginBottom: 8,
-    letterSpacing: 0.5,
+  bottomSection: {
+    paddingHorizontal: 32,
+    paddingBottom: 40,
+    alignItems: "flex-start", // Left-aligns the text like the reference
   },
-  tagline: {
-    fontSize: 16,
-    color: "#B0BEC5",
-    fontWeight: "500",
-    letterSpacing: 0.3,
-  },
-  featuresContainer: {
-    marginVertical: 30,
-    gap: 16,
-  },
-  featureCard: {
-    flexDirection: "row",
-    backgroundColor: "#1E1E1E",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "flex-start",
-    borderLeftWidth: 3,
-    borderLeftColor: "#4CAF50",
-  },
-  featureIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    backgroundColor: "rgba(76, 175, 80, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-    flexShrink: 0,
-  },
-  featureTextContainer: {
-    flex: 1,
-  },
-  featureTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#FFFFFF",
+  subTextLight: {
+    fontSize: 24,
+    color: THEME.textPrimary,
     marginBottom: 4,
+    opacity: 0.9,
   },
-  featureDescription: {
-    fontSize: 13,
-    color: "#90A4AE",
-    lineHeight: 18,
+  subTextBold: {
+    fontSize: 36,
+    color: THEME.textPrimary,
+    fontWeight: "bold",
+    marginBottom: 32,
   },
-  buttonsContainer: {
-    gap: 12,
-    marginVertical: 20,
-  },
-  buttonPrimary: {
-    backgroundColor: "#4CAF50",
-    paddingVertical: 16,
-    borderRadius: 12,
-    flexDirection: "row",
-    justifyContent: "center",
+  primaryButton: {
+    backgroundColor: THEME.success,
+    width: "100%",
+    paddingVertical: 18,
+    borderRadius: 16, // Smooth rounded corners
     alignItems: "center",
-    shadowColor: "#4CAF50",
+    justifyContent: "center",
+    marginBottom: 20,
+    shadowColor: THEME.success,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.4,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 8,
   },
-  buttonTextPrimary: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#121212",
-    letterSpacing: 0.5,
+  primaryButtonText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#000000", // Dark text on the bright button
   },
-  buttonSecondary: {
-    backgroundColor: "transparent",
-    paddingVertical: 15,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#4CAF50",
-    justifyContent: "center",
-    alignItems: "center",
+  loginLink: {
+    alignSelf: "center",
+    padding: 10,
   },
-  buttonTextSecondary: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#4CAF50",
-    letterSpacing: 0.5,
-  },
-  footerText: {
-    fontSize: 11,
-    color: "#616161",
-    textAlign: "center",
-    marginTop: 16,
-    lineHeight: 16,
+  loginText: {
+    fontSize: 14,
+    color: THEME.textPrimary,
+    opacity: 0.8,
     fontWeight: "500",
   },
 });
