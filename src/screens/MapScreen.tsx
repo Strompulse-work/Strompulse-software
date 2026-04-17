@@ -14,7 +14,7 @@ import {
   StatusBar,
 } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
-import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useUserDevices } from "../hooks/useDeviceData";
 import { Loading, ErrorMessage } from "../components/UIComponents";
