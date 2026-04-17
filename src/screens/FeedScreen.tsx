@@ -1,6 +1,6 @@
 /**
- * Feed Screen - Main Dashboard
- * Matches SRD Dark Theme: Global Activity Feed of power events across Ibadan
+ * Feed Screen - Main Dashboard (Advanced Light Mode)
+ * Features: Rich data widgets, status pills, dynamic greeting, and fixed icons.
  */
 
 import React, { useEffect, useState } from "react";
@@ -11,58 +11,70 @@ import {
   FlatList,
   RefreshControl,
   TouchableOpacity,
+  Dimensions,
+  StatusBar,
+  Platform,
 } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useUserDevices } from "../hooks/useDeviceData";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 
-// Extracted exact colors from your SRD image
+const { width } = Dimensions.get("window");
+
+// Premium Light Theme Palette (Slate, Emerald, Rose)
 const THEME = {
-  background: "#12141D",
-  cardBg: "#1E202B",
-  textPrimary: "#FFFFFF",
-  textSecondary: "#8E92A4",
-  success: "#00E676", // Bright Green
-  error: "#FF3B30", // Bright Red
-  warning: "#FFCC00", // Yellow
-  border: "#2C2F3F",
+  background: "#F4F6F8",
+  cardBg: "#FFFFFF",
+  textPrimary: "#0F172A", // Deep Slate
+  textSecondary: "#64748B", // Medium Slate
+  textTertiary: "#94A3B8", // Light Slate
+  success: "#059669", // Emerald Green
+  successBg: "#D1FAE5",
+  error: "#E11D48", // Rose Red
+  errorBg: "#FFE4E6",
+  border: "#E2E8F0",
+  iconMuted: "#CBD5E1",
 };
 
-// Quick helper to format "mins ago"
+// Formats "mins ago"
 const getRelativeTime = (dateString: string) => {
   const now = new Date();
   const past = new Date(dateString);
   const diffInMinutes = Math.floor((now.getTime() - past.getTime()) / 60000);
 
   if (diffInMinutes < 1) return "Just now";
-  if (diffInMinutes < 60) return `${diffInMinutes} mins ago`;
+  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
   const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) return `${diffInHours} hrs ago`;
-  return "1 day ago";
+  if (diffInHours < 24) return `${diffInHours}h ago`;
+  return "1d ago";
+};
+
+// Gets greeting based on device time
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
 };
 
 const FeedScreen: React.FC = () => {
-  const [userId, setUserId] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch initial user
   useEffect(() => {
     const getUser = async () => {
       const session = await AuthService.getCurrentSession();
-      if (session) {
-        setUserId(session.user.id);
-      }
+      if (session) setUser(session.user);
     };
     getUser();
   }, []);
 
-  // Fetch all devices for the user
   const {
     devices,
     loading: devicesLoading,
     error: devicesError,
-  } = useUserDevices(userId || "");
+  } = useUserDevices(user?.id || "");
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -85,28 +97,52 @@ const FeedScreen: React.FC = () => {
     );
   }
 
-  // Sort devices by who was "last seen" to make it act like a chronological timeline feed
   const feedItems = [...devices].sort(
     (a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
   );
 
   return (
     <View style={styles.container}>
-      {/* Header Area to match SRD Top Navigation vibe */}
+      <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
+
+      {/* Advanced Header */}
       <View style={styles.header}>
-        <View style={styles.headerIndicator} />
-        <Text style={styles.headerTitle}>Live Feed</Text>
+        <View>
+          <Text style={styles.greetingText}>{getGreeting()},</Text>
+          <Text style={styles.userNameText}>
+            {user?.full_name?.split(" ")[0] || "User"}
+          </Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.iconButton}>
+            <Feather name="search" size={20} color={THEME.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons
+              name="options-outline"
+              size={22}
+              color={THEME.textPrimary}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.feedTitleContainer}>
+        <Text style={styles.feedTitle}>Live Activity Feed</Text>
+        <View style={styles.pulseIndicator} />
       </View>
 
       {feedItems.length === 0 ? (
         <View style={[styles.container, styles.center]}>
-          <MaterialIcons
-            name="notifications-none"
+          <MaterialCommunityIcons
+            name="timeline-alert-outline"
             size={64}
-            color={THEME.textSecondary}
+            color={THEME.textTertiary}
           />
-          <Text style={{ color: THEME.textSecondary, marginTop: 16 }}>
-            No recent activity.
+          <Text
+            style={{ color: THEME.textSecondary, marginTop: 16, fontSize: 16 }}
+          >
+            Grid is quiet. No recent updates.
           </Text>
         </View>
       ) : (
@@ -122,6 +158,7 @@ const FeedScreen: React.FC = () => {
             />
           }
           renderItem={({ item }) => <FeedCard device={item} />}
+          showsVerticalScrollIndicator={false}
         />
       )}
     </View>
@@ -129,52 +166,80 @@ const FeedScreen: React.FC = () => {
 };
 
 /**
- * Individual Activity Notification Card
+ * Advanced Widget Card
+ * Replaces question marks with precise MaterialCommunityIcons.
  */
 const FeedCard: React.FC<{ device: any }> = ({ device }) => {
   const isOnline = device.status === "ON";
 
-  // Dynamic styling based on power status
-  const cardConfig = isOnline
+  // Configuration mapping based on IoT status
+  const config = isOnline
     ? {
         color: THEME.success,
-        bgColor: "rgba(0, 230, 118, 0.1)",
-        icon: "power",
-        title: `Power Restored in ${device.address}`,
-        subtitle: `Power is back in ${device.address}. Confidence: 98%`,
+        bgColor: THEME.successBg,
+        icon: "lightning-bolt", // Fix: Real lightning icon
+        statusText: "POWER RESTORED",
       }
     : {
         color: THEME.error,
-        bgColor: "rgba(255, 59, 48, 0.1)",
-        icon: "power-off",
-        title: `Outage in ${device.address}`,
-        subtitle: `Power outage detected in ${device.address}. Confidence: 95%`,
+        bgColor: THEME.errorBg,
+        icon: "power-plug-off", // Fix: Real unplugged icon
+        statusText: "POWER OUTAGE",
       };
 
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.8}>
-      {/* Left Icon */}
-      <View
-        style={[styles.iconContainer, { backgroundColor: cardConfig.bgColor }]}
-      >
-        <MaterialIcons
-          name={cardConfig.icon as any}
-          size={24}
-          color={cardConfig.color}
-        />
-      </View>
-
-      {/* Right Content */}
-      <View style={styles.contentContainer}>
-        <Text style={[styles.title, { color: cardConfig.color }]}>
-          {cardConfig.title}
-        </Text>
-        <Text style={styles.subtitle} numberOfLines={2}>
-          {cardConfig.subtitle}
-        </Text>
-        <Text style={styles.timestamp}>
+    <TouchableOpacity style={styles.card} activeOpacity={0.7}>
+      {/* Top Row: Status Pill & Timestamp */}
+      <View style={styles.cardTopRow}>
+        <View style={[styles.statusPill, { backgroundColor: config.bgColor }]}>
+          <MaterialCommunityIcons
+            name={config.icon as any}
+            size={14}
+            color={config.color}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.statusPillText, { color: config.color }]}>
+            {config.statusText}
+          </Text>
+        </View>
+        <Text style={styles.timestampText}>
           {getRelativeTime(device.last_seen)}
         </Text>
+      </View>
+
+      {/* Middle Row: Location Focus */}
+      <View style={styles.locationRow}>
+        <Ionicons
+          name="location-sharp"
+          size={20}
+          color={THEME.textPrimary}
+          style={{ marginRight: 6, marginTop: 2 }}
+        />
+        <Text style={styles.locationTitle}>{device.address}</Text>
+      </View>
+
+      {/* Bottom Row: Advanced Metadata Badges */}
+      <View style={styles.metadataRow}>
+        <View style={styles.badge}>
+          <MaterialCommunityIcons
+            name="target"
+            size={14}
+            color={THEME.textSecondary}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={styles.badgeText}>98% Uptime</Text>
+        </View>
+        {/* <View style={styles.badge}>
+          <MaterialCommunityIcons
+            name="memory"
+            size={14}
+            color={THEME.textSecondary}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={styles.badgeText}>
+            Node #{device.id.substring(0, 4)}
+          </Text>
+        </View> */}
       </View>
     </TouchableOpacity>
   );
@@ -191,64 +256,135 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: THEME.border,
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === "ios" ? 50 : 24,
+    paddingBottom: 20,
   },
-  headerIndicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: THEME.success,
-    marginRight: 12,
-  },
-  headerTitle: {
-    color: THEME.textPrimary,
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  listContainer: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  card: {
-    flexDirection: "row",
-    backgroundColor: THEME.cardBg,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 16,
-  },
-  contentContainer: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  title: {
-    fontSize: 16,
+  greetingText: {
+    fontSize: 14,
+    color: THEME.textSecondary,
     fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
     marginBottom: 4,
   },
-  subtitle: {
-    color: THEME.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 8,
+  userNameText: {
+    fontSize: 28,
+    color: THEME.textPrimary,
+    fontWeight: "800",
+    letterSpacing: -0.5,
   },
-  timestamp: {
-    color: THEME.textSecondary,
-    fontSize: 11,
+  headerActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: THEME.cardBg,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  feedTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    marginBottom: 16,
+  },
+  feedTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: THEME.textPrimary,
+    marginRight: 8,
+  },
+  pulseIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: THEME.success,
+  },
+  listContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+  },
+  card: {
+    backgroundColor: THEME.cardBg,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#64748B",
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  cardTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusPillText: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  timestampText: {
+    fontSize: 13,
+    color: THEME.textTertiary,
     fontWeight: "500",
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 16,
+  },
+  locationTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: THEME.textPrimary,
+    flex: 1,
+    letterSpacing: -0.3,
+  },
+  metadataRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: THEME.background,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  badgeText: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+    fontWeight: "600",
   },
 });
 

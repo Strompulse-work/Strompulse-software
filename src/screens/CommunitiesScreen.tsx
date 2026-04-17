@@ -1,6 +1,7 @@
 /**
  * Communities Screen
- * Matches SRD Dark Theme: Searchable list of communities with compact uptime stats
+ * Modern Light Mode Theme: Searchable list of communities with rich visual stats.
+ * Features travel-app inspired cards, category icons, and premium pill tabs.
  */
 
 import React, { useState } from "react";
@@ -13,25 +14,46 @@ import {
   FlatList,
   TextInput,
   ScrollView,
+  Platform,
+  StatusBar,
 } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
 import { useCommunities, useCommunityStats } from "../hooks/useDeviceData";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 import { Community } from "../types";
 
-// Extracted exact colors from your SRD image
+// Premium Light Theme Palette (Slate, Emerald, Rose)
 const THEME = {
-  background: "#12141D",
-  cardBg: "#1E202B",
-  textPrimary: "#FFFFFF",
-  textSecondary: "#8E92A4",
-  success: "#00E676", // Bright Green
-  error: "#FF3B30", // Bright Red
-  warning: "#FFCC00", // Yellow
-  border: "#2C2F3F",
+  background: "#F4F6F8",
+  cardBg: "#FFFFFF",
+  textPrimary: "#0F172A", // Deep Slate
+  textSecondary: "#64748B", // Medium Slate
+  textTertiary: "#94A3B8", // Light Slate
+  success: "#059669", // Emerald Green
+  successBg: "#D1FAE5",
+  error: "#E11D48", // Rose Red
+  errorBg: "#FFE4E6",
+  border: "#E2E8F0",
+  activeTab: "#0F172A", // Dark Slate for active tab
 };
 
 const FILTER_TABS = ["All", "Estates", "Areas", "Schools", "Markets"];
+
+// Maps community types to specific MaterialCommunityIcons
+const getCommunityIcon = (type: string) => {
+  switch (type?.toLowerCase()) {
+    case "estate":
+      return "home-city-outline";
+    case "institution":
+      return "school-outline";
+    case "commercial":
+      return "storefront-outline";
+    case "area":
+      return "map-marker-radius-outline";
+    default:
+      return "domain";
+  }
+};
 
 const CommunitiesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
@@ -55,7 +77,6 @@ const CommunitiesScreen: React.FC = () => {
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.city?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    // Safely cast c.type as string to bypass strict TypeScript warnings
     const communityType = c.type as string;
 
     const matchesTab =
@@ -87,50 +108,78 @@ const CommunitiesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Search Bar */}
+      <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
+
+      {/* Header Title */}
+      <View style={styles.headerContainer}>
+        <Text style={styles.headerTitle}>Grid Regions</Text>
+      </View>
+
+      {/* Advanced Search Bar */}
       <View style={styles.searchContainer}>
-        <MaterialIcons name="search" size={20} color={THEME.textSecondary} />
+        <Feather
+          name="search"
+          size={20}
+          color={THEME.textSecondary}
+          style={styles.searchIcon}
+        />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search estates, areas..."
-          placeholderTextColor={THEME.textSecondary}
+          placeholder="Search estates, regions, schools..."
+          placeholderTextColor={THEME.textTertiary}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery("")}>
+            <Ionicons
+              name="close-circle"
+              size={20}
+              color={THEME.textTertiary}
+            />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Filter Tabs */}
+      {/* Premium Filter Tabs */}
       <View style={styles.tabsContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {FILTER_TABS.map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[styles.tab, activeTab === tab && styles.activeTab]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text
-                style={[
-                  styles.tabText,
-                  activeTab === tab && styles.activeTabText,
-                ]}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsScrollContent}
+        >
+          {FILTER_TABS.map((tab) => {
+            const isActive = activeTab === tab;
+            return (
+              <TouchableOpacity
+                key={tab}
+                style={[styles.tab, isActive && styles.activeTab]}
+                onPress={() => setActiveTab(tab)}
+                activeOpacity={0.7}
               >
-                {tab}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[styles.tabText, isActive && styles.activeTabText]}
+                >
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
 
       {/* Communities List */}
       {filteredCommunities.length === 0 ? (
         <View style={[styles.container, styles.center]}>
-          <MaterialIcons
-            name="location-off"
-            size={48}
-            color={THEME.textSecondary}
+          <MaterialCommunityIcons
+            name="map-search-outline"
+            size={64}
+            color={THEME.textTertiary}
           />
-          <Text style={{ color: THEME.textSecondary, marginTop: 16 }}>
-            No communities match your search.
+          <Text
+            style={{ color: THEME.textSecondary, marginTop: 16, fontSize: 16 }}
+          >
+            No locations match your search.
           </Text>
         </View>
       ) : (
@@ -144,7 +193,8 @@ const CommunitiesScreen: React.FC = () => {
               tintColor={THEME.success}
             />
           }
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => <CommunityListItem community={item} />}
         />
       )}
@@ -153,50 +203,103 @@ const CommunitiesScreen: React.FC = () => {
 };
 
 /**
- * Sleek Row Component (Matches SRD design exactly)
+ * Advanced Floating Card Row (Travel App Aesthetic)
  */
 const CommunityListItem: React.FC<{ community: Community }> = ({
   community,
 }) => {
-  // This hook ensures each row updates in real-time when the simulator flips!
   const { stats } = useCommunityStats(community.id);
 
   // Determine if community is mostly online or offline
   const isOnline = stats ? stats.uptime_percentage > 50 : true;
-  const statusColor = isOnline ? THEME.success : THEME.error;
+
+  const statusConfig = isOnline
+    ? { color: THEME.success, bgColor: THEME.successBg, icon: "lightning-bolt" }
+    : { color: THEME.error, bgColor: THEME.errorBg, icon: "power-plug-off" };
 
   return (
-    <View style={styles.row}>
-      {/* Status Dot */}
-      <View style={[styles.dot, { backgroundColor: statusColor }]} />
-
-      {/* Center Details */}
-      <View style={styles.rowContent}>
-        <Text style={styles.communityName}>{community.name}</Text>
-        <Text style={styles.communitySubtext}>
-          {community.city || "Ibadan"} • {stats?.total_devices || 0} devices
-        </Text>
+    <TouchableOpacity style={styles.card} activeOpacity={0.7}>
+      {/* Left Icon Block */}
+      <View style={[styles.iconBox, { backgroundColor: THEME.background }]}>
+        <MaterialCommunityIcons
+          name={getCommunityIcon(community.type as string)}
+          size={26}
+          color={THEME.textSecondary}
+        />
       </View>
 
-      {/* Right Side Stats */}
-      <View style={styles.rowStats}>
+      {/* Center Details */}
+      <View style={styles.cardContent}>
+        <Text style={styles.communityName} numberOfLines={1}>
+          {community.name}
+        </Text>
+        <View style={styles.metadataRow}>
+          <Ionicons
+            name="location-outline"
+            size={14}
+            color={THEME.textSecondary}
+          />
+          <Text style={styles.communitySubtext}>
+            {community.city || "Ibadan"}
+          </Text>
+          <Text style={styles.bulletPoint}>•</Text>
+          <MaterialCommunityIcons
+            name="chip"
+            size={14}
+            color={THEME.textSecondary}
+          />
+          <Text style={styles.communitySubtext}>
+            {stats?.total_devices || 0} nodes
+          </Text>
+        </View>
+      </View>
+
+      {/* Right Side Rich Stats */}
+      <View style={styles.cardStats}>
         {isOnline ? (
           <>
-            <Text style={[styles.statValue, { color: THEME.success }]}>
-              {stats?.uptime_percentage || 100}%
-            </Text>
-            <Text style={styles.statLabel}>uptime</Text>
+            <View
+              style={[
+                styles.statusBadge,
+                { backgroundColor: statusConfig.bgColor },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={statusConfig.icon}
+                size={14}
+                color={statusConfig.color}
+              />
+              <Text style={[styles.statValue, { color: statusConfig.color }]}>
+                {stats?.uptime_percentage || 100}%
+              </Text>
+            </View>
+            <Text style={styles.statLabel}>Uptime</Text>
           </>
         ) : (
           <>
-            <Text style={[styles.statValue, { color: THEME.error }]}>OFF</Text>
-            <Text style={styles.statLabel}>
-              {stats?.current_outage_count || 1} active
+            <View
+              style={[
+                styles.statusBadge,
+                { backgroundColor: statusConfig.bgColor },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={statusConfig.icon}
+                size={14}
+                color={statusConfig.color}
+              />
+              <Text style={[styles.statValue, { color: statusConfig.color }]}>
+                OFF
+              </Text>
+            </View>
+            <Text style={[styles.statLabel, { color: THEME.error }]}>
+              {stats?.current_outage_count || 1} Outage
+              {stats?.current_outage_count > 1 ? "s" : ""}
             </Text>
           </>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -209,86 +312,161 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  headerContainer: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === "ios" ? 50 : 20,
+    paddingBottom: 10,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+    letterSpacing: -0.5,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: THEME.cardBg,
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 16,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    height: 52,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#64748B",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  searchIcon: {
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
     color: THEME.textPrimary,
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: "500",
   },
   tabsContainer: {
-    borderBottomWidth: 1,
-    borderBottomColor: THEME.border,
-    paddingVertical: 12,
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  tabsScrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     marginHorizontal: 4,
-    borderRadius: 20,
+    borderRadius: 24,
+    backgroundColor: THEME.cardBg,
     borderWidth: 1,
-    borderColor: "transparent",
+    borderColor: THEME.border,
   },
   activeTab: {
-    borderColor: THEME.success,
-    backgroundColor: "rgba(0, 230, 118, 0.1)", // Faint green tint
+    backgroundColor: THEME.activeTab,
+    borderColor: THEME.activeTab,
   },
   tabText: {
     color: THEME.textSecondary,
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   activeTabText: {
-    color: THEME.success,
+    color: "#FFFFFF",
   },
-  row: {
+  listContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  card: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: THEME.border,
+    backgroundColor: THEME.cardBg,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#64748B",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  iconBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 16,
   },
-  rowContent: {
+  cardContent: {
     flex: 1,
+    justifyContent: "center",
   },
   communityName: {
     color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 6,
+    letterSpacing: -0.2,
+  },
+  metadataRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   communitySubtext: {
     color: THEME.textSecondary,
     fontSize: 13,
-    marginTop: 4,
+    fontWeight: "500",
+    marginLeft: 4,
   },
-  rowStats: {
+  bulletPoint: {
+    color: THEME.textTertiary,
+    marginHorizontal: 6,
+    fontSize: 12,
+  },
+  cardStats: {
     alignItems: "flex-end",
+    justifyContent: "center",
+    marginLeft: 12,
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 4,
   },
   statValue: {
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 14,
+    fontWeight: "800",
+    marginLeft: 4,
   },
   statLabel: {
     color: THEME.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 });
 

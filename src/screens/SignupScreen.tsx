@@ -195,7 +195,7 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
 
             <View style={styles.contentContainer}>
               <View style={styles.titleContainer}>
-                <Text style={styles.cursiveTitle}>Join Ibadan</Text>
+                <Text style={styles.cursiveTitle}>Join Strompulse</Text>
                 <Text style={styles.subtitle}>
                   Create an account to monitor the grid.
                 </Text>

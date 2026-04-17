@@ -66,8 +66,7 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
       <SafeAreaView style={styles.safeArea}>
         {/* TOP SECTION: Massive Cursive Title (Like "Aspen") */}
         <View style={styles.topSection}>
-          <Text style={styles.cursiveTitle}>Ibadan</Text>
-          <Text style={styles.cursiveTitle}> Power</Text>
+          <Text style={styles.cursiveTitle}>Strompulse</Text>
         </View>
 
         {/* BOTTOM SECTION: Left-aligned text & button */}

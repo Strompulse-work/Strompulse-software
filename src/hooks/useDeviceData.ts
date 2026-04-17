@@ -1,9 +1,9 @@
 /**
  * Custom Hooks for Data Fetching and Realtime Subscriptions
- * Provides reusable logic for screens
+ * Fully upgraded to direct Supabase WebSocket connections for zero-latency updates.
  */
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Device,
   PowerEvent,
@@ -17,7 +17,7 @@ import {
   CommunityService,
   AnalyticsService,
 } from "../services/deviceService";
-import RealtimeService from "../services/realtimeService";
+import { supabase } from "../config/supabase";
 
 interface UseAsyncState<T> {
   loading: boolean;
@@ -26,7 +26,7 @@ interface UseAsyncState<T> {
 }
 
 /**
- * Generic async hook for data fetching
+ * Generic async hook for one-off data fetching
  */
 export const useAsync = <T>(
   handler: () => Promise<any>,
@@ -66,13 +66,12 @@ export const useAsync = <T>(
 };
 
 /**
- * Hook to fetch and subscribe to user devices with real-time updates AND silent sync
+ * Hook to fetch and subscribe to user devices with TRUE real-time updates.
  */
 export const useUserDevices = (userId: string) => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const subscriptionIds = useRef<string[]>([]);
 
   useEffect(() => {
     if (!userId) {
@@ -82,54 +81,64 @@ export const useUserDevices = (userId: string) => {
 
     const fetchDevices = async () => {
       try {
-        const response = await DeviceService.getUserDevices(userId);
-        if (response.success && response.data) {
-          setDevices(response.data);
-        } else if (response.error) {
-          setError(response.error);
+        // Fetch ALL devices in the city for the global Feed and Map
+        const { data, error } = await supabase.from("devices").select("*");
+
+        if (error) throw error;
+
+        if (data) {
+          const sortedData = data.sort(
+            (a, b) =>
+              new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
+          );
+          setDevices(sortedData);
         }
       } catch (err) {
-        console.error(err);
+        console.error("Error fetching devices:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    // Initial Fetch
     fetchDevices();
-
-    // The Real-Time Attempt
-    try {
-      const userDevicesSub = RealtimeService.subscribeToUserDevices(
-        userId,
+    // Direct Supabase WebSocket Connection with a unique channel name to survive hot-reloads!
+    const channel = supabase
+      .channel(`live-user-devices-${userId}-${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "devices" },
         (payload) => {
-          fetchDevices(); // Refetch perfectly on any change
+          setDevices((currentDevices) => {
+            const updatedDevices = currentDevices.map((device) =>
+              device.id === payload.new.id
+                ? { ...device, ...payload.new }
+                : device,
+            );
+            return updatedDevices.sort(
+              (a, b) =>
+                new Date(b.last_seen).getTime() -
+                new Date(a.last_seen).getTime(),
+            );
+          });
         },
-      );
-      subscriptionIds.current.push(userDevicesSub);
-    } catch (subErr) {
-      console.warn("Realtime channel occupied. Relying on silent sync.");
-    }
-
-    // THE FIX: Silent Background Sync every 5 seconds for tabs that missed the websocket
-    const syncInterval = setInterval(fetchDevices, 5000);
+      )
+      .subscribe();
 
     return () => {
-      clearInterval(syncInterval);
-      subscriptionIds.current.forEach((id) => RealtimeService.unsubscribe(id));
+      supabase.removeChannel(channel);
     };
   }, [userId]);
 
   return { devices, loading, error };
 };
+
 /**
- * Hook to fetch and subscribe to device events with real-time updates
+ * Hook to fetch and subscribe to device events (Raw ON/OFF logs)
  */
 export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
   const [events, setEvents] = useState<PowerEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const subscriptionId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!deviceId) {
@@ -137,22 +146,11 @@ export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
       return;
     }
 
-    const fetchAndSubscribe = async () => {
+    const fetchInitialEvents = async () => {
       try {
-        // Fetch initial events
         const response = await DeviceService.getDeviceEvents(deviceId, limit);
         if (response.success && response.data) {
           setEvents(response.data);
-
-          // Subscribe to new events
-          subscriptionId.current = RealtimeService.subscribeToDeviceEvents(
-            deviceId,
-            (payload) => {
-              if (payload.eventType === "INSERT" && payload.new) {
-                setEvents((prev) => [payload.new, ...prev].slice(0, limit));
-              }
-            },
-          );
         } else {
           setError(response.error || "Failed to fetch events");
         }
@@ -163,12 +161,29 @@ export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
       }
     };
 
-    fetchAndSubscribe();
+    fetchInitialEvents();
+
+    // Listen only for NEW events inserted for this specific device
+    const channel = supabase
+      .channel(`live-events-${deviceId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "events",
+          filter: `device_id=eq.${deviceId}`,
+        },
+        (payload) => {
+          setEvents((prev) =>
+            [payload.new as PowerEvent, ...prev].slice(0, limit),
+          );
+        },
+      )
+      .subscribe();
 
     return () => {
-      if (subscriptionId.current) {
-        RealtimeService.unsubscribe(subscriptionId.current);
-      }
+      supabase.removeChannel(channel);
     };
   }, [deviceId, limit]);
 
@@ -176,13 +191,12 @@ export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
 };
 
 /**
- * Hook to fetch outages for a device
+ * Hook to fetch outages and update in real-time
  */
 export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
   const [outages, setOutages] = useState<Outage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const subscriptionId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!deviceId) {
@@ -190,24 +204,11 @@ export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
       return;
     }
 
-    const fetchAndSubscribe = async () => {
+    const fetchOutages = async () => {
       try {
         const response = await DeviceService.getDeviceOutages(deviceId, limit);
         if (response.success && response.data) {
           setOutages(response.data);
-
-          subscriptionId.current = RealtimeService.subscribeToOutages(
-            deviceId,
-            (payload) => {
-              if (payload.eventType === "INSERT" && payload.new) {
-                setOutages((prev) => [payload.new, ...prev].slice(0, limit));
-              } else if (payload.eventType === "UPDATE" && payload.new) {
-                setOutages((prev) =>
-                  prev.map((o) => (o.id === payload.new.id ? payload.new : o)),
-                );
-              }
-            },
-          );
         } else {
           setError(response.error || "Failed to fetch outages");
         }
@@ -218,12 +219,37 @@ export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
       }
     };
 
-    fetchAndSubscribe();
+    fetchOutages();
+
+    // Listen for both new outages (power went off) and updated outages (power came back)
+    const channel = supabase
+      .channel(`live-outages-${deviceId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "outages",
+          filter: `device_id=eq.${deviceId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setOutages((prev) =>
+              [payload.new as Outage, ...prev].slice(0, limit),
+            );
+          } else if (payload.eventType === "UPDATE") {
+            setOutages((prev) =>
+              prev.map((o) =>
+                o.id === payload.new.id ? (payload.new as Outage) : o,
+              ),
+            );
+          }
+        },
+      )
+      .subscribe();
 
     return () => {
-      if (subscriptionId.current) {
-        RealtimeService.unsubscribe(subscriptionId.current);
-      }
+      supabase.removeChannel(channel);
     };
   }, [deviceId, limit]);
 
@@ -231,7 +257,7 @@ export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
 };
 
 /**
- * Hook to fetch all communities
+ * Hook to fetch all communities (Auto-updates when new communities are added)
  */
 export const useCommunities = () => {
   const [communities, setCommunities] = useState<Community[]>([]);
@@ -255,19 +281,33 @@ export const useCommunities = () => {
     };
 
     fetch();
+
+    const channel = supabase
+      .channel("live-communities")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "communities" },
+        () => {
+          fetch(); // Refetch the list when a new community is created/updated
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return { communities, loading, error };
 };
 
 /**
- * Hook to fetch community statistics with silent background sync
+ * Hook to fetch community statistics (Auto-recalculates when a device in the community changes)
  */
 export const useCommunityStats = (communityId: string) => {
   const [stats, setStats] = useState<CommunityStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const subscriptionIds = useRef<string[]>([]);
 
   useEffect(() => {
     if (!communityId) {
@@ -288,26 +328,27 @@ export const useCommunityStats = (communityId: string) => {
       }
     };
 
-    // Initial fetch
     fetchStats();
 
-    // The Real-Time Attempt
-    try {
-      const subId = RealtimeService.subscribeToCommunityDevices(
-        communityId,
-        () => fetchStats(),
-      );
-      subscriptionIds.current.push(subId);
-    } catch (err) {
-      // Ignore collision
-    }
-
-    // THE FIX: Silent Background Sync every 5 seconds
-    const syncInterval = setInterval(fetchStats, 5000);
+    // Trigger a backend stats recalculation whenever a device inside THIS community changes status
+    const channel = supabase
+      .channel(`live-community-stats-${communityId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "devices",
+          filter: `community_id=eq.${communityId}`,
+        },
+        () => {
+          fetchStats();
+        },
+      )
+      .subscribe();
 
     return () => {
-      clearInterval(syncInterval);
-      subscriptionIds.current.forEach((id) => RealtimeService.unsubscribe(id));
+      supabase.removeChannel(channel);
     };
   }, [communityId]);
 
@@ -315,7 +356,8 @@ export const useCommunityStats = (communityId: string) => {
 };
 
 /**
- * Hook to fetch insights/analytics for a device
+ * Hook to fetch insights/analytics for a device.
+ * Refetches if an outage record updates (e.g., duration changes).
  */
 export const useInsights = (deviceId: string) => {
   const [insights, setInsights] = useState<InsightsSummary | null>(null);
@@ -345,17 +387,33 @@ export const useInsights = (deviceId: string) => {
 
     fetch();
 
-    // Refetch every 5 minutes
-    const interval = setInterval(fetch, 5 * 60 * 1000);
+    // Update insights if any outages for this device change
+    const channel = supabase
+      .channel(`live-insights-${deviceId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "outages",
+          filter: `device_id=eq.${deviceId}`,
+        },
+        () => {
+          fetch();
+        },
+      )
+      .subscribe();
 
-    return () => clearInterval(interval);
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [deviceId]);
 
   return { insights, loading, error };
 };
 
 /**
- * Hook for polling device status at intervals
+ * Hook for polling device status at intervals (Fallback mechanism)
  */
 export const useDeviceStatusPolling = (
   deviceId: string,
@@ -387,7 +445,6 @@ export const useDeviceStatusPolling = (
     };
 
     fetch();
-
     const interval = setInterval(fetch, intervalMs);
 
     return () => clearInterval(interval);
