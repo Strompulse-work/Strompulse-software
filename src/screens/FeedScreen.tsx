@@ -1,6 +1,6 @@
 /**
- * Feed Screen - Main Dashboard (Advanced Light Mode)
- * Features: Rich data widgets, status pills, dynamic greeting, and fixed icons.
+ * Feed Screen - Main Dashboard
+ * Dynamically switches between Light and Dark mode using ThemeContext.
  */
 
 import React, { useEffect, useState } from "react";
@@ -18,24 +18,10 @@ import {
 import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useUserDevices } from "../hooks/useDeviceData";
+import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 
 const { width } = Dimensions.get("window");
-
-// Premium Light Theme Palette (Slate, Emerald, Rose)
-const THEME = {
-  background: "#F4F6F8",
-  cardBg: "#FFFFFF",
-  textPrimary: "#0F172A", // Deep Slate
-  textSecondary: "#64748B", // Medium Slate
-  textTertiary: "#94A3B8", // Light Slate
-  success: "#059669", // Emerald Green
-  successBg: "#D1FAE5",
-  error: "#E11D48", // Rose Red
-  errorBg: "#FFE4E6",
-  border: "#E2E8F0",
-  iconMuted: "#CBD5E1",
-};
 
 // Formats "mins ago"
 const getRelativeTime = (dateString: string) => {
@@ -59,6 +45,9 @@ const getGreeting = () => {
 };
 
 const FeedScreen: React.FC = () => {
+  const { theme, isDarkMode } = useTheme();
+  const styles = getStyles(theme); // Generate styles dynamically
+
   const [user, setUser] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -103,7 +92,10 @@ const FeedScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
+      <StatusBar
+        barStyle={isDarkMode ? "light-content" : "dark-content"}
+        backgroundColor={theme.background}
+      />
 
       {/* Advanced Header */}
       <View style={styles.header}>
@@ -115,13 +107,13 @@ const FeedScreen: React.FC = () => {
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.iconButton}>
-            <Feather name="search" size={20} color={THEME.textPrimary} />
+            <Feather name="search" size={20} color={theme.textPrimary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton}>
             <Ionicons
               name="options-outline"
               size={22}
-              color={THEME.textPrimary}
+              color={theme.textPrimary}
             />
           </TouchableOpacity>
         </View>
@@ -137,10 +129,10 @@ const FeedScreen: React.FC = () => {
           <MaterialCommunityIcons
             name="timeline-alert-outline"
             size={64}
-            color={THEME.textTertiary}
+            color={theme.textTertiary}
           />
           <Text
-            style={{ color: THEME.textSecondary, marginTop: 16, fontSize: 16 }}
+            style={{ color: theme.textSecondary, marginTop: 16, fontSize: 16 }}
           >
             Grid is quiet. No recent updates.
           </Text>
@@ -154,7 +146,7 @@ const FeedScreen: React.FC = () => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={THEME.success}
+              tintColor={theme.success}
             />
           }
           renderItem={({ item }) => <FeedCard device={item} />}
@@ -167,23 +159,24 @@ const FeedScreen: React.FC = () => {
 
 /**
  * Advanced Widget Card
- * Replaces question marks with precise MaterialCommunityIcons.
  */
 const FeedCard: React.FC<{ device: any }> = ({ device }) => {
+  const { theme } = useTheme();
+  const styles = getStyles(theme);
   const isOnline = device.status === "ON";
 
-  // Configuration mapping based on IoT status
+  // Configuration mapping based on IoT status and active theme
   const config = isOnline
     ? {
-        color: THEME.success,
-        bgColor: THEME.successBg,
-        icon: "lightning-bolt", // Fix: Real lightning icon
+        color: theme.success,
+        bgColor: theme.successBg,
+        icon: "lightning-bolt",
         statusText: "POWER RESTORED",
       }
     : {
-        color: THEME.error,
-        bgColor: THEME.errorBg,
-        icon: "power-plug-off", // Fix: Real unplugged icon
+        color: theme.error,
+        bgColor: theme.errorBg,
+        icon: "power-plug-off",
         statusText: "POWER OUTAGE",
       };
 
@@ -212,7 +205,7 @@ const FeedCard: React.FC<{ device: any }> = ({ device }) => {
         <Ionicons
           name="location-sharp"
           size={20}
-          color={THEME.textPrimary}
+          color={theme.textPrimary}
           style={{ marginRight: 6, marginTop: 2 }}
         />
         <Text style={styles.locationTitle}>{device.address}</Text>
@@ -224,168 +217,163 @@ const FeedCard: React.FC<{ device: any }> = ({ device }) => {
           <MaterialCommunityIcons
             name="target"
             size={14}
-            color={THEME.textSecondary}
+            color={theme.textSecondary}
             style={{ marginRight: 4 }}
           />
           <Text style={styles.badgeText}>98% Uptime</Text>
         </View>
-        {/* <View style={styles.badge}>
-          <MaterialCommunityIcons
-            name="memory"
-            size={14}
-            color={THEME.textSecondary}
-            style={{ marginRight: 4 }}
-          />
-          <Text style={styles.badgeText}>
-            Node #{device.id.substring(0, 4)}
-          </Text>
-        </View> */}
       </View>
     </TouchableOpacity>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: THEME.background,
-  },
-  center: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === "ios" ? 50 : 24,
-    paddingBottom: 20,
-  },
-  greetingText: {
-    fontSize: 14,
-    color: THEME.textSecondary,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  userNameText: {
-    fontSize: 28,
-    color: THEME.textPrimary,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-  },
-  headerActions: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: THEME.cardBg,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  feedTitleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 24,
-    marginBottom: 16,
-  },
-  feedTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: THEME.textPrimary,
-    marginRight: 8,
-  },
-  pulseIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: THEME.success,
-  },
-  listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 120,
-  },
-  card: {
-    backgroundColor: THEME.cardBg,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: THEME.border,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#64748B",
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  cardTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  statusPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusPillText: {
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  timestampText: {
-    fontSize: 13,
-    color: THEME.textTertiary,
-    fontWeight: "500",
-  },
-  locationRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 16,
-  },
-  locationTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: THEME.textPrimary,
-    flex: 1,
-    letterSpacing: -0.3,
-  },
-  metadataRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.background,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  badgeText: {
-    fontSize: 12,
-    color: THEME.textSecondary,
-    fontWeight: "600",
-  },
-});
+// Generate styles dynamically based on the injected theme
+const getStyles = (theme: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    center: {
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    header: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-end",
+      paddingHorizontal: 24,
+      paddingTop: Platform.OS === "ios" ? 50 : 24,
+      paddingBottom: 20,
+    },
+    greetingText: {
+      fontSize: 14,
+      color: theme.textSecondary,
+      fontWeight: "600",
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4,
+    },
+    userNameText: {
+      fontSize: 28,
+      color: theme.textPrimary,
+      fontWeight: "800",
+      letterSpacing: -0.5,
+    },
+    headerActions: {
+      flexDirection: "row",
+      gap: 12,
+    },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.cardBg,
+      justifyContent: "center",
+      alignItems: "center",
+      ...Platform.select({
+        ios: {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 4,
+        },
+        android: { elevation: 2 },
+      }),
+    },
+    feedTitleContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 24,
+      marginBottom: 16,
+    },
+    feedTitle: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: theme.textPrimary,
+      marginRight: 8,
+    },
+    pulseIndicator: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: theme.success,
+    },
+    listContainer: {
+      paddingHorizontal: 20,
+      paddingBottom: 120,
+    },
+    card: {
+      backgroundColor: theme.cardBg,
+      borderRadius: 20,
+      padding: 20,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      ...Platform.select({
+        ios: {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+        },
+        android: {
+          elevation: 3,
+        },
+      }),
+    },
+    cardTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+    },
+    statusPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    statusPillText: {
+      fontSize: 12,
+      fontWeight: "800",
+      letterSpacing: 0.5,
+    },
+    timestampText: {
+      fontSize: 13,
+      color: theme.textTertiary,
+      fontWeight: "500",
+    },
+    locationRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      marginBottom: 16,
+    },
+    locationTitle: {
+      fontSize: 20,
+      fontWeight: "700",
+      color: theme.textPrimary,
+      flex: 1,
+      letterSpacing: -0.3,
+    },
+    metadataRow: {
+      flexDirection: "row",
+      gap: 12,
+    },
+    badge: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: theme.background,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    badgeText: {
+      fontSize: 12,
+      color: theme.textSecondary,
+      fontWeight: "600",
+    },
+  });
 
 export default FeedScreen;

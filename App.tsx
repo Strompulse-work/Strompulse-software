@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
 import { supabase } from "./src/config/supabase";
 import AuthService from "./src/services/authService";
+import { ThemeProvider } from "./src/theme/ThemeContext";
 import RealtimeService from "./src/services/realtimeService";
 import RootNavigator from "./src/navigation/RootNavigator";
 import { Colors } from "./src/styles/theme";
@@ -64,29 +65,31 @@ export default function App() {
   }, []);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationContainer
-        linking={{
-          prefixes: ["ibadanpower://", "https://ibadanpower.app"],
-          config: {
-            screens: {
-              index: "",
-              auth: "auth",
-              "(tabs)": "(tabs)",
-              "(tabs)/feed": "feed",
-              "(tabs)/map": "map",
-              "(tabs)/communities": "communities",
-              "(tabs)/insights": "insights",
-              "(tabs)/profile": "profile",
-              "community-details": "community/:communityId",
-              "device-details": "device/:deviceId",
+    <ThemeProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <NavigationContainer
+          linking={{
+            prefixes: ["ibadanpower://", "https://ibadanpower.app"],
+            config: {
+              screens: {
+                index: "",
+                auth: "auth",
+                "(tabs)": "(tabs)",
+                "(tabs)/communities": "communities",
+                "(tabs)/feed": "feed",
+                "(tabs)/map": "map",
+                "(tabs)/insights": "insights",
+                "(tabs)/profile": "profile",
+                "community-details": "community/:communityId",
+                "device-details": "device/:deviceId",
+              },
             },
-          },
-        }}
-      >
-        <RootNavigator isSignedIn={isSignedIn} />
-      </NavigationContainer>
-      <StatusBar style="light" backgroundColor={Colors.primary} />
-    </GestureHandlerRootView>
+          }}
+        >
+          <RootNavigator isSignedIn={isSignedIn} />
+        </NavigationContainer>
+        <StatusBar style="light" backgroundColor={Colors.primary} />
+      </GestureHandlerRootView>
+    </ThemeProvider>
   );
 }

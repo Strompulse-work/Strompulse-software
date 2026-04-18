@@ -1,7 +1,7 @@
 /**
  * Communities Screen
- * Modern Light Mode Theme: Searchable list of communities with rich visual stats.
- * Features travel-app inspired cards, category icons, and premium pill tabs.
+ * Dynamically switches between Light and Dark mode using ThemeContext.
+ * Features searchable list of communities with rich visual stats.
  */
 
 import React, { useState } from "react";
@@ -19,23 +19,9 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
 import { useCommunities, useCommunityStats } from "../hooks/useDeviceData";
+import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 import { Community } from "../types";
-
-// Premium Light Theme Palette (Slate, Emerald, Rose)
-const THEME = {
-  background: "#F4F6F8",
-  cardBg: "#FFFFFF",
-  textPrimary: "#0F172A", // Deep Slate
-  textSecondary: "#64748B", // Medium Slate
-  textTertiary: "#94A3B8", // Light Slate
-  success: "#059669", // Emerald Green
-  successBg: "#D1FAE5",
-  error: "#E11D48", // Rose Red
-  errorBg: "#FFE4E6",
-  border: "#E2E8F0",
-  activeTab: "#0F172A", // Dark Slate for active tab
-};
 
 const FILTER_TABS = ["All", "Estates", "Areas", "Schools", "Markets"];
 
@@ -56,6 +42,9 @@ const getCommunityIcon = (type: string) => {
 };
 
 const CommunitiesScreen: React.FC = () => {
+  const { theme, isDarkMode } = useTheme();
+  const styles = getStyles(theme);
+
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All");
@@ -108,7 +97,10 @@ const CommunitiesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
+      <StatusBar
+        barStyle={isDarkMode ? "light-content" : "dark-content"}
+        backgroundColor={theme.background}
+      />
 
       {/* Header Title */}
       <View style={styles.headerContainer}>
@@ -120,13 +112,13 @@ const CommunitiesScreen: React.FC = () => {
         <Feather
           name="search"
           size={20}
-          color={THEME.textSecondary}
+          color={theme.textSecondary}
           style={styles.searchIcon}
         />
         <TextInput
           style={styles.searchInput}
           placeholder="Search estates, regions, schools..."
-          placeholderTextColor={THEME.textTertiary}
+          placeholderTextColor={theme.textTertiary}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
@@ -135,7 +127,7 @@ const CommunitiesScreen: React.FC = () => {
             <Ionicons
               name="close-circle"
               size={20}
-              color={THEME.textTertiary}
+              color={theme.textTertiary}
             />
           </TouchableOpacity>
         )}
@@ -174,10 +166,10 @@ const CommunitiesScreen: React.FC = () => {
           <MaterialCommunityIcons
             name="map-search-outline"
             size={64}
-            color={THEME.textTertiary}
+            color={theme.textTertiary}
           />
           <Text
-            style={{ color: THEME.textSecondary, marginTop: 16, fontSize: 16 }}
+            style={{ color: theme.textSecondary, marginTop: 16, fontSize: 16 }}
           >
             No locations match your search.
           </Text>
@@ -190,7 +182,7 @@ const CommunitiesScreen: React.FC = () => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={THEME.success}
+              tintColor={theme.success}
             />
           }
           contentContainerStyle={styles.listContainer}
@@ -203,28 +195,30 @@ const CommunitiesScreen: React.FC = () => {
 };
 
 /**
- * Advanced Floating Card Row (Travel App Aesthetic)
+ * Advanced Floating Card Row
  */
 const CommunityListItem: React.FC<{ community: Community }> = ({
   community,
 }) => {
+  const { theme } = useTheme();
+  const styles = getStyles(theme);
   const { stats } = useCommunityStats(community.id);
 
   // Determine if community is mostly online or offline
   const isOnline = stats ? stats.uptime_percentage > 50 : true;
 
   const statusConfig = isOnline
-    ? { color: THEME.success, bgColor: THEME.successBg, icon: "lightning-bolt" }
-    : { color: THEME.error, bgColor: THEME.errorBg, icon: "power-plug-off" };
+    ? { color: theme.success, bgColor: theme.successBg, icon: "lightning-bolt" }
+    : { color: theme.error, bgColor: theme.errorBg, icon: "power-plug-off" };
 
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.7}>
       {/* Left Icon Block */}
-      <View style={[styles.iconBox, { backgroundColor: THEME.background }]}>
+      <View style={[styles.iconBox, { backgroundColor: theme.background }]}>
         <MaterialCommunityIcons
           name={getCommunityIcon(community.type as string)}
           size={26}
-          color={THEME.textSecondary}
+          color={theme.textSecondary}
         />
       </View>
 
@@ -237,7 +231,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
           <Ionicons
             name="location-outline"
             size={14}
-            color={THEME.textSecondary}
+            color={theme.textSecondary}
           />
           <Text style={styles.communitySubtext}>
             {community.city || "Ibadan"}
@@ -246,7 +240,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
           <MaterialCommunityIcons
             name="chip"
             size={14}
-            color={THEME.textSecondary}
+            color={theme.textSecondary}
           />
           <Text style={styles.communitySubtext}>
             {stats?.total_devices || 0} nodes
@@ -265,7 +259,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
               ]}
             >
               <MaterialCommunityIcons
-                name={statusConfig.icon}
+                name={statusConfig.icon as any}
                 size={14}
                 color={statusConfig.color}
               />
@@ -284,7 +278,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
               ]}
             >
               <MaterialCommunityIcons
-                name={statusConfig.icon}
+                name={statusConfig.icon as any}
                 size={14}
                 color={statusConfig.color}
               />
@@ -292,9 +286,9 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
                 OFF
               </Text>
             </View>
-            <Text style={[styles.statLabel, { color: THEME.error }]}>
+            <Text style={[styles.statLabel, { color: theme.error }]}>
               {stats?.current_outage_count || 1} Outage
-              {stats?.current_outage_count > 1 ? "s" : ""}
+              {(stats?.current_outage_count || 1) > 1 ? "s" : ""}
             </Text>
           </>
         )}
@@ -303,171 +297,173 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: THEME.background,
-  },
-  center: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerContainer: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "ios" ? 50 : 20,
-    paddingBottom: 10,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: THEME.textPrimary,
-    letterSpacing: -0.5,
-  },
-  searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.cardBg,
-    marginHorizontal: 20,
-    marginTop: 8,
-    marginBottom: 16,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    height: 52,
-    borderWidth: 1,
-    borderColor: THEME.border,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#64748B",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  searchIcon: {
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  tabsContainer: {
-    marginBottom: 12,
-  },
-  tabsScrollContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  tab: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    marginHorizontal: 4,
-    borderRadius: 24,
-    backgroundColor: THEME.cardBg,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  activeTab: {
-    backgroundColor: THEME.activeTab,
-    borderColor: THEME.activeTab,
-  },
-  tabText: {
-    color: THEME.textSecondary,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  activeTabText: {
-    color: "#FFFFFF",
-  },
-  listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.cardBg,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: THEME.border,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#64748B",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
-  },
-  iconBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 16,
-  },
-  cardContent: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  communityName: {
-    color: THEME.textPrimary,
-    fontSize: 17,
-    fontWeight: "700",
-    marginBottom: 6,
-    letterSpacing: -0.2,
-  },
-  metadataRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  communitySubtext: {
-    color: THEME.textSecondary,
-    fontSize: 13,
-    fontWeight: "500",
-    marginLeft: 4,
-  },
-  bulletPoint: {
-    color: THEME.textTertiary,
-    marginHorizontal: 6,
-    fontSize: 12,
-  },
-  cardStats: {
-    alignItems: "flex-end",
-    justifyContent: "center",
-    marginLeft: 12,
-  },
-  statusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: "800",
-    marginLeft: 4,
-  },
-  statLabel: {
-    color: THEME.textSecondary,
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-});
+// Generate styles dynamically based on the injected theme
+const getStyles = (theme: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    center: {
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    headerContainer: {
+      paddingHorizontal: 20,
+      paddingTop: Platform.OS === "ios" ? 50 : 20,
+      paddingBottom: 10,
+    },
+    headerTitle: {
+      fontSize: 28,
+      fontWeight: "800",
+      color: theme.textPrimary,
+      letterSpacing: -0.5,
+    },
+    searchContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: theme.cardBg,
+      marginHorizontal: 20,
+      marginTop: 8,
+      marginBottom: 16,
+      borderRadius: 16,
+      paddingHorizontal: 16,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.border,
+      ...Platform.select({
+        ios: {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+        },
+        android: {
+          elevation: 2,
+        },
+      }),
+    },
+    searchIcon: {
+      marginRight: 10,
+    },
+    searchInput: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontSize: 16,
+      fontWeight: "500",
+    },
+    tabsContainer: {
+      marginBottom: 12,
+    },
+    tabsScrollContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+    },
+    tab: {
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      marginHorizontal: 4,
+      borderRadius: 24,
+      backgroundColor: theme.cardBg,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    activeTab: {
+      backgroundColor: theme.textPrimary, // Inverts based on theme
+      borderColor: theme.textPrimary,
+    },
+    tabText: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    activeTabText: {
+      color: theme.background, // Text becomes the background color for perfect contrast
+    },
+    listContainer: {
+      paddingHorizontal: 20,
+      paddingBottom: 100,
+    },
+    card: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: theme.cardBg,
+      borderRadius: 20,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      ...Platform.select({
+        ios: {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+        },
+        android: {
+          elevation: 3,
+        },
+      }),
+    },
+    iconBox: {
+      width: 52,
+      height: 52,
+      borderRadius: 16,
+      justifyContent: "center",
+      alignItems: "center",
+      marginRight: 16,
+    },
+    cardContent: {
+      flex: 1,
+      justifyContent: "center",
+    },
+    communityName: {
+      color: theme.textPrimary,
+      fontSize: 17,
+      fontWeight: "700",
+      marginBottom: 6,
+      letterSpacing: -0.2,
+    },
+    metadataRow: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    communitySubtext: {
+      color: theme.textSecondary,
+      fontSize: 13,
+      fontWeight: "500",
+      marginLeft: 4,
+    },
+    bulletPoint: {
+      color: theme.textTertiary,
+      marginHorizontal: 6,
+      fontSize: 12,
+    },
+    cardStats: {
+      alignItems: "flex-end",
+      justifyContent: "center",
+      marginLeft: 12,
+    },
+    statusBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 8,
+      marginBottom: 4,
+    },
+    statValue: {
+      fontSize: 14,
+      fontWeight: "800",
+      marginLeft: 4,
+    },
+    statLabel: {
+      color: theme.textSecondary,
+      fontSize: 11,
+      fontWeight: "600",
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+  });
 
 export default CommunitiesScreen;

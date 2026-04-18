@@ -1,7 +1,6 @@
 /**
  * Profile Screen
- * Modern Light Mode Theme: Premium user settings and preferences.
- * Features: Floating cards, rich status pills, and crisp line icons.
+ * Dynamically switches between Light and Dark mode using ThemeContext.
  */
 
 import React, { useState, useEffect } from "react";
@@ -16,30 +15,17 @@ import {
   Platform,
   StatusBar,
 } from "react-native";
-import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useUserDevices } from "../hooks/useDeviceData";
+import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 import { User } from "../types";
 
-// Premium Light Theme Palette (Slate, Emerald, Rose)
-const THEME = {
-  background: "#F4F6F8",
-  cardBg: "#FFFFFF",
-  textPrimary: "#0F172A", // Deep Slate
-  textSecondary: "#64748B", // Medium Slate
-  textTertiary: "#94A3B8", // Light Slate
-  success: "#059669", // Emerald Green
-  successBg: "#D1FAE5",
-  error: "#E11D48", // Rose Red
-  errorBg: "#FFE4E6",
-  warning: "#D97706",
-  border: "#E2E8F0",
-  primary: "#0EA5E9", // Sky Blue for premium user badges
-  primaryBg: "#E0F2FE",
-};
-
 const ProfileScreen: React.FC = () => {
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
+  const styles = getStyles(theme); // Generate styles dynamically based on the active theme
+
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -130,7 +116,10 @@ const ProfileScreen: React.FC = () => {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: 60 }}
     >
-      <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
+      <StatusBar
+        barStyle={isDarkMode ? "light-content" : "dark-content"}
+        backgroundColor={theme.background}
+      />
 
       {/* Advanced Header */}
       <View style={styles.headerContainer}>
@@ -153,8 +142,8 @@ const ProfileScreen: React.FC = () => {
               {
                 backgroundColor:
                   user.role === "community_admin"
-                    ? THEME.primaryBg
-                    : THEME.successBg,
+                    ? theme.primaryBg
+                    : theme.successBg,
               },
             ]}
           >
@@ -166,7 +155,7 @@ const ProfileScreen: React.FC = () => {
               }
               size={14}
               color={
-                user.role === "community_admin" ? THEME.primary : THEME.success
+                user.role === "community_admin" ? theme.primary : theme.success
               }
               style={{ marginRight: 4 }}
             />
@@ -176,8 +165,8 @@ const ProfileScreen: React.FC = () => {
                 {
                   color:
                     user.role === "community_admin"
-                      ? THEME.primary
-                      : THEME.success,
+                      ? theme.primary
+                      : theme.success,
                 },
               ]}
             >
@@ -205,16 +194,11 @@ const ProfileScreen: React.FC = () => {
                   ]}
                 >
                   <View style={styles.deviceRowLeft}>
-                    <View
-                      style={[
-                        styles.iconBox,
-                        { backgroundColor: THEME.background },
-                      ]}
-                    >
+                    <View style={styles.iconBox}>
                       <MaterialCommunityIcons
                         name="router-wireless"
                         size={22}
-                        color={THEME.textSecondary}
+                        color={theme.textSecondary}
                       />
                     </View>
                     <View style={{ marginLeft: 12 }}>
@@ -231,8 +215,8 @@ const ProfileScreen: React.FC = () => {
                       styles.statusPill,
                       {
                         backgroundColor: isOnline
-                          ? THEME.successBg
-                          : THEME.errorBg,
+                          ? theme.successBg
+                          : theme.errorBg,
                       },
                     ]}
                   >
@@ -241,15 +225,15 @@ const ProfileScreen: React.FC = () => {
                         styles.statusDot,
                         {
                           backgroundColor: isOnline
-                            ? THEME.success
-                            : THEME.error,
+                            ? theme.success
+                            : theme.error,
                         },
                       ]}
                     />
                     <Text
                       style={[
                         styles.statusPillText,
-                        { color: isOnline ? THEME.success : THEME.error },
+                        { color: isOnline ? theme.success : theme.error },
                       ]}
                     >
                       {isOnline ? "ONLINE" : "OFFLINE"}
@@ -263,11 +247,11 @@ const ProfileScreen: React.FC = () => {
               <MaterialCommunityIcons
                 name="hardware-chip"
                 size={40}
-                color={THEME.border}
+                color={theme.border}
               />
               <Text
                 style={{
-                  color: THEME.textSecondary,
+                  color: theme.textSecondary,
                   marginTop: 12,
                   fontWeight: "500",
                 }}
@@ -276,6 +260,32 @@ const ProfileScreen: React.FC = () => {
               </Text>
             </View>
           )}
+        </View>
+      </View>
+
+      {/* APP SETTINGS (Dark Mode Toggle) */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>APP SETTINGS</Text>
+        <View style={styles.cardBlock}>
+          <View style={styles.actionRow}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <View style={styles.iconBox}>
+                <Feather
+                  name={isDarkMode ? "moon" : "sun"}
+                  size={18}
+                  color={theme.textPrimary}
+                />
+              </View>
+              <Text style={styles.actionText}>Dark Mode</Text>
+            </View>
+            <Switch
+              value={isDarkMode}
+              onValueChange={toggleDarkMode}
+              trackColor={{ false: theme.border, true: theme.success }}
+              thumbColor={"#FFFFFF"}
+              ios_backgroundColor={theme.border}
+            />
+          </View>
         </View>
       </View>
 
@@ -288,6 +298,7 @@ const ProfileScreen: React.FC = () => {
             label="Outage Alerts"
             value={outageAlerts}
             onValueChange={setOutageAlerts}
+            theme={theme}
           />
           <NotificationRow
             icon="zap"
@@ -295,6 +306,7 @@ const ProfileScreen: React.FC = () => {
             value={restorationAlerts}
             onValueChange={setRestorationAlerts}
             borderTop
+            theme={theme}
           />
           <NotificationRow
             icon="mail"
@@ -302,6 +314,7 @@ const ProfileScreen: React.FC = () => {
             value={emailNotifications}
             onValueChange={setEmailNotifications}
             borderTop
+            theme={theme}
           />
         </View>
       </View>
@@ -316,17 +329,15 @@ const ProfileScreen: React.FC = () => {
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View
-                style={[styles.iconBox, { backgroundColor: THEME.background }]}
-              >
-                <Feather name="lock" size={18} color={THEME.textPrimary} />
+              <View style={styles.iconBox}>
+                <Feather name="lock" size={18} color={theme.textPrimary} />
               </View>
               <Text style={styles.actionText}>Change Password</Text>
             </View>
             <Feather
               name="chevron-right"
               size={20}
-              color={THEME.textTertiary}
+              color={theme.textTertiary}
             />
           </TouchableOpacity>
 
@@ -337,11 +348,11 @@ const ProfileScreen: React.FC = () => {
           >
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <View
-                style={[styles.iconBox, { backgroundColor: THEME.errorBg }]}
+                style={[styles.iconBox, { backgroundColor: theme.errorBg }]}
               >
-                <Feather name="log-out" size={18} color={THEME.error} />
+                <Feather name="log-out" size={18} color={theme.error} />
               </View>
-              <Text style={[styles.actionText, { color: THEME.error }]}>
+              <Text style={[styles.actionText, { color: theme.error }]}>
                 Log Out
               </Text>
             </View>
@@ -354,7 +365,7 @@ const ProfileScreen: React.FC = () => {
         <MaterialCommunityIcons
           name="lightning-bolt-circle"
           size={28}
-          color={THEME.textTertiary}
+          color={theme.textTertiary}
         />
         <Text style={styles.footerTitle}>STROMPULSE</Text>
         <Text style={styles.footerVersion}>Version 1.0.0 • Build 42</Text>
@@ -364,7 +375,7 @@ const ProfileScreen: React.FC = () => {
 };
 
 /**
- * Custom Notification Row Component using Feather Icons
+ * Custom Notification Row Component
  */
 interface NotificationRowProps {
   icon: keyof typeof Feather.glyphMap;
@@ -372,6 +383,7 @@ interface NotificationRowProps {
   value: boolean;
   onValueChange: (value: boolean) => void;
   borderTop?: boolean;
+  theme: any;
 }
 
 const NotificationRow: React.FC<NotificationRowProps> = ({
@@ -380,233 +392,238 @@ const NotificationRow: React.FC<NotificationRowProps> = ({
   value,
   onValueChange,
   borderTop,
+  theme,
 }) => {
+  const styles = getStyles(theme);
   return (
     <View style={[styles.notificationRow, borderTop && styles.borderTop]}>
       <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <View style={[styles.iconBox, { backgroundColor: THEME.background }]}>
-          <Feather name={icon} size={18} color={THEME.textPrimary} />
+        <View style={styles.iconBox}>
+          <Feather name={icon} size={18} color={theme.textPrimary} />
         </View>
         <Text style={styles.notificationText}>{label}</Text>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: THEME.border, true: THEME.success }}
+        trackColor={{ false: theme.border, true: theme.success }}
         thumbColor={"#FFFFFF"}
-        ios_backgroundColor={THEME.border}
+        ios_backgroundColor={theme.border}
       />
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: THEME.background,
-  },
-  center: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerContainer: {
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === "ios" ? 50 : 24,
-    paddingBottom: 12,
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: "800",
-    color: THEME.textPrimary,
-    letterSpacing: -0.5,
-  },
-  userCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.cardBg,
-    marginHorizontal: 20,
-    marginTop: 8,
-    padding: 20,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: THEME.border,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#64748B",
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-      },
-      android: { elevation: 4 },
-    }),
-  },
-  avatarContainer: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: THEME.textPrimary,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 16,
-  },
-  avatarText: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    color: THEME.textPrimary,
-    fontSize: 20,
-    fontWeight: "700",
-    letterSpacing: -0.2,
-  },
-  userEmail: {
-    color: THEME.textSecondary,
-    fontSize: 14,
-    fontWeight: "500",
-    marginTop: 2,
-  },
-  roleBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-    alignSelf: "flex-start",
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-  },
-  roleBadgeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  section: {
-    marginTop: 28,
-    paddingHorizontal: 20,
-  },
-  sectionTitle: {
-    color: THEME.textSecondary,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1,
-    marginBottom: 10,
-    marginLeft: 8,
-  },
-  cardBlock: {
-    backgroundColor: THEME.cardBg,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: THEME.border,
-    overflow: "hidden",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#64748B",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-      },
-      android: { elevation: 2 },
-    }),
-  },
-  borderTop: {
-    borderTopWidth: 1,
-    borderTopColor: THEME.border,
-  },
-  borderBottom: {
-    borderBottomWidth: 1,
-    borderBottomColor: THEME.border,
-  },
-  deviceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-  },
-  deviceRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  iconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  deviceTitle: {
-    color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  deviceSub: {
-    color: THEME.textSecondary,
-    fontSize: 13,
-    fontWeight: "500",
-    marginTop: 2,
-  },
-  statusPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  notificationRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-  },
-  notificationText: {
-    color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "600",
-    marginLeft: 12,
-  },
-  actionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-  },
-  actionText: {
-    color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "600",
-    marginLeft: 12,
-  },
-  footerContainer: {
-    alignItems: "center",
-    marginTop: 40,
-    opacity: 0.8,
-  },
-  footerTitle: {
-    color: THEME.textSecondary,
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 2,
-    marginTop: 8,
-  },
-  footerVersion: {
-    color: THEME.textTertiary,
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 4,
-  },
-});
+// Generate styles dynamically based on the injected theme
+const getStyles = (theme: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    center: {
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    headerContainer: {
+      paddingHorizontal: 24,
+      paddingTop: Platform.OS === "ios" ? 50 : 24,
+      paddingBottom: 12,
+    },
+    headerTitle: {
+      fontSize: 32,
+      fontWeight: "800",
+      color: theme.textPrimary,
+      letterSpacing: -0.5,
+    },
+    userCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: theme.cardBg,
+      marginHorizontal: 20,
+      marginTop: 8,
+      padding: 20,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: theme.border,
+      ...Platform.select({
+        ios: {
+          shadowColor: "#000", // Darkened shadow for better dark mode compatibility
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: 0.1,
+          shadowRadius: 12,
+        },
+        android: { elevation: 4 },
+      }),
+    },
+    avatarContainer: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      backgroundColor: theme.textPrimary,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 16,
+    },
+    avatarText: {
+      fontSize: 28,
+      fontWeight: "800",
+      color: theme.background, // Inverts based on theme
+    },
+    userInfo: {
+      flex: 1,
+    },
+    userName: {
+      color: theme.textPrimary,
+      fontSize: 20,
+      fontWeight: "700",
+      letterSpacing: -0.2,
+    },
+    userEmail: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "500",
+      marginTop: 2,
+    },
+    roleBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: 8,
+      alignSelf: "flex-start",
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 10,
+    },
+    roleBadgeText: {
+      fontSize: 12,
+      fontWeight: "700",
+      letterSpacing: 0.5,
+    },
+    section: {
+      marginTop: 28,
+      paddingHorizontal: 20,
+    },
+    sectionTitle: {
+      color: theme.textSecondary,
+      fontSize: 12,
+      fontWeight: "800",
+      letterSpacing: 1,
+      marginBottom: 10,
+      marginLeft: 8,
+    },
+    cardBlock: {
+      backgroundColor: theme.cardBg,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme.border,
+      overflow: "hidden",
+      ...Platform.select({
+        ios: {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+        },
+        android: { elevation: 2 },
+      }),
+    },
+    borderTop: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+    },
+    borderBottom: {
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    deviceRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: 16,
+    },
+    deviceRowLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    iconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: theme.background,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    deviceTitle: {
+      color: theme.textPrimary,
+      fontSize: 16,
+      fontWeight: "700",
+    },
+    deviceSub: {
+      color: theme.textSecondary,
+      fontSize: 13,
+      fontWeight: "500",
+      marginTop: 2,
+    },
+    statusPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 12,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      marginRight: 6,
+    },
+    statusPillText: {
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 0.5,
+    },
+    notificationRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: 16,
+    },
+    notificationText: {
+      color: theme.textPrimary,
+      fontSize: 16,
+      fontWeight: "600",
+      marginLeft: 12,
+    },
+    actionRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: 16,
+    },
+    actionText: {
+      color: theme.textPrimary,
+      fontSize: 16,
+      fontWeight: "600",
+      marginLeft: 12,
+    },
+    footerContainer: {
+      alignItems: "center",
+      marginTop: 40,
+      opacity: 0.8,
+    },
+    footerTitle: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "800",
+      letterSpacing: 2,
+      marginTop: 8,
+    },
+    footerVersion: {
+      color: theme.textTertiary,
+      fontSize: 12,
+      fontWeight: "500",
+      marginTop: 4,
+    },
+  });
 
 export default ProfileScreen;

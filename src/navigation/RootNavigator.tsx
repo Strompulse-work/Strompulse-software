@@ -1,152 +1,100 @@
-/**
- * Root Navigation Setup
- * Configures the bottom tab navigation structure
- */
-
 import React from "react";
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { MaterialIcons } from "@expo/vector-icons";
-import { RootStackParamList } from "../types";
-import { Colors } from "../styles/theme";
+import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
+import { useTheme } from "../theme/ThemeContext";
 
-// Import screens and navigators
+// Screens
 import FeedScreen from "../screens/FeedScreen";
 import MapScreen from "../screens/MapScreen";
 import CommunitiesScreen from "../screens/CommunitiesScreen";
+import CommunitiesNavigator from "./CommunitiesNavigator";
 import InsightsScreen from "../screens/InsightsScreen";
 import ProfileScreen from "../screens/ProfileScreen";
-import AuthNavigator from "./AuthNavigator";
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab = createBottomTabNavigator<RootStackParamList>();
+const Tab = createBottomTabNavigator();
 
-/**
- * Bottom Tab Navigator with 5 main screens
- */
-export const TabNavigator: React.FC = () => {
+const RootNavigator = () => {
+  const { theme, isDarkMode } = useTheme();
+
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: true,
-        headerStyle: {
-          backgroundColor: Colors.primary,
-        },
-        headerTintColor: "white",
-        headerTitleStyle: {
-          fontWeight: "600",
-        },
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.text.tertiary,
+      screenOptions={{
+        headerShown: false, // Hides the default top header since we built custom ones
         tabBarStyle: {
-          backgroundColor: Colors.background,
-          borderTopColor: Colors.border,
-          paddingBottom: 5,
-          paddingTop: 5,
+          backgroundColor: theme.cardBg, // This makes the background switch instantly
+          borderTopColor: theme.border, // Darkens the separator line in dark mode
+          borderTopWidth: 1,
+          height: 65,
+          paddingBottom: 10,
+          paddingTop: 8,
+          elevation: 0,
         },
+        // The active icon color (using the deep green success color)
+        tabBarActiveTintColor: theme.success,
+        // The inactive icon color
+        tabBarInactiveTintColor: theme.textSecondary,
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: "500",
+          fontSize: 11,
+          fontWeight: "700",
         },
-        tabBarIcon: ({ color, size }) => {
-          let iconName: keyof typeof MaterialIcons.glyphMap;
-
-          switch (route.name) {
-            case "(tabs)/feed":
-              iconName = "dashboard";
-              break;
-            case "(tabs)/map":
-              iconName = "map";
-              break;
-            case "(tabs)/communities":
-              iconName = "location-city";
-              break;
-            case "(tabs)/insights":
-              iconName = "analytics";
-              break;
-            case "(tabs)/profile":
-              iconName = "person";
-              break;
-            default:
-              iconName = "help";
-          }
-
-          return <MaterialIcons name={iconName} size={size} color={color} />;
-        },
-      })}
+      }}
     >
       <Tab.Screen
-        name="(tabs)/feed"
-        component={FeedScreen}
+        name="Communities"
+        component={CommunitiesNavigator}
         options={{
-          title: "Feed",
-          tabBarLabel: "Feed",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="city-variant-outline"
+              size={26}
+              color={color}
+            />
+          ),
         }}
       />
+
       <Tab.Screen
-        name="(tabs)/map"
+        name="Map"
         component={MapScreen}
         options={{
-          title: "Map",
-          tabBarLabel: "Map",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="map" size={22} color={color} />
+          ),
         }}
       />
+
       <Tab.Screen
-        name="(tabs)/communities"
-        component={CommunitiesScreen}
+        name="Feed"
+        component={FeedScreen}
         options={{
-          title: "Communities",
-          tabBarLabel: "Communities",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="view-dashboard"
+              size={24}
+              color={color}
+            />
+          ),
         }}
       />
       <Tab.Screen
-        name="(tabs)/insights"
+        name="Insights"
         component={InsightsScreen}
         options={{
-          title: "Insights",
-          tabBarLabel: "Insights",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="chart-bar" size={24} color={color} />
+          ),
         }}
       />
       <Tab.Screen
-        name="(tabs)/profile"
+        name="Profile"
         component={ProfileScreen}
         options={{
-          title: "Profile",
-          tabBarLabel: "Profile",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="user" size={24} color={color} />
+          ),
         }}
       />
     </Tab.Navigator>
-  );
-};
-
-/**
- * Root Stack Navigator - handles authentication flow
- */
-export const RootNavigator: React.FC<{ isSignedIn: boolean }> = ({
-  isSignedIn,
-}) => {
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: Colors.background },
-        animation: "none",
-      }}
-    >
-      {isSignedIn ? (
-        <Stack.Group>
-          <Stack.Screen name="(tabs)" component={TabNavigator} />
-        </Stack.Group>
-      ) : (
-        <Stack.Group
-          screenOptions={{
-            animation: "none",
-          }}
-        >
-          <Stack.Screen name="auth" component={AuthNavigator} />
-        </Stack.Group>
-      )}
-    </Stack.Navigator>
   );
 };
 
