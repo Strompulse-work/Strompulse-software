@@ -14,12 +14,18 @@
     "updates": {
       "fallbackToCacheTimeout": 0
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "bundleIdentifier": "com.ibadanpower.app"
     },
     "android": {
-      "package": "com.ibadanpower.app"
+      "package": "com.ibadanpower.app",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "plugins": [
       "expo-location",
@@ -27,6 +33,10 @@
       "expo-font",
       "expo-web-browser"
     ],
-    "scheme": "ibadanpower"
+    "extra": {
+      "eas": {
+        "projectId": "e9719fd5-2b71-4c9d-8591-57628005cfa2"
+      }
+    }
   }
 }
