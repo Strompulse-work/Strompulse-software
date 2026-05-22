@@ -256,10 +256,10 @@ const MapScreen: React.FC = () => {
   }, [devices.length]);
 
   // Map Real-time Status to premium colors
-  const getDeviceColors = (status: string) => {
-    if (status === "ON")
+  const getDeviceColors = (status: number) => {
+    if (status === 1)
       return { border: theme.success, fill: theme.successBg };
-    if (status === "OFF") return { border: theme.error, fill: theme.errorBg };
+    if (status === 0) return { border: theme.error, fill: theme.errorBg };
     return { border: theme.warning, fill: theme.warningBg };
   };
 
@@ -367,7 +367,7 @@ const MapScreen: React.FC = () => {
                   styles.statusPill,
                   {
                     backgroundColor:
-                      selectedDevice.status === "ON"
+                      selectedDevice.status === 1
                         ? theme.successBg
                         : theme.errorBg,
                   },
@@ -378,7 +378,7 @@ const MapScreen: React.FC = () => {
                     styles.statusDot,
                     {
                       backgroundColor:
-                        selectedDevice.status === "ON"
+                        selectedDevice.status === 1
                           ? theme.success
                           : theme.error,
                     },
@@ -389,13 +389,13 @@ const MapScreen: React.FC = () => {
                     styles.statusPillText,
                     {
                       color:
-                        selectedDevice.status === "ON"
+                        selectedDevice.status === 1
                           ? theme.success
                           : theme.error,
                     },
                   ]}
                 >
-                  {selectedDevice.status === "ON" ? "RESTORED" : "OUTAGE"}
+                  {selectedDevice.status === 1 ? "RESTORED" : "OUTAGE"}
                 </Text>
               </View>
             </View>
@@ -413,7 +413,7 @@ const MapScreen: React.FC = () => {
               styles.actionButton,
               {
                 backgroundColor:
-                  selectedDevice.status === "ON" ? theme.success : theme.error,
+                  selectedDevice.status === 1 ? theme.success : theme.error,
               },
             ]}
             activeOpacity={0.8}

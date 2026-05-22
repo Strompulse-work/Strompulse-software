@@ -3,7 +3,7 @@
  * Production-grade TypeScript interfaces for all data models
  */
 
-export type PowerStatus = "ON" | "OFF" | "OFFLINE";
+export type PowerStatus = 1 | 0;
 export type UserRole = "user" | "community_admin" | "installer";
 
 // ============ AUTHENTICATION ============
@@ -27,14 +27,15 @@ export interface AuthSession {
 // ============ DEVICES ============
 export interface Device {
   id: string;
-  device_id: string; // IoT device identifier
-  owner_user_id: string;
+  device_id: string; // IoT device identifier (e.g., "STROM001")
+  owner_user_id: string | null; 
   community_id?: string;
   address: string;
   latitude: number;
   longitude: number;
-  status: PowerStatus;
-  last_seen: string; // ISO timestamp
+  voltage: number; // NEW: Real-time voltage from ZMPT101B sensor
+  status: PowerStatus; // NEW: Now expects 1 (ON) or 0 (OFF)
+  last_seen: string; // ISO timestamp (e.g., "2026-05-18T16:56:07Z")
   current_event_id?: string;
   metadata?: {
     device_type?: string;
@@ -49,7 +50,7 @@ export interface Device {
 export interface PowerEvent {
   id: string;
   device_id: string;
-  status: "ON" | "OFF";
+  status: PowerStatus;
   timestamp: string; // ISO timestamp
   duration_seconds?: number; // Calculate duration from next event
   created_at: string;

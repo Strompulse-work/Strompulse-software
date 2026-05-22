@@ -1,7 +1,7 @@
 /**
  * Welcome Screen
- * Matches Aspen App Reference: Full-screen background, cursive top header,
- * left-aligned bottom typography, and a single wide button.
+ * Clean white background with centered logo, left-aligned typography,
+ * and a single wide button to match the new mockup.
  */
 
 import React from "react";
@@ -10,31 +10,24 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ImageBackground,
-  Dimensions,
   SafeAreaView,
   StatusBar,
+  Image,
+  Platform,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { AuthStackParamList } from "../navigation/AuthNavigator";
-import { useFonts } from "expo-font";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Welcome">;
 
-const { width, height } = Dimensions.get("window");
-
-// Exact SRD Dark Theme Colors
+// Updated Theme Colors for the Light UI
 const THEME = {
-  success: "#00E676", // Bright Green for the main button
-  textPrimary: "#FFFFFF",
+  success: "#10C55B", // Exact green from your mockup button
+  textPrimary: "#1A1A1A", // Dark charcoal for readability on white
+  background: "#FFFFFF",
 };
 
 const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
-  // Load ONLY the custom cursive font
-  const [fontsLoaded] = useFonts({
-    Hiatus: require("../../assets/fonts/Hiatus.ttf"),
-  });
-
   const handleGetStarted = () => {
     navigation.navigate("Signup");
   };
@@ -43,35 +36,26 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
     navigation.navigate("Login");
   };
 
-  // Wait for fonts to load before rendering to prevent visual glitches
-  if (!fontsLoaded) {
-    return <View style={{ flex: 1, backgroundColor: "#12141D" }} />;
-  }
-
   return (
-    <ImageBackground
-      source={require("../../assets/images/welcome-bg.png")}
-      style={styles.backgroundImage}
-      resizeMode="cover"
-    >
+    <View style={styles.container}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content" // Dark icons for the white background
         backgroundColor="transparent"
         translucent
       />
 
-      {/* Dark gradient/overlay so white text is readable over any background */}
-      <View style={styles.overlay} />
-
       <SafeAreaView style={styles.safeArea}>
-        {/* TOP SECTION: Massive Cursive Title (Like "Aspen") */}
-        <View style={styles.topSection}>
-          <Text style={styles.cursiveTitle}>Strompulse</Text>
+        {/* CENTER SECTION: Sized-down Logo */}
+        <View style={styles.logoContainer}>
+          <Image
+            source={require("../../assets/images/strompulselogo.png")} // Make sure the image is in this folder!
+            style={styles.logo}
+          />
         </View>
 
         {/* BOTTOM SECTION: Left-aligned text & button */}
         <View style={styles.bottomSection}>
-          <Text style={styles.subTextLight}>monitor your</Text>
+          <Text style={styles.subTextLight}>Monitor your</Text>
           <Text style={styles.subTextBold}>Real-Time Grid</Text>
 
           <TouchableOpacity
@@ -85,74 +69,71 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
           {/* Minimalist Login Link */}
           <TouchableOpacity onPress={handleLogIn} style={styles.loginLink}>
             <Text style={styles.loginText}>
-              Already have an account? Log in
+              Already have an account? <Text style={{ fontWeight: "bold" }}>Log in</Text>
             </Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    </ImageBackground>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  backgroundImage: {
+  container: {
     flex: 1,
-    width: width,
-    height: height,
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.35)", // Darkens the image slightly for text contrast
+    backgroundColor: THEME.background,
   },
   safeArea: {
     flex: 1,
-    justifyContent: "space-between", // Pushes title up, button down
+    justifyContent: "space-between",
   },
-  topSection: {
+  logoContainer: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
-    marginTop: height * 0.1, // Pushes it down a bit from the very top edge
   },
-  cursiveTitle: {
-    fontFamily: "Hiatus",
-    fontSize: 90, // Massive size to match the "Aspen" script
-    color: THEME.textPrimary,
-    letterSpacing: 2,
+  logo: {
+    width: 180, // Restricts the size so it is not overwhelmingly large
+    height: 180,
+    resizeMode: "contain",
   },
   bottomSection: {
     paddingHorizontal: 32,
-    paddingBottom: 40,
-    alignItems: "flex-start", // Left-aligns the text like the reference
+    paddingBottom: Platform.OS === "ios" ? 40 : 32, 
+    alignItems: "flex-start", 
   },
   subTextLight: {
-    fontSize: 24,
+    fontSize: 26,
     color: THEME.textPrimary,
-    marginBottom: 4,
-    opacity: 0.9,
+    fontWeight: "600",
+    marginBottom: -2, 
   },
   subTextBold: {
-    fontSize: 36,
+    fontSize: 38,
     color: THEME.textPrimary,
-    fontWeight: "bold",
+    fontWeight: "900", // Heavy bold to match the mockup
     marginBottom: 32,
+    letterSpacing: -0.5,
   },
   primaryButton: {
     backgroundColor: THEME.success,
     width: "100%",
     paddingVertical: 18,
-    borderRadius: 16, // Smooth rounded corners
+    borderRadius: 16, 
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
+    // Subtle shadow for the button
     shadowColor: THEME.success,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 4,
   },
   primaryButtonText: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#000000", // Dark text on the bright button
+    fontWeight: "700",
+    color: "#FFFFFF", // White text on the green button
   },
   loginLink: {
     alignSelf: "center",

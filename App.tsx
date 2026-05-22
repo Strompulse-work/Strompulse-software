@@ -15,26 +15,35 @@ import { ThemeProvider } from "./src/theme/ThemeContext";
 import RealtimeService from "./src/services/realtimeService";
 import RootNavigator from "./src/navigation/RootNavigator";
 import { Colors } from "./src/styles/theme";
+import CustomSplashScreen from "./src/screens/CustomSplashScreen";
 
 export default function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Prevent splash screen from auto-hiding
+    // Prevent the native splash screen from auto-hiding immediately
     SplashScreen.preventAutoHideAsync();
 
-    // Check if user is authenticated on app startup
     const bootstrapAsync = async () => {
       try {
-        const isAuthenticated = await AuthService.isAuthenticated();
+        // 1. Instantly hide the native Expo splash screen so our Custom BYTES screen is visible
+        await SplashScreen.hideAsync();
+
+        // 2. Run the Auth check AND a 2-second timer at the exact same time.
+        // This guarantees the splash screen stays visible for exactly 2 seconds, 
+        // mimicking the professional WhatsApp/Instagram loading flow.
+        const [isAuthenticated] = await Promise.all([
+          AuthService.isAuthenticated(),
+          new Promise((resolve) => setTimeout(resolve, 2000)), 
+        ]);
+
         setIsSignedIn(isAuthenticated);
       } catch (err) {
         console.error("Error checking authentication:", err);
       } finally {
+        // 3. After the 2 seconds are up, drop the splash screen and reveal the app!
         setIsLoading(false);
-        // Hide splash screen after auth check
-        await SplashScreen.hideAsync();
       }
     };
 
@@ -44,26 +53,27 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Update signed-in state based on auth state changes
       setIsSignedIn(!!session?.access_token);
 
-      // Handle different auth events
       if (event === "SIGNED_IN") {
         console.log("User signed in");
       } else if (event === "SIGNED_OUT") {
         console.log("User signed out");
-      } else if (event === "TOKEN_REFRESHED") {
-        console.log("Token refreshed");
       }
     });
 
-    // Cleanup real-time subscriptions on app unmount
     return () => {
       subscription?.unsubscribe();
       RealtimeService.unsubscribeAll();
     };
   }, []);
 
+  // Show the custom splash screen while the 2-second timer and auth check are running
+  if (isLoading) {
+    return <CustomSplashScreen />;
+  }
+
+  // Once loading is done, render the real app
   return (
     <ThemeProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>

@@ -1,3 +1,8 @@
+/**
+ * Verify Screen
+ * Clean Light Theme: Solid white background, light gray inputs, heavy dark headers.
+ */
+
 import React, { useState } from "react";
 import {
   View,
@@ -10,37 +15,32 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
-  ImageBackground,
   StatusBar,
-  Dimensions,
+  Image,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { MaterialIcons } from "@expo/vector-icons";
 import { AuthStackParamList } from "../navigation/AuthNavigator";
 import AuthService from "../services/authService";
-import { useFonts } from "expo-font";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Verify">;
 
-const { width, height } = Dimensions.get("window");
-
+// Updated Theme Colors for Light UI
 const THEME = {
-  success: "#00E676",
-  textPrimary: "#FFFFFF",
-  textSecondary: "rgba(255, 255, 255, 0.7)",
-  glassBg: "rgba(18, 20, 29, 0.75)",
-  glassBorder: "rgba(255, 255, 255, 0.1)",
+  success: "#10C55B",
+  textPrimary: "#1A1A1A",
+  textSecondary: "#666666",
+  background: "#FFFFFF",
+  inputBg: "#F7F7F9",
+  border: "#E5E5EA",
+  error: "#FF3B30",
 };
 
 const VerifyScreen: React.FC<Props> = ({ route, navigation }) => {
-  // We will pass the phone/email from the previous screen
+  // We pass the phone/email from the previous screen
   const { identifier } = route.params;
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const [fontsLoaded] = useFonts({
-    Hiatus: require("../../assets/fonts/Hiatus.ttf"),
-  });
 
   const handleVerify = async () => {
     if (code.length !== 6) {
@@ -58,7 +58,7 @@ const VerifyScreen: React.FC<Props> = ({ route, navigation }) => {
         );
       } else {
         Alert.alert("Success!", "Your account is verified.", [
-          { text: "Continue" }, // Your AuthNavigator will auto-redirect them if session is set!
+          { text: "Continue" }, // AuthNavigator will auto-redirect if session is set!
         ]);
       }
     } catch (error) {
@@ -68,43 +68,42 @@ const VerifyScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-  if (!fontsLoaded)
-    return <View style={{ flex: 1, backgroundColor: "#12141D" }} />;
-
   return (
-    <ImageBackground
-      source={require("../../assets/images/welcome-bg.png")}
-      style={styles.backgroundImage}
-      resizeMode="cover"
-    >
+    <View style={styles.container}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor="transparent"
         translucent
       />
-      <View style={styles.overlay} />
 
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.keyboardAvoidingView}
         >
+          {/* UPDATED HEADER: Houses back button and the logo */}
           <View style={styles.header}>
             <TouchableOpacity
               onPress={() => navigation.goBack()}
               style={styles.backButton}
+              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
               <MaterialIcons
                 name="arrow-back-ios"
-                size={22}
+                size={20}
                 color={THEME.textPrimary}
               />
             </TouchableOpacity>
+
+            <Image 
+              source={require("../../assets/images/strompulselogo.png")} 
+              style={styles.headerLogo} 
+            />
           </View>
 
           <View style={styles.contentContainer}>
             <View style={styles.titleContainer}>
-              <Text style={styles.cursiveTitle}>Verify</Text>
+              <Text style={styles.title}>Verify</Text>
               <Text style={styles.subtitle}>
                 Enter the 6-digit code sent to
               </Text>
@@ -139,9 +138,10 @@ const VerifyScreen: React.FC<Props> = ({ route, navigation }) => {
               ]}
               onPress={handleVerify}
               disabled={code.length !== 6 || loading}
+              activeOpacity={0.8}
             >
               {loading ? (
-                <ActivityIndicator size="small" color="#000000" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text style={styles.verifyButtonText}>Verify Account</Text>
               )}
@@ -149,27 +149,38 @@ const VerifyScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </ImageBackground>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  backgroundImage: { flex: 1, width: width, height: height },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
   },
   safeArea: { flex: 1 },
   keyboardAvoidingView: { flex: 1 },
-  header: { paddingHorizontal: 24, paddingTop: 20 },
+  header: { 
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 24, 
+    paddingTop: Platform.OS === "ios" ? 10 : 30, 
+    paddingBottom: 10 
+  },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: THEME.inputBg,
     justifyContent: "center",
     alignItems: "center",
     paddingLeft: 6,
+  },
+  headerLogo: {
+    width: 44, 
+    height: 44,
+    resizeMode: "contain",
   },
   contentContainer: {
     flex: 1,
@@ -178,15 +189,15 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   titleContainer: { marginBottom: 40, alignItems: "flex-start" },
-  cursiveTitle: {
-    fontFamily: "Hiatus",
-    fontSize: 72,
+  title: {
+    fontSize: 38,
+    fontWeight: "900",
     color: THEME.textPrimary,
-    letterSpacing: 1,
-    marginBottom: -10,
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: 16,
     color: THEME.textSecondary,
     fontWeight: "500",
     marginTop: 10,
@@ -201,18 +212,18 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: THEME.glassBg,
+    backgroundColor: THEME.inputBg,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: THEME.glassBorder,
+    borderColor: THEME.border,
     paddingHorizontal: 16,
     paddingVertical: 18,
   },
   inputIcon: { marginRight: 12 },
   input: {
     flex: 1,
-    fontSize: 24,
-    letterSpacing: 8,
+    fontSize: 28, // Slightly larger for code emphasis
+    letterSpacing: 10,
     fontWeight: "bold",
     color: THEME.textPrimary,
     padding: 0,
@@ -224,9 +235,23 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
+    shadowColor: THEME.success,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  verifyButtonDisabled: { backgroundColor: "rgba(0, 230, 118, 0.4)" },
-  verifyButtonText: { fontSize: 18, fontWeight: "bold", color: "#000000" },
+  verifyButtonDisabled: {
+    backgroundColor: "#A7F3D0",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  verifyButtonText: { 
+    fontSize: 18, 
+    fontWeight: "bold", 
+    color: "#FFFFFF" 
+  },
 });
 
 export default VerifyScreen;

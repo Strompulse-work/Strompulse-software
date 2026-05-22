@@ -1,6 +1,6 @@
 /**
  * Login Screen
- * Modern Cinematic Theme: Full-bleed background, glassy inputs, cursive header
+ * Clean Light Theme: Solid white background, light gray inputs, heavy dark headers.
  * Supports Email, Phone (Auto E.164 Formatting), and Google OAuth
  */
 
@@ -17,26 +17,24 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
-  ImageBackground,
   StatusBar,
-  Dimensions,
+  Image,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { MaterialIcons, AntDesign } from "@expo/vector-icons";
 import { AuthStackParamList } from "../navigation/AuthNavigator";
 import AuthService from "../services/authService";
-import { useFonts } from "expo-font";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Login">;
 
-const { width, height } = Dimensions.get("window");
-
+// Updated Theme Colors for Light UI (Matching Welcome & Signup)
 const THEME = {
-  success: "#00E676",
-  textPrimary: "#FFFFFF",
-  textSecondary: "rgba(255, 255, 255, 0.7)",
-  glassBg: "rgba(18, 20, 29, 0.75)",
-  glassBorder: "rgba(255, 255, 255, 0.1)",
+  success: "#10C55B",
+  textPrimary: "#1A1A1A",
+  textSecondary: "#666666",
+  background: "#FFFFFF",
+  inputBg: "#F7F7F9",
+  border: "#E5E5EA",
   error: "#FF3B30",
 };
 
@@ -56,10 +54,6 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-
-  const [fontsLoaded] = useFonts({
-    Hiatus: require("../../assets/fonts/Hiatus.ttf"),
-  });
 
   const isPhone = /^\d+$/.test(identifier.replace(/[\s\-\+]/g, ""));
 
@@ -137,21 +131,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
   const isFormValid = identifier.trim() && password;
 
-  if (!fontsLoaded)
-    return <View style={{ flex: 1, backgroundColor: "#12141D" }} />;
-
   return (
-    <ImageBackground
-      source={require("../../assets/images/welcome-bg.png")}
-      style={styles.backgroundImage}
-      resizeMode="cover"
-    >
+    <View style={styles.container}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor="transparent"
         translucent
       />
-      <View style={styles.overlay} />
 
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
@@ -163,6 +149,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             showsVerticalScrollIndicator={false}
             bounces={false}
           >
+            {/* UPDATED HEADER: Now houses the back button and the logo */}
             <View style={styles.header}>
               <TouchableOpacity
                 onPress={() => navigation.navigate("Welcome")}
@@ -171,15 +158,20 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               >
                 <MaterialIcons
                   name="arrow-back-ios"
-                  size={22}
+                  size={20}
                   color={THEME.textPrimary}
                 />
               </TouchableOpacity>
+              
+              <Image 
+                source={require("../../assets/images/strompulselogo.png")} 
+                style={styles.headerLogo} 
+              />
             </View>
 
             <View style={styles.contentContainer}>
               <View style={styles.titleContainer}>
-                <Text style={styles.cursiveTitle}>Welcome Back</Text>
+                <Text style={styles.title}>Welcome Back</Text>
                 <Text style={styles.subtitle}>
                   Sign in to access your grid dashboard.
                 </Text>
@@ -255,7 +247,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
                 activeOpacity={0.8}
               >
                 {loading ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <Text style={styles.loginButtonText}>Sign In</Text>
                 )}
@@ -274,13 +266,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
                 activeOpacity={0.8}
               >
                 {googleLoading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={THEME.textPrimary} />
                 ) : (
                   <>
                     <AntDesign
                       name="google"
                       size={20}
-                      color="#FFFFFF"
+                      color={THEME.textPrimary}
                       style={{ marginRight: 12 }}
                     />
                     <Text style={styles.googleButtonText}>
@@ -303,28 +295,39 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </ImageBackground>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  backgroundImage: { flex: 1, width: width, height: height },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
   },
   safeArea: { flex: 1 },
   keyboardAvoidingView: { flex: 1 },
   scrollContainer: { flexGrow: 1 },
-  header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 10 },
+  header: { 
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 24, 
+    paddingTop: Platform.OS === "ios" ? 10 : 30, 
+    paddingBottom: 10 
+  },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: THEME.inputBg,
     justifyContent: "center",
     alignItems: "center",
-    paddingLeft: 6,
+    paddingLeft: 6, 
+  },
+  headerLogo: {
+    width: 44, 
+    height: 44,
+    resizeMode: "contain",
   },
   contentContainer: {
     flex: 1,
@@ -333,22 +336,22 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   titleContainer: { marginBottom: 40, alignItems: "flex-start" },
-  cursiveTitle: {
-    fontFamily: "Hiatus",
-    fontSize: 72,
+  title: {
+    fontSize: 38,
+    fontWeight: "900",
     color: THEME.textPrimary,
-    letterSpacing: 1,
-    marginBottom: -10,
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
-  subtitle: { fontSize: 15, color: THEME.textSecondary, fontWeight: "500" },
+  subtitle: { fontSize: 16, color: THEME.textSecondary, fontWeight: "500" },
   formContainer: { gap: 16, marginBottom: 24 },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: THEME.glassBg,
+    backgroundColor: THEME.inputBg,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: THEME.glassBorder,
+    borderColor: THEME.border,
     paddingHorizontal: 16,
     paddingVertical: 18,
   },
@@ -365,7 +368,7 @@ const styles = StyleSheet.create({
   forgotPasswordText: {
     fontSize: 13,
     color: THEME.textSecondary,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   loginButton: {
     backgroundColor: THEME.success,
@@ -378,20 +381,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 4,
   },
   loginButtonDisabled: {
-    backgroundColor: "rgba(0, 230, 118, 0.4)",
+    backgroundColor: "#A7F3D0",
     shadowOpacity: 0,
     elevation: 0,
   },
-  loginButtonText: { fontSize: 18, fontWeight: "bold", color: "#000000" },
+  loginButtonText: { fontSize: 18, fontWeight: "bold", color: "#FFFFFF" },
   dividerContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginVertical: 24,
   },
-  dividerLine: { flex: 1, height: 1, backgroundColor: THEME.glassBorder },
+  dividerLine: { flex: 1, height: 1, backgroundColor: THEME.border },
   dividerText: {
     color: THEME.textSecondary,
     paddingHorizontal: 16,
@@ -399,9 +402,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   googleButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: THEME.background,
     borderWidth: 1,
-    borderColor: THEME.glassBorder,
+    borderColor: THEME.border,
     width: "100%",
     paddingVertical: 18,
     borderRadius: 16,

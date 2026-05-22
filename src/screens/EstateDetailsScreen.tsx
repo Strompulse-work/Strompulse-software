@@ -19,7 +19,6 @@ const EstateDetailsScreen = ({ route, navigation }: any) => {
 
   const [userId, setUserId] = useState<string | null>(null);
 
-  // 1. Fetch User ID so the database actually returns our data!
   useEffect(() => {
     const getUser = async () => {
       const session = await AuthService.getCurrentSession();
@@ -30,19 +29,18 @@ const EstateDetailsScreen = ({ route, navigation }: any) => {
 
   const { devices } = useUserDevices(userId || "");
 
-  // 2. Find the real database device for this specific community
   const communityDevice = devices.find((d) => d.community_id === community.id);
-  const isActuallyOnline = communityDevice?.status === "ON";
+  // UPDATED: Now strictly checks for the number 1 instead of the string "ON"
+  const isActuallyOnline = communityDevice?.status === 1; 
 
-  // 3. Build the 4 exact zones to match your reference image perfectly!
-  // We use the real database status to power Zones A, B, and C so it responds to your simulator.
+  // UPDATED: All mock zones now strictly use 1 (Live) and 0 (Offline) to match hardware
   const estateZones = [
     {
       id: "zone-A",
       letter: "A",
       dir: "NW",
       desc: "Roads 1 - 4, Gate entrance",
-      status: isActuallyOnline ? "ON" : "OFF",
+      status: isActuallyOnline ? 1 : 0, 
       uptime: isActuallyOnline ? "100%" : "0%",
       time: isActuallyOnline ? "Since 6h ago" : "Out 1h 20m",
     },
@@ -51,7 +49,7 @@ const EstateDetailsScreen = ({ route, navigation }: any) => {
       letter: "B",
       dir: "NE",
       desc: "Roads 5 - 9, Club house axis",
-      status: isActuallyOnline ? "ON" : "OFF",
+      status: isActuallyOnline ? 1 : 0,
       uptime: isActuallyOnline ? "100%" : "0%",
       time: isActuallyOnline ? "Since 8h ago" : "Out 1h 20m",
     },
@@ -60,27 +58,27 @@ const EstateDetailsScreen = ({ route, navigation }: any) => {
       letter: "C",
       dir: "SW",
       desc: "Roads 10 - 13, Back estate",
-      status: isActuallyOnline ? "PARTIAL" : "OFF", // Matches the yellow partial from your image
-      uptime: isActuallyOnline ? "67%" : "0%",
-      time: isActuallyOnline ? "Out 2h 14m" : "Out 1h 20m",
+      status: 0, // Forced offline for demo contrast
+      uptime: "0%",
+      time: "Out 2h 14m",
     },
     {
       id: "zone-D",
       letter: "D",
       dir: "SE",
       desc: "Roads 14 - 18, Extension",
-      status: "OFF", // Forced offline to match the red offline zone in your image
+      status: 0, // Forced offline for demo contrast
       uptime: "0%",
       time: "Out 12h",
     },
   ];
 
-  // Helper to get exact colors based on status
-  const getZoneTheme = (status: string) => {
-    if (status === "ON")
+  // UPDATED: Parameter changed from string to number
+  const getZoneTheme = (status: number) => {
+    if (status === 1)
       return { color: theme.success, text: "Live", badgeText: "LIVE" };
-    if (status === "PARTIAL")
-      return { color: theme.warning, text: "Partial", badgeText: "PARTIAL" };
+    
+    // Everything else (0) is Offline
     return { color: theme.error, text: "Offline", badgeText: "OFFLINE" };
   };
 
@@ -125,7 +123,7 @@ const EstateDetailsScreen = ({ route, navigation }: any) => {
                 <View style={styles.dirBadge}>
                   <Feather
                     name={
-                      zone.status === "OFF"
+                      zone.status === 0 // UPDATED: Checks for 0 instead of "OFF"
                         ? "arrow-down-right"
                         : "arrow-up-right"
                     }
@@ -219,7 +217,7 @@ const EstateDetailsScreen = ({ route, navigation }: any) => {
                     styles.progressBar,
                     {
                       backgroundColor:
-                        zone.status === "ON" ? zTheme.color : theme.border,
+                        zone.status === 1 ? zTheme.color : theme.border, // UPDATED: Checks for 1 instead of "ON"
                     },
                   ]}
                 />

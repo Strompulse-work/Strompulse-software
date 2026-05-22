@@ -1,6 +1,7 @@
 /**
  * Feed Screen - Main Dashboard
  * Dynamically switches between Light and Dark mode using ThemeContext.
+ * Features auto-ticking relative timestamps and active sorting.
  */
 
 import React, { useEffect, useState } from "react";
@@ -23,17 +24,28 @@ import { Loading, ErrorMessage } from "../components/UIComponents";
 
 const { width } = Dimensions.get("window");
 
-// Formats "mins ago"
-const getRelativeTime = (dateString: string) => {
-  const now = new Date();
-  const past = new Date(dateString);
-  const diffInMinutes = Math.floor((now.getTime() - past.getTime()) / 60000);
+// Advanced Relative Time formatter that relies on an actively ticking 'now' state
+const getRelativeTime = (dateString: string, nowTime: number) => {
+  if (!dateString) return "Unknown";
+  
+  const past = new Date(dateString).getTime();
+  if (isNaN(past)) return "Unknown";
+
+  const diffInMinutes = Math.floor((nowTime - past) / 60000);
 
   if (diffInMinutes < 1) return "Just now";
   if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
   const diffInHours = Math.floor(diffInMinutes / 60);
   if (diffInHours < 24) return `${diffInHours}h ago`;
-  return "1d ago";
+  const diffInDays = Math.floor(diffInHours / 24);
+  return `${diffInDays}d ago`;
+};
+
+// Safely grabs the most recent timestamp to sort by
+const getLatestTimestamp = (device: any) => {
+  const lastSeen = new Date(device.last_seen || 0).getTime();
+  const updatedAt = new Date(device.updated_at || 0).getTime();
+  return Math.max(lastSeen, updatedAt);
 };
 
 // Gets greeting based on device time
@@ -46,17 +58,25 @@ const getGreeting = () => {
 
 const FeedScreen: React.FC = () => {
   const { theme, isDarkMode } = useTheme();
-  const styles = getStyles(theme); // Generate styles dynamically
+  const styles = getStyles(theme); 
 
   const [user, setUser] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
+  // 1. Fetch user session
   useEffect(() => {
     const getUser = async () => {
       const session = await AuthService.getCurrentSession();
       if (session) setUser(session.user);
     };
     getUser();
+  }, []);
+
+  // 2. Ticking Clock: Forces the UI to re-render every 60 seconds so "1m ago" stays accurate
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
+    return () => clearInterval(timer);
   }, []);
 
   const {
@@ -86,8 +106,9 @@ const FeedScreen: React.FC = () => {
     );
   }
 
+  // Actively sort items so the most recently updated device jumps to the top
   const feedItems = [...devices].sort(
-    (a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
+    (a, b) => getLatestTimestamp(b) - getLatestTimestamp(a)
   );
 
   return (
@@ -149,7 +170,7 @@ const FeedScreen: React.FC = () => {
               tintColor={theme.success}
             />
           }
-          renderItem={({ item }) => <FeedCard device={item} />}
+          renderItem={({ item }) => <FeedCard device={item} currentTime={currentTime} />}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -160,10 +181,13 @@ const FeedScreen: React.FC = () => {
 /**
  * Advanced Widget Card
  */
-const FeedCard: React.FC<{ device: any }> = ({ device }) => {
+const FeedCard: React.FC<{ device: any; currentTime: number }> = ({ device, currentTime }) => {
   const { theme } = useTheme();
   const styles = getStyles(theme);
-  const isOnline = device.status === "ON";
+  
+  // Checking for the integer 1 to match your real hardware logic
+  const isOnline = device.status === 1;
+  const displayTime = device.last_seen || device.updated_at;
 
   // Configuration mapping based on IoT status and active theme
   const config = isOnline
@@ -196,7 +220,7 @@ const FeedCard: React.FC<{ device: any }> = ({ device }) => {
           </Text>
         </View>
         <Text style={styles.timestampText}>
-          {getRelativeTime(device.last_seen)}
+          {getRelativeTime(displayTime, currentTime)}
         </Text>
       </View>
 
@@ -220,7 +244,10 @@ const FeedCard: React.FC<{ device: any }> = ({ device }) => {
             color={theme.textSecondary}
             style={{ marginRight: 4 }}
           />
-          <Text style={styles.badgeText}>98% Uptime</Text>
+          <Text style={styles.badgeText}>
+            {/* Wires up dynamic uptime. Defaults to 100% if the database doesn't supply it yet */}
+            {device.uptime !== undefined ? `${device.uptime}%` : "100%"} Uptime
+          </Text>
         </View>
       </View>
     </TouchableOpacity>

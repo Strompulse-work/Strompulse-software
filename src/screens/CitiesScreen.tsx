@@ -31,7 +31,7 @@ const CitiesScreen = ({ navigation }: any) => {
       />
 
       <View style={styles.headerContainer}>
-        <Text style={styles.screenStep}>SCREEN 1 — CITIES</Text>
+        
         <Text style={styles.headerTitle}>Communities</Text>
       </View>
 

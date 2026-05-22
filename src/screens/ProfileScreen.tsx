@@ -19,12 +19,12 @@ import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useUserDevices } from "../hooks/useDeviceData";
 import { useTheme } from "../theme/ThemeContext";
-import { Loading, ErrorMessage } from "../components/UIComponents";
+import { Loading } from "../components/UIComponents";
 import { User } from "../types";
 
-const ProfileScreen: React.FC = () => {
+const ProfileScreen = () => {
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
-  const styles = getStyles(theme); // Generate styles dynamically based on the active theme
+  const styles = getStyles(theme);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +68,8 @@ const ProfileScreen: React.FC = () => {
             if (!result.success) {
               Alert.alert("Error", result.error || "Failed to logout");
             }
+            // NO NAVIGATION COMMANDS HERE. 
+            // Supabase updates the state, and RootNavigator handles the rest automatically!
           },
         },
       ],
@@ -102,12 +104,10 @@ const ProfileScreen: React.FC = () => {
     );
   }
 
+  // If the user logs out, we just return null. 
+  // RootNavigator will instantly unmount this screen and show the Welcome screen!
   if (!user) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <ErrorMessage message="Unable to load user profile." />
-      </View>
-    );
+    return null;
   }
 
   return (
@@ -184,13 +184,13 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.cardBlock}>
           {devices && devices.length > 0 ? (
             devices.map((device, index) => {
-              const isOnline = device.status === "ON";
+              const isOnline = device.status === 1;
               return (
                 <View
                   key={device.id}
                   style={[
                     styles.deviceRow,
-                    index !== devices.length - 1 && styles.borderBottom,
+                    index !== devices.length - 1 ? styles.borderBottom : undefined,
                   ]}
                 >
                   <View style={styles.deviceRowLeft}>
@@ -245,7 +245,7 @@ const ProfileScreen: React.FC = () => {
           ) : (
             <View style={{ padding: 24, alignItems: "center" }}>
               <MaterialCommunityIcons
-                name="hardware-chip"
+                name="microchip" // <-- FIXED: This perfectly matches the MaterialCommunityIcons dictionary!
                 size={40}
                 color={theme.border}
               />
@@ -378,7 +378,7 @@ const ProfileScreen: React.FC = () => {
  * Custom Notification Row Component
  */
 interface NotificationRowProps {
-  icon: keyof typeof Feather.glyphMap;
+  icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
   value: boolean;
   onValueChange: (value: boolean) => void;
@@ -396,7 +396,7 @@ const NotificationRow: React.FC<NotificationRowProps> = ({
 }) => {
   const styles = getStyles(theme);
   return (
-    <View style={[styles.notificationRow, borderTop && styles.borderTop]}>
+    <View style={[styles.notificationRow, borderTop ? styles.borderTop : undefined]}>
       <View style={{ flexDirection: "row", alignItems: "center" }}>
         <View style={styles.iconBox}>
           <Feather name={icon} size={18} color={theme.textPrimary} />
@@ -448,7 +448,7 @@ const getStyles = (theme: any) =>
       borderColor: theme.border,
       ...Platform.select({
         ios: {
-          shadowColor: "#000", // Darkened shadow for better dark mode compatibility
+          shadowColor: "#000",
           shadowOffset: { width: 0, height: 6 },
           shadowOpacity: 0.1,
           shadowRadius: 12,
@@ -468,7 +468,7 @@ const getStyles = (theme: any) =>
     avatarText: {
       fontSize: 28,
       fontWeight: "800",
-      color: theme.background, // Inverts based on theme
+      color: theme.background,
     },
     userInfo: {
       flex: 1,
