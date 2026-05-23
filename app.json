@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "Strompulse",
-    "slug": "strompulse",
+    "slug": "ibadan-power",
     "scheme": "strompulse",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/images/strompulselogo.png",
     "splash": {
       "image": "./assets/images/strompulselogo.png",
       "resizeMode": "contain",

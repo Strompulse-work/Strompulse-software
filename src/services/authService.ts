@@ -5,16 +5,11 @@
  */
 
 import supabase from "../config/supabase";
-import { User, AuthSession, ApiResponse } from "../types"; // Keeps your custom type exactly as is
+import { User, AuthSession, ApiResponse } from "../types"; 
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
-import { Alert } from "react-native";
-import * as ExpoAuthSession from "expo-auth-session"; // <-- Added 'Expo' to the name here!
+import * as ExpoAuthSession from "expo-auth-session";
 
-// Tells the browser to close itself automatically once auth is done
-WebBrowser.maybeCompleteAuthSession();
-
-// Tells the browser to close itself automatically once auth is done
 WebBrowser.maybeCompleteAuthSession();
 
 const AUTH_TOKEN_KEY = "auth_token";
@@ -22,41 +17,22 @@ const REFRESH_TOKEN_KEY = "refresh_token";
 const USER_KEY = "user_data";
 
 export class AuthService {
-  /**
-   * Helper to determine if an identifier is a phone number or email
-   */
   private static isPhoneNumber(identifier: string): boolean {
     return /^\d+$/.test(identifier.replace(/[\s\-\+]/g, ""));
   }
 
-  /**
-   * Automatically formats local Nigerian numbers into global E.164 format
-   */
   private static formatPhoneNumber(phone: string): string {
-    // Remove all spaces, dashes, or weird characters
     let cleaned = phone.replace(/[^\d+]/g, "");
-
-    // If they already included the '+', trust them and send it as-is
     if (cleaned.startsWith("+")) return cleaned;
-
-    // If they typed a standard local Nigerian number (e.g., 09059259175)
-    // We remove the first '0' and add '+234'
     if (cleaned.startsWith("0") && cleaned.length === 11) {
       return "+234" + cleaned.substring(1);
     }
-
-    // If they typed the country code but forgot the '+' (e.g., 2349059259175)
     if (cleaned.startsWith("234") && cleaned.length === 13) {
       return "+" + cleaned;
     }
-
-    // Fallback: just add a plus and hope for the best
     return "+" + cleaned;
   }
 
-  /**
-   * Sign up with Email OR Phone Number + Password
-   */
   static async signupWithEmail(
     identifier: string,
     password: string,
@@ -64,8 +40,6 @@ export class AuthService {
   ): Promise<ApiResponse<AuthSession>> {
     try {
       const isPhone = this.isPhoneNumber(identifier);
-
-      // Dynamically set either the email or phone key
       const credentials = isPhone
         ? { phone: identifier, password }
         : { email: identifier, password };
@@ -80,15 +54,9 @@ export class AuthService {
         },
       });
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
+      if (error) return { success: false, error: error.message };
+      if (!data.user) return { success: false, error: "User creation failed" };
 
-      if (!data.user) {
-        return { success: false, error: "User creation failed" };
-      }
-
-      // Store session
       if (data.session) {
         await this.storeSession({
           user: this.mapAuthUser(data.user),
@@ -112,33 +80,21 @@ export class AuthService {
     }
   }
 
-  /**
-   * Login with Email OR Phone Number + Password
-   */
   static async loginWithEmail(
     identifier: string,
     password: string,
   ): Promise<ApiResponse<AuthSession>> {
     try {
       const isPhone = this.isPhoneNumber(identifier);
-
-      // Dynamically set either the email or phone key
       const credentials = isPhone
         ? { phone: identifier, password }
         : { email: identifier, password };
 
-      const { data, error } =
-        await supabase.auth.signInWithPassword(credentials);
+      const { data, error } = await supabase.auth.signInWithPassword(credentials);
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
+      if (error) return { success: false, error: error.message };
+      if (!data.user || !data.session) return { success: false, error: "Login failed" };
 
-      if (!data.user || !data.session) {
-        return { success: false, error: "Login failed" };
-      }
-
-      // Store session securely
       const sessionData: AuthSession = {
         user: this.mapAuthUser(data.user),
         access_token: data.session.access_token,
@@ -146,52 +102,41 @@ export class AuthService {
       };
 
       await this.storeSession(sessionData);
-
       return { success: true, data: sessionData };
     } catch (error) {
       return { success: false, error: String(error) };
     }
   }
 
-  /**
-   * Login/Sign up with Google OAuth via WebBrowser
-   */
   static async loginWithGoogle(): Promise<ApiResponse<AuthSession>> {
     try {
-      // 1. Get the custom teleport link for your Expo app
       const redirectUrl = ExpoAuthSession.makeRedirectUri();
 
-      // 2. Ask Supabase to generate the specific Google login page URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: redirectUrl,
-          skipBrowserRedirect: true, // We are handling the browser manually below
+          skipBrowserRedirect: true, 
         },
       });
 
       if (error) return { success: false, error: error.message };
       if (!data?.url) return { success: false, error: "No URL returned" };
 
-      // 3. Open the secure in-app browser to the Google login page
       const result = await WebBrowser.openAuthSessionAsync(
         data.url,
         redirectUrl,
       );
 
-      // 4. When the user successfully logs in and comes back to the app...
       if (result.type === "success") {
-        // Extract the secure tokens from the URL that Google sent back
         const params = result.url.split("#")[1];
         if (!params) return { success: false, error: "No tokens returned" };
 
-        // Parse the URL parameters
         const urlParams = new URLSearchParams(params);
         const accessToken = urlParams.get("access_token");
         const refreshToken = urlParams.get("refresh_token");
 
         if (accessToken && refreshToken) {
-          // Tell Supabase to officially log the user in with these tokens
           const { data: sessionData, error: sessionError } =
             await supabase.auth.setSession({
               access_token: accessToken,
@@ -219,21 +164,12 @@ export class AuthService {
     }
   }
 
-  /**
-   * Login with phone number OTP (future feature/fallback)
-   */
   static async loginWithPhoneOTP(
     phone: string,
   ): Promise<ApiResponse<{ sessionId: string }>> {
     try {
-      const { data, error } = await supabase.auth.signInWithOtp({
-        phone,
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
+      const { data, error } = await supabase.auth.signInWithOtp({ phone });
+      if (error) return { success: false, error: error.message };
       return {
         success: true,
         data: { sessionId: ((data as any)?.user?.id as string) || "" },
@@ -243,9 +179,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * Verify OTP token
-   */
   static async verifyOTP(
     phone: string,
     token: string,
@@ -257,13 +190,8 @@ export class AuthService {
         type: "sms",
       });
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      if (!data.user || !data.session) {
-        return { success: false, error: "OTP verification failed" };
-      }
+      if (error) return { success: false, error: error.message };
+      if (!data.user || !data.session) return { success: false, error: "OTP verification failed" };
 
       const sessionData: AuthSession = {
         user: this.mapAuthUser(data.user),
@@ -272,22 +200,16 @@ export class AuthService {
       };
 
       await this.storeSession(sessionData);
-
       return { success: true, data: sessionData };
     } catch (error) {
       return { success: false, error: String(error) };
     }
   }
 
-  /**
-   * Get current session from storage
-   */
   static async getCurrentSession(): Promise<AuthSession | null> {
     try {
       const jsonStr = await SecureStore.getItemAsync(USER_KEY);
-      if (jsonStr) {
-        return JSON.parse(jsonStr);
-      }
+      if (jsonStr) return JSON.parse(jsonStr);
       return null;
     } catch (error) {
       console.error("Error retrieving session:", error);
@@ -295,9 +217,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * Store session securely
-   */
   static async storeSession(session: AuthSession): Promise<void> {
     try {
       await SecureStore.setItemAsync(USER_KEY, JSON.stringify(session));
@@ -308,23 +227,16 @@ export class AuthService {
     }
   }
 
-  /**
-   * Refresh authentication token
-   */
   static async refreshToken(): Promise<ApiResponse<string>> {
     try {
       const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (!refreshToken) {
-        return { success: false, error: "No refresh token available" };
-      }
+      if (!refreshToken) return { success: false, error: "No refresh token available" };
 
       const { data, error } = await supabase.auth.refreshSession({
         refresh_token: refreshToken,
       });
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
+      if (error) return { success: false, error: error.message };
 
       if (data.session) {
         await SecureStore.setItemAsync(
@@ -340,18 +252,11 @@ export class AuthService {
     }
   }
 
-  /**
-   * Logout and clear session
-   */
   static async logout(): Promise<ApiResponse<void>> {
     try {
       const { error } = await supabase.auth.signOut();
+      if (error) console.warn("Supabase logout error:", error);
 
-      if (error) {
-        console.warn("Supabase logout error:", error);
-      }
-
-      // Clear secure storage
       await SecureStore.deleteItemAsync(USER_KEY);
       await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
       await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
@@ -362,9 +267,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * Update user profile
-   */
   static async updateProfile(
     fullName: string,
     avatarUrl?: string,
@@ -377,17 +279,10 @@ export class AuthService {
         },
       });
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      if (!data.user) {
-        return { success: false, error: "Profile update failed" };
-      }
+      if (error) return { success: false, error: error.message };
+      if (!data.user) return { success: false, error: "Profile update failed" };
 
       const user = this.mapAuthUser(data.user);
-
-      // Update stored session
       const session = await this.getCurrentSession();
       if (session) {
         session.user = user;
@@ -400,47 +295,30 @@ export class AuthService {
     }
   }
 
-  /**
-   * Change password
-   */
   static async changePassword(newPassword: string): Promise<ApiResponse<void>> {
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (error) {
       return { success: false, error: String(error) };
     }
   }
 
-  /**
-   * Request password reset
-   */
   static async requestPasswordReset(email: string): Promise<ApiResponse<void>> {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: "ibadanpower://auth/reset-password",
+        // UPDATED: Now points to the correct Strompulse deep link
+        redirectTo: "strompulse://auth/reset-password",
       });
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
+      if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (error) {
       return { success: false, error: String(error) };
     }
   }
 
-  /**
-   * Map Supabase auth user to app User type
-   */
   private static mapAuthUser(authUser: any): User {
     return {
       id: authUser.id,
@@ -454,9 +332,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * Check if user session is valid
-   */
   static async isAuthenticated(): Promise<boolean> {
     const session = await this.getCurrentSession();
     return !!session?.access_token;
