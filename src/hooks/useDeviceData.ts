@@ -1,6 +1,6 @@
 /**
  * Custom Hooks for Data Fetching and Realtime Subscriptions
- * Fully upgraded to direct Supabase WebSocket connections for zero-latency updates.
+ * Hybrid Backend Upgrade: Static relationships from Supabase + Zero-Latency hardware stream from Firebase.
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -18,6 +18,8 @@ import {
   AnalyticsService,
 } from "../services/deviceService";
 import { supabase } from "../config/supabase";
+import { ref, onValue, off } from "firebase/database";
+import { firebaseDb } from "../config/firebase";
 
 interface UseAsyncState<T> {
   loading: boolean;
@@ -66,10 +68,11 @@ export const useAsync = <T>(
 };
 
 /**
- * Hook to fetch and subscribe to user devices with TRUE real-time updates.
+ * Hook to fetch and subscribe to user devices with HYBRID backend integration.
+ * Pulls structure from Supabase and syncs hardware variables live from Firebase's PowerMonitor node.
  */
 export const useUserDevices = (userId: string) => {
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [devices, setDevices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,53 +82,77 @@ export const useUserDevices = (userId: string) => {
       return;
     }
 
-    const fetchDevices = async () => {
+    let firebaseListener: any;
+    const rootFirebaseRef = ref(firebaseDb, "/");
+
+    const fetchAndSyncDevices = async () => {
       try {
-        // Fetch ALL devices in the city for the global Feed and Map
-        const { data, error } = await supabase.from("devices").select("*");
+        // 1. Fetch static structural assets (Metadata, Names, Base coordinates) from Supabase
+        const { data: supabaseData, error: dbError } = await supabase
+          .from("devices")
+          .select("*");
 
-        if (error) throw error;
+        if (dbError) throw dbError;
 
-        if (data) {
-          const sortedData = data.sort(
-            (a, b) =>
-              new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
-          );
-          setDevices(sortedData);
+        if (supabaseData) {
+          // 2. Open a real-time stream subscription on the hardware guy's Firebase root node
+          firebaseListener = onValue(rootFirebaseRef, (snapshot) => {
+            const liveHardwareTree = snapshot.val();
+
+            // Check if the tree exists AND if the PowerMonitor node exists
+            if (liveHardwareTree && liveHardwareTree.PowerMonitor) {
+              const powerMonitorNode = liveHardwareTree.PowerMonitor;
+
+              // 3. Perform a relational join between local Supabase assets and incoming physical IoT signals
+              const synchronizedDevices = supabaseData.map((dbDevice: any) => {
+                const hardwareMetrics = powerMonitorNode[dbDevice.device_id]?.realtime || {};
+
+                return {
+                  ...dbDevice,
+                  id: dbDevice.device_id,
+                  
+                  // THE FIX: Wrap both in Number() so it is strictly 1 or 0
+                  status: hardwareMetrics.status !== undefined 
+                           ? Number(hardwareMetrics.status) 
+                           : Number(dbDevice.status),
+                           
+                  voltage: hardwareMetrics.voltage !== undefined ? hardwareMetrics.voltage : dbDevice.voltage,
+                  updated_at: hardwareMetrics.timestamp || dbDevice.last_seen || Date.now(),
+                  latitude: hardwareMetrics.latitude || dbDevice.latitude,
+                  longitude: hardwareMetrics.longitude || dbDevice.longitude,
+                };
+              });
+
+              // Sort by operational timing so active alerts contextually float to the peak
+              const sortedDevices = synchronizedDevices.sort(
+                (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+              );
+              setDevices(sortedDevices);
+            } else {
+              // Fallback to purely Supabase data if the Firebase node goes missing
+              setDevices(supabaseData.map(d => ({ ...d, id: d.device_id, updated_at: d.last_seen })));
+            }
+            setLoading(false);
+          }, (fbErr) => {
+            console.error("Firebase continuous pipe error:", fbErr);
+            setError(fbErr.message);
+            setLoading(false);
+          });
         }
       } catch (err) {
-        console.error("Error fetching devices:", err);
-      } finally {
+        console.error("Error setting up hybrid engine hooks:", err);
+        setError(String(err));
         setLoading(false);
       }
     };
 
-    fetchDevices();
-    // Direct Supabase WebSocket Connection with a unique channel name to survive hot-reloads!
-    const channel = supabase
-      .channel(`live-user-devices-${userId}-${Date.now()}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "devices" },
-        (payload) => {
-          setDevices((currentDevices) => {
-            const updatedDevices = currentDevices.map((device) =>
-              device.id === payload.new.id
-                ? { ...device, ...payload.new }
-                : device,
-            );
-            return updatedDevices.sort(
-              (a, b) =>
-                new Date(b.last_seen).getTime() -
-                new Date(a.last_seen).getTime(),
-            );
-          });
-        },
-      )
-      .subscribe();
+    fetchAndSyncDevices();
 
+    // Clean up persistent hardware channel streams when component layout tears down
     return () => {
-      supabase.removeChannel(channel);
+      if (firebaseListener) {
+        off(rootFirebaseRef, "value", firebaseListener);
+      }
     };
   }, [userId]);
 
@@ -163,7 +190,6 @@ export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
 
     fetchInitialEvents();
 
-    // Listen only for NEW events inserted for this specific device
     const channel = supabase
       .channel(`live-events-${deviceId}`)
       .on(
@@ -221,7 +247,6 @@ export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
 
     fetchOutages();
 
-    // Listen for both new outages (power went off) and updated outages (power came back)
     const channel = supabase
       .channel(`live-outages-${deviceId}`)
       .on(

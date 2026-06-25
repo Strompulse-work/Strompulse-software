@@ -56,7 +56,7 @@ const CitiesScreen = ({ navigation }: any) => {
                 activeOpacity={isPilot ? 0.7 : 1}
                 onPress={() =>
                   isPilot &&
-                  navigation.navigate("CityCommunities", { city: city.name })
+                  navigation.navigate("CityDetail", { city: city.name })
                 }
               >
                 <View style={styles.cardHeader}>

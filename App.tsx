@@ -84,16 +84,19 @@ export default function App() {
               screens: {
                 index: "",
                 auth: "auth",
-                "(tabs)": "(tabs)",
-                "(tabs)/communities": "communities",
-                "(tabs)/feed": "feed",
-                "(tabs)/map": "map",
-                "(tabs)/insights": "insights",
-                "(tabs)/profile": "profile",
-                "community-details": "community/:communityId",
-                "device-details": "device/:deviceId",
+                "Power Status": {
+                  path: "power-status",
+                  screens: {
+                    CitySelector: "selector",
+                    CityDetail: "details",
+                  },
+                },
+                Safety: "safety",
+                Feed: "feed",
+                Notifications: "notifications",
+                Profile: "profile",
               },
-            },
+            } as any,
           }}
         >
           <RootNavigator isSignedIn={isSignedIn} />

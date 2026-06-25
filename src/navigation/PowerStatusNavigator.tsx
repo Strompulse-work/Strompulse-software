@@ -1,19 +1,17 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import CitiesScreen from "../screens/CitySelectorScreen";
+import CitySelectorScreen from "../screens/CitySelectorScreen";
 import CityDetailScreen from "../screens/CityDetailScreen";
-import EstateDetailsScreen from "../screens/EstateDetailsScreen";
 
 const Stack = createNativeStackNavigator();
 
-const CommunitiesNavigator = () => {
+const PowerStatusNavigator = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Cities" component={CitiesScreen} />
+      <Stack.Screen name="CitySelector" component={CitySelectorScreen} />
       <Stack.Screen name="CityDetail" component={CityDetailScreen} />
-      <Stack.Screen name="EstateDetails" component={EstateDetailsScreen} />
     </Stack.Navigator>
   );
 };
 
-export default CommunitiesNavigator;
+export default PowerStatusNavigator;

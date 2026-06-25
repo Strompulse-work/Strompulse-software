@@ -26,15 +26,15 @@ export const darkTheme = {
   textPrimary: "#FFFFFF",
   textSecondary: "#8E92A4",
   textTertiary: "#4b5563",
-  success: "#00E676",
-  successBg: "rgba(0, 230, 118, 0.15)",
+  success: "#00C48A",
+  successBg: "rgba(0, 196, 138, 0.16)",
   error: "#FF3B30",
   errorBg: "rgba(255, 59, 48, 0.15)",
   warning: "#FFCC00",
   warningBg: "rgba(255, 204, 0, 0.15)",
   border: "#2C2F3F",
-  primary: "#00E676",
-  primaryBg: "rgba(0, 230, 118, 0.15)",
+  primary: "#00C48A",
+  primaryBg: "rgba(0, 196, 138, 0.16)",
 };
 
 type Theme = typeof lightTheme;

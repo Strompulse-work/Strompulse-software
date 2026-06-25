@@ -1,6 +1,6 @@
 /**
- * Profile Screen
- * Dynamically switches between Light and Dark mode using ThemeContext.
+ * Profile Screen v2.0
+ * Features: High-contrast UI, Stat Cards, Sectioned Menus, and Light/Dark Mode integration.
  */
 
 import React, { useState, useEffect } from "react";
@@ -11,28 +11,21 @@ import {
   ScrollView,
   Alert,
   TouchableOpacity,
-  Switch,
   Platform,
   StatusBar,
 } from "react-native";
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import AuthService from "../services/authService";
-import { useUserDevices } from "../hooks/useDeviceData";
 import { useTheme } from "../theme/ThemeContext";
 import { Loading } from "../components/UIComponents";
 import { User } from "../types";
 
 const ProfileScreen = () => {
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Notification States
-  const [outageAlerts, setOutageAlerts] = useState(true);
-  const [restorationAlerts, setRestorationAlerts] = useState(true);
-  const [emailNotifications, setEmailNotifications] = useState(false);
 
   // Fetch user info
   useEffect(() => {
@@ -51,9 +44,6 @@ const ProfileScreen = () => {
     getUser();
   }, []);
 
-  // Fetch user devices
-  const { devices } = useUserDevices(user?.id || "");
-
   const handleLogout = () => {
     Alert.alert(
       "Log Out",
@@ -68,8 +58,6 @@ const ProfileScreen = () => {
             if (!result.success) {
               Alert.alert("Error", result.error || "Failed to logout");
             }
-            // NO NAVIGATION COMMANDS HERE. 
-            // Supabase updates the state, and RootNavigator handles the rest automatically!
           },
         },
       ],
@@ -104,8 +92,6 @@ const ProfileScreen = () => {
     );
   }
 
-  // If the user logs out, we just return null. 
-  // RootNavigator will instantly unmount this screen and show the Welcome screen!
   if (!user) {
     return null;
   }
@@ -121,296 +107,152 @@ const ProfileScreen = () => {
         backgroundColor={theme.background}
       />
 
-      {/* Advanced Header */}
-      <View style={styles.headerContainer}>
-        <Text style={styles.headerTitle}>Profile</Text>
-      </View>
-
-      {/* Premium User Info Card */}
-      <View style={styles.userCard}>
-        <View style={styles.avatarContainer}>
+      {/* Hero Avatar Section */}
+      <View style={styles.avatarSection}>
+        <View style={styles.avatarCircle}>
           <Text style={styles.avatarText}>
-            {user.full_name?.charAt(0).toUpperCase() || "U"}
+            {user.full_name?.charAt(0).toUpperCase() || "A"}
           </Text>
         </View>
-        <View style={styles.userInfo}>
-          <Text style={styles.userName}>{user.full_name || "User"}</Text>
-          <Text style={styles.userEmail}>{user.email || user.phone}</Text>
-          <View
-            style={[
-              styles.roleBadge,
-              {
-                backgroundColor:
-                  user.role === "community_admin"
-                    ? theme.primaryBg
-                    : theme.successBg,
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name={
-                user.role === "community_admin"
-                  ? "shield-star-outline"
-                  : "star-check-outline"
-              }
-              size={14}
-              color={
-                user.role === "community_admin" ? theme.primary : theme.success
-              }
-              style={{ marginRight: 4 }}
-            />
-            <Text
-              style={[
-                styles.roleBadgeText,
-                {
-                  color:
-                    user.role === "community_admin"
-                      ? theme.primary
-                      : theme.success,
-                },
-              ]}
-            >
-              {user.role === "community_admin"
-                ? "Community Admin"
-                : "Premium Member"}
-            </Text>
-          </View>
+        
+        <Text style={styles.userName}>{user.full_name || "Awoniyi"}</Text>
+        <Text style={styles.userLocation}>Carlton Gate Estate, Ibadan</Text>
+        
+        <View style={styles.securityBadge}>
+          <MaterialCommunityIcons name="shield-check-outline" size={14} color="#00C48A" />
+          <Text style={styles.securityText}>Strompulse Security</Text>
         </View>
       </View>
 
-      {/* Linked Devices Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>LINKED HARDWARE</Text>
-        <View style={styles.cardBlock}>
-          {devices && devices.length > 0 ? (
-            devices.map((device, index) => {
-              const isOnline = device.status === 1;
-              return (
-                <View
-                  key={device.id}
-                  style={[
-                    styles.deviceRow,
-                    index !== devices.length - 1 ? styles.borderBottom : undefined,
-                  ]}
-                >
-                  <View style={styles.deviceRowLeft}>
-                    <View style={styles.iconBox}>
-                      <MaterialCommunityIcons
-                        name="router-wireless"
-                        size={22}
-                        color={theme.textSecondary}
-                      />
-                    </View>
-                    <View style={{ marginLeft: 12 }}>
-                      <Text style={styles.deviceTitle}>{device.device_id}</Text>
-                      <Text style={styles.deviceSub}>
-                        {device.address.split(",")[0]}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Advanced Status Pill */}
-                  <View
-                    style={[
-                      styles.statusPill,
-                      {
-                        backgroundColor: isOnline
-                          ? theme.successBg
-                          : theme.errorBg,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.statusDot,
-                        {
-                          backgroundColor: isOnline
-                            ? theme.success
-                            : theme.error,
-                        },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.statusPillText,
-                        { color: isOnline ? theme.success : theme.error },
-                      ]}
-                    >
-                      {isOnline ? "ONLINE" : "OFFLINE"}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
-          ) : (
-            <View style={{ padding: 24, alignItems: "center" }}>
-              <MaterialCommunityIcons
-                name="microchip" // <-- FIXED: This perfectly matches the MaterialCommunityIcons dictionary!
-                size={40}
-                color={theme.border}
-              />
-              <Text
-                style={{
-                  color: theme.textSecondary,
-                  marginTop: 12,
-                  fontWeight: "500",
-                }}
-              >
-                No hardware linked to this account.
-              </Text>
-            </View>
-          )}
-        </View>
+      {/* Stats Row */}
+      <View style={styles.statsContainer}>
+        <StatCard count="2" label="COMMUNITIES" theme={theme} />
+        <StatCard count="3" label="ALERT CONTACTS" theme={theme} />
+        <StatCard count="7" label="REPORTS" theme={theme} />
       </View>
 
-      {/* APP SETTINGS (Dark Mode Toggle) */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>APP SETTINGS</Text>
-        <View style={styles.cardBlock}>
-          <View style={styles.actionRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View style={styles.iconBox}>
-                <Feather
-                  name={isDarkMode ? "moon" : "sun"}
-                  size={18}
-                  color={theme.textPrimary}
-                />
-              </View>
-              <Text style={styles.actionText}>Dark Mode</Text>
-            </View>
-            <Switch
-              value={isDarkMode}
-              onValueChange={toggleDarkMode}
-              trackColor={{ false: theme.border, true: theme.success }}
-              thumbColor={"#FFFFFF"}
-              ios_backgroundColor={theme.border}
-            />
-          </View>
-        </View>
-      </View>
-
-      {/* Notification Preferences */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>NOTIFICATIONS</Text>
-        <View style={styles.cardBlock}>
-          <NotificationRow
-            icon="bell"
-            label="Outage Alerts"
-            value={outageAlerts}
-            onValueChange={setOutageAlerts}
+      {/* Account Section */}
+      <View style={styles.menuSection}>
+        <Text style={styles.menuSectionTitle}>ACCOUNT</Text>
+        <View style={styles.menuCard}>
+          <MenuItem 
+            iconName="user" 
+            IconProvider={Feather} 
+            label="Edit Profile" 
+            color={theme.textSecondary} 
             theme={theme}
+            onPress={handleChangePassword} 
           />
-          <NotificationRow
-            icon="zap"
-            label="Restoration Alerts"
-            value={restorationAlerts}
-            onValueChange={setRestorationAlerts}
-            borderTop
+          <MenuItem 
+            iconName="bell" 
+            IconProvider={Feather} 
+            label="My Subscriptions" 
+            color="#EAB308" // Gold
             theme={theme}
+            borderTop 
           />
-          <NotificationRow
-            icon="mail"
-            label="Email Summaries"
-            value={emailNotifications}
-            onValueChange={setEmailNotifications}
-            borderTop
+          <MenuItem 
+            iconName="link" 
+            IconProvider={Feather} 
+            label="Invite Friends" 
+            color={theme.textSecondary} 
             theme={theme}
+            borderTop 
+          />
+          <MenuItem 
+            iconName="lock" 
+            IconProvider={Feather} 
+            label="Privacy Settings" 
+            color="#EAB308" // Gold
+            theme={theme}
+            borderTop 
           />
         </View>
       </View>
 
-      {/* Account Actions */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>ACCOUNT & SECURITY</Text>
-        <View style={styles.cardBlock}>
-          <TouchableOpacity
-            style={styles.actionRow}
-            onPress={handleChangePassword}
-            activeOpacity={0.7}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View style={styles.iconBox}>
-                <Feather name="lock" size={18} color={theme.textPrimary} />
-              </View>
-              <Text style={styles.actionText}>Change Password</Text>
-            </View>
-            <Feather
-              name="chevron-right"
-              size={20}
-              color={theme.textTertiary}
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionRow, styles.borderTop]}
+      {/* Strompulse Section */}
+      <View style={styles.menuSection}>
+        <Text style={styles.menuSectionTitle}>STROMPULSE</Text>
+        <View style={styles.menuCard}>
+          <MenuItem 
+            iconName="lightning-bolt" 
+            IconProvider={MaterialCommunityIcons} 
+            label="About Strompulse" 
+            color="#EAB308" // Gold
+            theme={theme}
+          />
+          <MenuItem 
+            iconName="help-circle" 
+            IconProvider={Feather} 
+            label="Help & Support" 
+            color="#EF4444" // Red
+            theme={theme}
+            borderTop 
+          />
+          <MenuItem 
+            iconName="star" 
+            IconProvider={Feather} 
+            label="Rate the App" 
+            color="#EAB308" // Gold
+            theme={theme}
+            borderTop 
+          />
+          {/* Preserved Logout Functionality */}
+          <MenuItem 
+            iconName="log-out" 
+            IconProvider={Feather} 
+            label="Log Out" 
+            color="#EF4444" // Red
+            theme={theme}
+            borderTop 
             onPress={handleLogout}
-            activeOpacity={0.7}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View
-                style={[styles.iconBox, { backgroundColor: theme.errorBg }]}
-              >
-                <Feather name="log-out" size={18} color={theme.error} />
-              </View>
-              <Text style={[styles.actionText, { color: theme.error }]}>
-                Log Out
-              </Text>
-            </View>
-          </TouchableOpacity>
+          />
         </View>
       </View>
 
-      {/* App Info Footer */}
+      {/* Footer */}
       <View style={styles.footerContainer}>
-        <MaterialCommunityIcons
-          name="lightning-bolt-circle"
-          size={28}
-          color={theme.textTertiary}
-        />
-        <Text style={styles.footerTitle}>STROMPULSE</Text>
-        <Text style={styles.footerVersion}>Version 1.0.0 • Build 42</Text>
+        <Text style={styles.footerVersion}>Strompulse v1.0.0 • Real-time Power Visibility</Text>
+        <View style={styles.statusIndicator}>
+          <View style={styles.statusDot} />
+          <Text style={styles.statusText}>All systems normal</Text>
+        </View>
       </View>
     </ScrollView>
   );
 };
 
 /**
- * Custom Notification Row Component
+ * Reusable Stat Card Component
  */
-interface NotificationRowProps {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  label: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  borderTop?: boolean;
-  theme: any;
-}
-
-const NotificationRow: React.FC<NotificationRowProps> = ({
-  icon,
-  label,
-  value,
-  onValueChange,
-  borderTop,
-  theme,
-}) => {
+const StatCard = ({ count, label, theme }: { count: string, label: string, theme: any }) => {
   const styles = getStyles(theme);
   return (
-    <View style={[styles.notificationRow, borderTop ? styles.borderTop : undefined]}>
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <View style={styles.iconBox}>
-          <Feather name={icon} size={18} color={theme.textPrimary} />
-        </View>
-        <Text style={styles.notificationText}>{label}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: theme.border, true: theme.success }}
-        thumbColor={"#FFFFFF"}
-        ios_backgroundColor={theme.border}
-      />
+    <View style={styles.statCard}>
+      <Text style={styles.statNumber}>{count}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
     </View>
+  );
+};
+
+/**
+ * Reusable Menu Item Component
+ */
+const MenuItem = ({ iconName, IconProvider, label, color, borderTop, theme, onPress }: any) => {
+  const styles = getStyles(theme);
+  return (
+    <TouchableOpacity 
+      style={[styles.menuItem, borderTop && styles.borderTop]} 
+      onPress={onPress}
+      activeOpacity={0.7}
+      disabled={!onPress}
+    >
+      <View style={styles.menuItemLeft}>
+        <IconProvider name={iconName} size={20} color={color} />
+        <Text style={styles.menuItemText}>{label}</Text>
+      </View>
+      <Feather name="chevron-right" size={20} color={theme.textTertiary || theme.border} />
+    </TouchableOpacity>
   );
 };
 
@@ -425,204 +267,154 @@ const getStyles = (theme: any) =>
       justifyContent: "center",
       alignItems: "center",
     },
-    headerContainer: {
-      paddingHorizontal: 24,
-      paddingTop: Platform.OS === "ios" ? 50 : 24,
-      paddingBottom: 12,
-    },
-    headerTitle: {
-      fontSize: 32,
-      fontWeight: "800",
-      color: theme.textPrimary,
-      letterSpacing: -0.5,
-    },
-    userCard: {
-      flexDirection: "row",
+    avatarSection: {
       alignItems: "center",
+      marginTop: Platform.OS === "ios" ? 60 : 40,
+    },
+    avatarCircle: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      borderWidth: 2,
+      borderColor: "#00C48A", // PRD Accent Green
       backgroundColor: theme.cardBg,
-      marginHorizontal: 20,
-      marginTop: 8,
-      padding: 20,
-      borderRadius: 24,
-      borderWidth: 1,
-      borderColor: theme.border,
-      ...Platform.select({
-        ios: {
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.1,
-          shadowRadius: 12,
-        },
-        android: { elevation: 4 },
-      }),
-    },
-    avatarContainer: {
-      width: 68,
-      height: 68,
-      borderRadius: 34,
-      backgroundColor: theme.textPrimary,
-      alignItems: "center",
       justifyContent: "center",
-      marginRight: 16,
+      alignItems: "center",
+      shadowColor: "#00C48A",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.2,
+      shadowRadius: 10,
+      elevation: 5,
     },
     avatarText: {
-      fontSize: 28,
+      fontSize: 32,
       fontWeight: "800",
-      color: theme.background,
-    },
-    userInfo: {
-      flex: 1,
+      color: "#00C48A",
     },
     userName: {
+      fontSize: 22,
+      fontWeight: "800",
       color: theme.textPrimary,
-      fontSize: 20,
-      fontWeight: "700",
-      letterSpacing: -0.2,
+      marginTop: 16,
+      letterSpacing: -0.5,
     },
-    userEmail: {
-      color: theme.textSecondary,
+    userLocation: {
       fontSize: 14,
       fontWeight: "500",
-      marginTop: 2,
+      color: theme.textSecondary,
+      marginTop: 4,
     },
-    roleBadge: {
+    securityBadge: {
       flexDirection: "row",
       alignItems: "center",
-      marginTop: 8,
-      alignSelf: "flex-start",
+      marginTop: 12,
+      paddingHorizontal: 12,
       paddingVertical: 6,
-      paddingHorizontal: 10,
-      borderRadius: 10,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: "rgba(0, 196, 138, 0.3)",
+      backgroundColor: "rgba(0, 196, 138, 0.05)",
     },
-    roleBadgeText: {
+    securityText: {
       fontSize: 12,
       fontWeight: "700",
+      color: "#00C48A",
+      marginLeft: 6,
+    },
+    statsContainer: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginHorizontal: 20,
+      marginTop: 32,
+    },
+    statCard: {
+      flex: 1,
+      backgroundColor: theme.cardBg,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      paddingVertical: 16,
+      alignItems: "center",
+      marginHorizontal: 4,
+    },
+    statNumber: {
+      fontSize: 22,
+      fontWeight: "800",
+      color: theme.textPrimary,
+    },
+    statLabel: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: theme.textSecondary,
+      marginTop: 6,
       letterSpacing: 0.5,
     },
-    section: {
-      marginTop: 28,
-      paddingHorizontal: 20,
+    menuSection: {
+      marginHorizontal: 20,
+      marginTop: 32,
     },
-    sectionTitle: {
-      color: theme.textSecondary,
+    menuSectionTitle: {
       fontSize: 12,
       fontWeight: "800",
+      color: theme.textSecondary,
+      marginBottom: 12,
       letterSpacing: 1,
-      marginBottom: 10,
-      marginLeft: 8,
+      marginLeft: 4,
     },
-    cardBlock: {
+    menuCard: {
       backgroundColor: theme.cardBg,
-      borderRadius: 20,
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: theme.border,
       overflow: "hidden",
-      ...Platform.select({
-        ios: {
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.05,
-          shadowRadius: 8,
-        },
-        android: { elevation: 2 },
-      }),
+    },
+    menuItem: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: 16,
+      backgroundColor: theme.cardBg,
+    },
+    menuItemLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    menuItemText: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: theme.textPrimary,
+      marginLeft: 16,
     },
     borderTop: {
       borderTopWidth: 1,
       borderTopColor: theme.border,
-    },
-    borderBottom: {
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-    },
-    deviceRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: 16,
-    },
-    deviceRowLeft: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    iconBox: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      backgroundColor: theme.background,
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    deviceTitle: {
-      color: theme.textPrimary,
-      fontSize: 16,
-      fontWeight: "700",
-    },
-    deviceSub: {
-      color: theme.textSecondary,
-      fontSize: 13,
-      fontWeight: "500",
-      marginTop: 2,
-    },
-    statusPill: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 12,
-    },
-    statusDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      marginRight: 6,
-    },
-    statusPillText: {
-      fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 0.5,
-    },
-    notificationRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: 16,
-    },
-    notificationText: {
-      color: theme.textPrimary,
-      fontSize: 16,
-      fontWeight: "600",
-      marginLeft: 12,
-    },
-    actionRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: 16,
-    },
-    actionText: {
-      color: theme.textPrimary,
-      fontSize: 16,
-      fontWeight: "600",
-      marginLeft: 12,
     },
     footerContainer: {
       alignItems: "center",
       marginTop: 40,
       opacity: 0.8,
     },
-    footerTitle: {
-      color: theme.textSecondary,
-      fontSize: 14,
-      fontWeight: "800",
-      letterSpacing: 2,
-      marginTop: 8,
-    },
     footerVersion: {
-      color: theme.textTertiary,
       fontSize: 12,
       fontWeight: "500",
-      marginTop: 4,
+      color: theme.textSecondary,
+      marginBottom: 8,
+    },
+    statusIndicator: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: "#00C48A",
+      marginRight: 6,
+    },
+    statusText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: "#00C48A",
     },
   });
 

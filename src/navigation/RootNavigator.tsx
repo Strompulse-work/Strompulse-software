@@ -1,49 +1,49 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createStackNavigator } from "@react-navigation/stack"; // <-- Added Stack
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 
-// Import Auth Navigator
 import AuthNavigator from "./AuthNavigator";
+import PowerStatusNavigator from "./PowerStatusNavigator";
+import SafetyScreen from "../screens/SafetyScreen";
+import FeedTabScreen from "../screens/FeedTabScreen";
+import NotificationsScreen from "../screens/NotificationsScreen";
+import ProfileTabScreen from "../screens/ProfileTabScreen";
 
-// Screens
-import FeedScreen from "../screens/FeedScreen";
-import MapScreen from "../screens/MapScreen";
+// Import your new screens!
+import JourneyShareScreen from "../screens/JourneyShareScreen";
+import ContactsScreen from "../screens/ContactsScreen";
+import SafetySettingsScreen from "../screens/SafetySettingsScreen";
 import CommunitiesNavigator from "./CommunitiesNavigator";
-import InsightsScreen from "../screens/InsightsScreen";
-import ProfileScreen from "../screens/ProfileScreen";
+import MapScreen from "../screens/MapScreen";
+import InsightsScreen from "../screens/NotificationsScreen";
 
 const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator(); // <-- Initialize Stack
 
-// 1. Accept the isSignedIn prop from App.tsx
-const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
-  const { theme, isDarkMode } = useTheme();
-
-  // 2. THE MAGIC: If they are not signed in, show the Welcome/Auth screens.
-  // When they log out, React Navigation instantly destroys the tabs and shows this instead.
-  if (!isSignedIn) {
-    return <AuthNavigator />;
-  }
-
-  // 3. If they are signed in, show the main app tabs
+// 1. We move your exact Tab Navigator into its own component
+const MainTabs = () => {
   return (
     <Tab.Navigator
+      initialRouteName="Power Status"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: theme.cardBg,
-          borderTopColor: theme.border,
+          backgroundColor: "#12141D",
+          borderTopColor: "#1D1F28",
           borderTopWidth: 1,
-          height: 65,
-          paddingBottom: 10,
-          paddingTop: 8,
+          height: 68,
+          paddingBottom: 8,
+          paddingTop: 6,
           elevation: 0,
         },
-        tabBarActiveTintColor: theme.success,
-        tabBarInactiveTintColor: theme.textSecondary,
+        tabBarActiveTintColor: "#00C48A",
+        tabBarInactiveTintColor: "#8E92A4",
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: "700",
+          fontFamily: "Arial",
         },
       }}
     >
@@ -52,7 +52,7 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
         component={CommunitiesNavigator}
         options={{
           tabBarIcon: ({ color }) => (
-            <MaterialCommunityIcons name="city-variant-outline" size={26} color={color} />
+            <MaterialCommunityIcons name="city" size={24} color={color} />
           ),
         }}
       />
@@ -61,16 +61,16 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
         component={MapScreen}
         options={{
           tabBarIcon: ({ color }) => (
-            <Feather name="map" size={22} color={color} />
+            <MaterialCommunityIcons name="flag" size={24} color={color} />
           ),
         }}
       />
       <Tab.Screen
         name="Feed"
-        component={FeedScreen}
+        component={FeedTabScreen}
         options={{
           tabBarIcon: ({ color }) => (
-            <MaterialCommunityIcons name="view-dashboard" size={24} color={color} />
+            <MaterialCommunityIcons name="view-dashboard-outline" size={24} color={color} />
           ),
         }}
       />
@@ -79,13 +79,13 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
         component={InsightsScreen}
         options={{
           tabBarIcon: ({ color }) => (
-            <MaterialCommunityIcons name="chart-bar" size={24} color={color} />
+            <Feather name="bar-chart-2" size={24} color={color} />
           ),
         }}
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={ProfileTabScreen}
         options={{
           tabBarIcon: ({ color }) => (
             <Feather name="user" size={24} color={color} />
@@ -93,6 +93,25 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
         }}
       />
     </Tab.Navigator>
+  );
+};
+
+// 2. The Root Navigator now uses a Stack to hold the Tabs AND the new screens
+const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
+  if (!isSignedIn) {
+    return <AuthNavigator />;
+  }
+
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {/* The main app with bottom tabs */}
+      <Stack.Screen name="MainTabs" component={MainTabs} />
+      
+      {/* The new screens that open over the tabs */}
+      <Stack.Screen name="JourneyShareScreen" component={JourneyShareScreen} />
+      <Stack.Screen name="ContactsScreen" component={ContactsScreen} />
+      <Stack.Screen name="SafetySettingsScreen" component={SafetySettingsScreen} />
+    </Stack.Navigator>
   );
 };
 
