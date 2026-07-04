@@ -139,9 +139,11 @@ export const useUserDevices = (userId: string) => {
             setLoading(false);
           });
         }
-      } catch (err) {
-        console.error("Error setting up hybrid engine hooks:", err);
-        setError(String(err));
+     } catch (err: any) {
+        console.error("❌ Error setting up hybrid engine hooks!");
+        console.error("Exact Error Message:", err?.message || err);
+        console.error("Firebase DB Connected:", !!firebaseDb);
+        setError(String(err?.message || err));
         setLoading(false);
       }
     };

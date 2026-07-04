@@ -127,7 +127,7 @@ const FeedScreen: React.FC = () => {
             {user?.full_name?.split(" ")[0] || "User"}
           </Text>
         </View>
-        <View style={styles.headerActions}>
+        {/* <View style={styles.headerActions}>
           <TouchableOpacity style={styles.iconButton}>
             <Feather name="search" size={20} color={theme.textPrimary} />
           </TouchableOpacity>
@@ -138,7 +138,7 @@ const FeedScreen: React.FC = () => {
               color={theme.textPrimary}
             />
           </TouchableOpacity>
-        </View>
+        </View> */}
       </View>
 
       <View style={styles.feedTitleContainer}>
