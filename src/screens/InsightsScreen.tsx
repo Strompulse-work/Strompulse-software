@@ -1,7 +1,7 @@
 /**
  * Insights Screen
  * Dynamically switches between Light and Dark mode using ThemeContext.
- * Features: Wavy line charts, rich stat widgets with icons, and crisp typography.
+ * Features: Real-time Firebase integration, wavy line charts, and rich stat widgets.
  */
 
 import React, { useEffect, useState } from "react";
@@ -40,11 +40,12 @@ const InsightsScreen: React.FC = () => {
     getUser();
   }, []);
 
-  // 2. Get Devices
+  // 2. Get Real-Time Devices from Firebase
   const { devices, loading: devicesLoading } = useUserDevices(userId || "");
-  const mainDeviceId = devices.length > 0 ? devices[0].id : "";
+  const stromDevice = devices.find((d) => d.id === "STROM001");
+  const mainDeviceId = stromDevice ? stromDevice.id : (devices.length > 0 ? devices[0].id : "");
 
-  // 3. Get Real-Time Analytics
+  // 3. Get Historical Analytics
   const {
     insights,
     loading: insightsLoading,
@@ -64,13 +65,29 @@ const InsightsScreen: React.FC = () => {
     );
   }
 
-  if (error && !insights) {
+  if (error && !insights && !stromDevice) {
     return (
       <View style={[styles.container, styles.center]}>
         <ErrorMessage message="Unable to load analytics at this time." />
       </View>
     );
   }
+
+  // --- Real-Time Hardware Logic ---
+  let isOnline = true;
+  let liveUptime = insights?.avg_daily_uptime_percentage || 100;
+
+  if (stromDevice) {
+    const rawStatus = String(stromDevice.status).toLowerCase().trim();
+    isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
+    if (stromDevice.uptime !== undefined) {
+      liveUptime = stromDevice.uptime;
+    }
+  }
+
+  // Dynamic Theme Colors based on Real-Time Power Status
+  const statusColor = isOnline ? theme.success : theme.error;
+  const statusBgColor = isOnline ? theme.successBg : theme.errorBg;
 
   // --- Chart Data (Using mock trend data to match UI) ---
   const uptimeChartData = {
@@ -103,7 +120,7 @@ const InsightsScreen: React.FC = () => {
       {/* Modern Header */}
       <View style={styles.headerContainer}>
         <Text style={styles.headerTitle}>Analytics</Text>
-        <Text style={styles.headerSubtitle}>Weekly grid performance</Text>
+        <Text style={styles.headerSubtitle}>Real-time grid performance</Text>
       </View>
 
       {/* Advanced Stats Grid */}
@@ -140,35 +157,31 @@ const InsightsScreen: React.FC = () => {
           </Text>
         </View>
 
-        {/* Avg Daily Power Widget */}
+        {/* Real-Time Uptime Widget */}
         <View style={styles.statCard}>
-          <View style={[styles.iconBox, { backgroundColor: theme.successBg }]}>
+          <View style={[styles.iconBox, { backgroundColor: statusBgColor }]}>
             <MaterialCommunityIcons
-              name="lightning-bolt"
+              name={isOnline ? "lightning-bolt" : "lightning-bolt-outline"}
               size={20}
-              color={theme.success}
+              color={statusColor}
             />
           </View>
           <Text style={styles.statLabel}>AVG DAILY POWER</Text>
-          <Text style={[styles.statValue, { color: theme.success }]}>
-            {insights?.avg_daily_uptime_percentage || 100}%
+          <Text style={[styles.statValue, { color: statusColor }]}>
+            {liveUptime}%
           </Text>
         </View>
 
-        {/* Stability Score Widget */}
-        <View style={[styles.statCard, { backgroundColor: theme.textPrimary }]}>
+        {/* Dynamic Stability Score Widget */}
+        <View style={[styles.statCard, { backgroundColor: isOnline ? theme.textPrimary : theme.error }]}>
           <View
             style={[
               styles.iconBox,
-              {
-                backgroundColor: isDarkMode
-                  ? "rgba(0,0,0,0.2)"
-                  : "rgba(255,255,255,0.15)",
-              },
+              { backgroundColor: "rgba(255,255,255,0.15)" },
             ]}
           >
             <MaterialCommunityIcons
-              name="shield-check"
+              name={isOnline ? "shield-check" : "shield-alert"}
               size={20}
               color={theme.background}
             />
@@ -176,23 +189,25 @@ const InsightsScreen: React.FC = () => {
           <Text
             style={[
               styles.statLabel,
-              { color: theme.background, opacity: 0.8 },
+              { color: theme.background, opacity: 0.9 },
             ]}
           >
-            STABILITY SCORE
+            {isOnline ? "STABILITY SCORE" : "GRID UNSTABLE"}
           </Text>
           <View style={{ flexDirection: "row", alignItems: "baseline" }}>
             <Text style={[styles.statValue, { color: theme.background }]}>
-              {insights?.stability_score || 100}
+              {isOnline ? (insights?.stability_score || 100) : "OUTAGE"}
             </Text>
-            <Text
-              style={[
-                styles.statUnit,
-                { color: theme.background, marginLeft: 2, opacity: 0.8 },
-              ]}
-            >
-              /100
-            </Text>
+            {isOnline && (
+              <Text
+                style={[
+                  styles.statUnit,
+                  { color: theme.background, marginLeft: 2, opacity: 0.8 },
+                ]}
+              >
+                /100
+              </Text>
+            )}
           </View>
         </View>
       </View>

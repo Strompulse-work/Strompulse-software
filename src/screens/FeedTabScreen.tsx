@@ -25,28 +25,52 @@ import { Loading, ErrorMessage } from "../components/UIComponents";
 
 const { width } = Dimensions.get("window");
 
-// Advanced Relative Time formatter that relies on an actively ticking 'now' state
-const getRelativeTime = (dateString: string | number, nowTime: number) => {
-  if (!dateString) return "Unknown";
+// Helper to parse both standard dates AND the custom IoT hardware format (DDMMYYYYHHMMSS)
+const parseDeviceTime = (dateInput: string | number) => {
+  if (!dateInput) return 0;
+  const tsStr = String(dateInput);
   
-  const past = new Date(dateString).getTime();
-  if (isNaN(past)) return "Unknown";
-
-  const diffInMinutes = Math.floor((nowTime - past) / 60000);
-
-  if (diffInMinutes < 1) return "Just now";
-  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) return `${diffInHours}h ago`;
-  const diffInDays = Math.floor(diffInHours / 24);
-  return `${diffInDays}d ago`;
+  // If it's the exact 14-digit hardware string (e.g., "09072026152759")
+  if (tsStr.length === 14 && /^\d+$/.test(tsStr)) {
+    const day = parseInt(tsStr.substring(0, 2), 10);
+    const month = parseInt(tsStr.substring(2, 4), 10) - 1; // JS months are 0-11
+    const year = parseInt(tsStr.substring(4, 8), 10);
+    const hour = parseInt(tsStr.substring(8, 10), 10);
+    const minute = parseInt(tsStr.substring(10, 12), 10);
+    const second = parseInt(tsStr.substring(12, 14), 10);
+    return new Date(year, month, day, hour, minute, second).getTime();
+  }
+  
+  // Fallback for standard ISO strings or epoch numbers
+  return new Date(dateInput).getTime() || 0;
 };
 
-// Safely grabs the most recent timestamp to sort by
+// Advanced Relative Time formatter with seconds, minutes, hours, days, weeks, years support
+const getRelativeTime = (dateInput: string | number, nowTime: number, isOnline: boolean) => {
+  const past = parseDeviceTime(dateInput);
+  if (!past || isNaN(past)) return "Unknown";
+
+  // Calculate difference in seconds
+  const diffInSeconds = Math.floor(Math.max(nowTime - past, 0) / 1000);
+  let timeString = "";
+
+  if (diffInSeconds < 60) timeString = `${diffInSeconds}s ago`;
+  else if (diffInSeconds < 3600) timeString = `${Math.floor(diffInSeconds / 60)}m ago`;
+  else if (diffInSeconds < 86400) timeString = `${Math.floor(diffInSeconds / 3600)}h ago`;
+  else if (diffInSeconds < 604800) timeString = `${Math.floor(diffInSeconds / 86400)}d ago`;
+  else if (diffInSeconds < 31536000) timeString = `${Math.floor(diffInSeconds / 604800)}w ago`;
+  else timeString = `${Math.floor(diffInSeconds / 31536000)}y ago`;
+
+  const prefix = isOnline ? "Power Restored:" : "Power Outage:";
+  return `(${prefix} ${timeString})`;
+};
+
+// Safely grabs the most recent timestamp to sort by using the custom parser
 const getLatestTimestamp = (device: any) => {
-  const lastSeen = new Date(device.last_seen || 0).getTime();
-  const updatedAt = new Date(device.updated_at || 0).getTime();
-  return Math.max(lastSeen, updatedAt);
+  const timestamp = parseDeviceTime(device.timestamp);
+  const lastSeen = parseDeviceTime(device.last_seen);
+  const updatedAt = parseDeviceTime(device.updated_at);
+  return Math.max(timestamp, lastSeen, updatedAt, 0);
 };
 
 // Gets greeting based on device time
@@ -74,9 +98,9 @@ const FeedScreen: React.FC = () => {
     getUser();
   }, []);
 
-  // 2. Ticking Clock: Forces the UI to re-render every 60 seconds so "1m ago" stays accurate
+  // 2. Ticking Clock: Forces the UI to re-render every 1 second so "s ago" updates live
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -109,7 +133,7 @@ const FeedScreen: React.FC = () => {
 
   // Actively sort items so the most recently updated device jumps to the top
   const feedItems = [...devices]
-    .filter((device) => device.id === "STROM001") // <--- THIS LINE REMOVES THE 7 DUMMIES
+    .filter((device) => device.id === "STROM001")
     .sort((a, b) => getLatestTimestamp(b) - getLatestTimestamp(a));
 
   return (
@@ -127,18 +151,6 @@ const FeedScreen: React.FC = () => {
             {user?.full_name?.split(" ")[0] || "User"}
           </Text>
         </View>
-        {/* <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconButton}>
-            <Feather name="search" size={20} color={theme.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons
-              name="options-outline"
-              size={22}
-              color={theme.textPrimary}
-            />
-          </TouchableOpacity>
-        </View> */}
       </View>
 
       <View style={styles.feedTitleContainer}>
@@ -162,7 +174,7 @@ const FeedScreen: React.FC = () => {
       ) : (
         <FlatList
           data={feedItems}
-          extraData={feedItems} // <--- ADD THIS LINE: Forces the list to redraw when status changes
+          extraData={feedItems} // Forces the list to redraw when status changes
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
           refreshControl={
@@ -188,11 +200,11 @@ const FeedCard: React.FC<{ device: any; currentTime: number }> = ({ device, curr
   const styles = getStyles(theme);
   
   // THE BULLETPROOF FIX: Convert whatever Firebase sends to a string and check it.
-  // This will catch 1, "1", true, "true", or "ON"
   const rawStatus = String(device.status).toLowerCase().trim();
   const isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
   
-  const displayTime = device.updated_at || device.last_seen || Date.now();
+  // FIXED: Explicitly look for the 'timestamp' key sent by the hardware engineer
+  const displayTime = device.timestamp || device.updated_at || device.last_seen || Date.now();
 
   // Configuration mapping based on IoT status and active theme
   const config = isOnline
@@ -226,13 +238,21 @@ const FeedCard: React.FC<{ device: any; currentTime: number }> = ({ device, curr
         </View>
         
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={styles.timestampText}>
-            {getRelativeTime(displayTime, currentTime)}
+          <Text style={[styles.timestampText, { color: config.color }]}>
+            {getRelativeTime(displayTime, currentTime, isOnline)}
           </Text>
-          {/* TEMPORARY DEBUG TEXT: See exactly what Firebase is sending */}
-          <Text style={{ fontSize: 9, color: theme.textTertiary, marginTop: 2 }}>
-            Raw Firebase Status: {rawStatus}
-          </Text>
+          
+          {/* Reference Point Indicator */}
+          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+            <MaterialCommunityIcons 
+              name="map-marker-radius-outline" 
+              size={12} 
+              color={theme.textTertiary} 
+            />
+            <Text style={{ fontSize: 10, color: theme.textTertiary, fontWeight: "600", marginLeft: 2, letterSpacing: 0.3 }}>
+              Ref: Gate/Entrance Area
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -244,36 +264,7 @@ const FeedCard: React.FC<{ device: any; currentTime: number }> = ({ device, curr
           color={theme.textPrimary}
           style={{ marginRight: 6, marginTop: 2 }}
         />
-        <Text style={styles.locationTitle}>{device.id} </Text>
-      </View>
-
-      {/* Bottom Row: Advanced Metadata Badges */}
-      <View style={styles.metadataRow}>
-        <View style={styles.badge}>
-          <MaterialCommunityIcons
-            name="target"
-            size={14}
-            color={theme.textSecondary}
-            style={{ marginRight: 4 }}
-          />
-          <Text style={styles.badgeText}>
-            {device.uptime !== undefined ? `${device.uptime}%` : "100%"} Uptime
-          </Text>
-        </View>
-        
-        {device.voltage !== undefined && (
-          <View style={styles.badge}>
-            <MaterialCommunityIcons
-              name="flash"
-              size={14}
-              color={theme.textSecondary}
-              style={{ marginRight: 4 }}
-            />
-            <Text style={styles.badgeText}>
-              {device.voltage}V
-            </Text>
-          </View>
-        )}
+        <Text style={styles.locationTitle}>Jericho Quarters</Text>
       </View>
     </TouchableOpacity>
   );
@@ -394,7 +385,6 @@ const getStyles = (theme: any) =>
     },
     timestampText: {
       fontSize: 13,
-      color: theme.textTertiary,
       fontWeight: "500",
     },
     locationRow: {

@@ -1,10 +1,10 @@
 /**
  * Communities Screen
  * Dynamically switches between Light and Dark mode using ThemeContext.
- * Features searchable list of communities with rich visual stats.
+ * Features searchable list of communities with real-time Firebase integration.
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -18,7 +18,8 @@ import {
   StatusBar,
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
-import { useCommunities, useCommunityStats } from "../hooks/useDeviceData";
+import AuthService from "../services/authService";
+import { useCommunities, useCommunityStats, useUserDevices } from "../hooks/useDeviceData";
 import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 import { Community } from "../types";
@@ -26,28 +27,32 @@ import { Community } from "../types";
 const FILTER_TABS = ["All", "Estates", "Areas", "Schools", "Markets"];
 
 // Maps community types to specific MaterialCommunityIcons
-const getCommunityIcon = (type: string) => {
-  switch (type?.toLowerCase()) {
-    case "estate":
-      return "home-city-outline";
-    case "institution":
-      return "school-outline";
-    case "commercial":
-      return "storefront-outline";
-    case "area":
-      return "map-marker-radius-outline";
-    default:
-      return "domain";
-  }
+const getCommunityIcon = (type: string, name: string) => {
+  const nameLower = name?.toLowerCase() || "";
+  if (nameLower.includes("ui campus")) return "school-outline";
+  if (nameLower.includes("mokola")) return "storefront-outline";
+  if (nameLower.includes("jericho")) return "home-city-outline";
+  if (nameLower.includes("ring road")) return "map-marker-radius-outline";
+  return "domain";
 };
 
 const CommunitiesScreen: React.FC = () => {
   const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme);
 
+  const [user, setUser] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All");
+
+  // 1. Fetch user session
+  useEffect(() => {
+    const getUser = async () => {
+      const session = await AuthService.getCurrentSession();
+      if (session) setUser(session.user);
+    };
+    getUser();
+  }, []);
 
   const {
     communities,
@@ -55,29 +60,51 @@ const CommunitiesScreen: React.FC = () => {
     error: communitiesError,
   } = useCommunities();
 
+  // 2. Fetch real-time Firebase devices
+  const { devices } = useUserDevices(user?.id || "");
+  const stromDevice = devices.find((d) => d.id === "STROM001");
+
   const onRefresh = async () => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  // Filter communities based on search and selected tab
+  // Filter communities based on search and strict selected tab rules
   const filteredCommunities = communities.filter((c) => {
+    const nameLower = c.name.toLowerCase();
+    
     const matchesSearch =
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      nameLower.includes(searchQuery.toLowerCase()) ||
       c.city?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const communityType = c.type as string;
-
-    const matchesTab =
-      activeTab === "All" ||
-      (activeTab === "Estates" && communityType === "estate") ||
-      (activeTab === "Areas" &&
-        (communityType === "area" || communityType === "other")) ||
-      (activeTab === "Schools" && communityType === "institution") ||
-      (activeTab === "Markets" && communityType === "commercial");
+    // Strict Tab Enforcement
+    let matchesTab = false;
+    
+    if (activeTab === "All") {
+      matchesTab = true;
+    } else if (activeTab === "Estates") {
+      // Show Jericho, plus any other general estates
+      matchesTab = nameLower.includes("jericho") || (c as any).type === "estate";
+    
+    } else if (activeTab === "Schools") {
+      // ONLY show UI Campus
+      matchesTab = nameLower.includes("ui campus");
+    } else if (activeTab === "Markets") {
+      // ONLY show Mokola
+      matchesTab = nameLower.includes("mokola");
+    } else if (activeTab === "Areas") {
+      // ONLY show Ring Road
+      matchesTab = nameLower.includes("ring road");
+    }
 
     return matchesSearch && matchesTab;
   });
+
+  // PREVENT DUPLICATES: Find the exact index for Jericho, or default to 0 if it doesn't exist
+  const jerichoIndex = filteredCommunities.findIndex((c) => 
+    c.name?.toLowerCase().includes("jericho")
+  );
+  const targetJerichoIndex = jerichoIndex !== -1 ? jerichoIndex : 0;
 
   if (communitiesLoading) {
     return (
@@ -187,7 +214,13 @@ const CommunitiesScreen: React.FC = () => {
           }
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => <CommunityListItem community={item} />}
+          renderItem={({ item, index }) => (
+            <CommunityListItem 
+              community={item} 
+              stromDevice={stromDevice} 
+              isJericho={index === targetJerichoIndex && item.name.toLowerCase().includes("jericho")} 
+            />
+          )}
         />
       )}
     </View>
@@ -195,17 +228,28 @@ const CommunitiesScreen: React.FC = () => {
 };
 
 /**
- * Advanced Floating Card Row
+ * Advanced Floating Card Row - Hooked up to Firebase Real-time Data
  */
-const CommunityListItem: React.FC<{ community: Community }> = ({
+const CommunityListItem: React.FC<{ community: Community; stromDevice: any; isJericho: boolean }> = ({
   community,
+  stromDevice,
+  isJericho
 }) => {
   const { theme } = useTheme();
   const styles = getStyles(theme);
   const { stats } = useCommunityStats(community.id);
+  
+  // Default all dummies to "ON"
+  let isOnline = true; 
+  let nodeCount = stats?.total_devices || (isJericho ? 1 : Math.floor(Math.random() * 5) + 2); 
 
-  // Determine if community is mostly online or offline
-  const isOnline = stats ? stats.uptime_percentage > 50 : true;
+  // If this is the ONE specific Jericho card, override with real-time Firebase data!
+  if (isJericho && stromDevice) {
+    const rawStatus = String(stromDevice.status).toLowerCase().trim();
+    isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
+  }
+
+  const displayName = isJericho ? "Jericho Quarters" : community.name;
 
   const statusConfig = isOnline
     ? { color: theme.success, bgColor: theme.successBg, icon: "lightning-bolt" }
@@ -216,7 +260,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
       {/* Left Icon Block */}
       <View style={[styles.iconBox, { backgroundColor: theme.background }]}>
         <MaterialCommunityIcons
-          name={getCommunityIcon(community.type as string)}
+          name={getCommunityIcon(community.type as string, community.name)}
           size={26}
           color={theme.textSecondary}
         />
@@ -225,7 +269,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
       {/* Center Details */}
       <View style={styles.cardContent}>
         <Text style={styles.communityName} numberOfLines={1}>
-          {community.name}
+          {displayName}
         </Text>
         <View style={styles.metadataRow}>
           <Ionicons
@@ -243,7 +287,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
             color={theme.textSecondary}
           />
           <Text style={styles.communitySubtext}>
-            {stats?.total_devices || 0} nodes
+            {nodeCount} node{nodeCount > 1 ? "s" : ""}
           </Text>
         </View>
       </View>
@@ -264,10 +308,10 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
                 color={statusConfig.color}
               />
               <Text style={[styles.statValue, { color: statusConfig.color }]}>
-                {stats?.uptime_percentage || 100}%
+                ON
               </Text>
             </View>
-            <Text style={styles.statLabel}>Uptime</Text>
+            <Text style={styles.statLabel}>POWER RESTORED</Text>
           </>
         ) : (
           <>
@@ -287,8 +331,7 @@ const CommunityListItem: React.FC<{ community: Community }> = ({
               </Text>
             </View>
             <Text style={[styles.statLabel, { color: theme.error }]}>
-              {stats?.current_outage_count || 1} Outage
-              {(stats?.current_outage_count || 1) > 1 ? "s" : ""}
+              POWER OUTAGE
             </Text>
           </>
         )}

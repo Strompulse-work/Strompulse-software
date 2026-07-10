@@ -18,7 +18,7 @@ import ContactsScreen from "../screens/ContactsScreen";
 import SafetySettingsScreen from "../screens/SafetySettingsScreen";
 import CommunitiesNavigator from "./CommunitiesNavigator";
 import MapScreen from "../screens/MapScreen";
-import InsightsScreen from "../screens/NotificationsScreen";
+import InsightsScreen from "../screens/InsightsScreen";
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
