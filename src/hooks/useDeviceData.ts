@@ -68,8 +68,94 @@ export const useAsync = <T>(
 };
 
 /**
+ * Hook to fetch all grid devices globally. 
+ * Bypasses user-specific restrictions and pulls everything directly from the Firebase stream.
+ */
+export const useAllGridDevices = () => {
+  const [devices, setDevices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let firebaseListener: any;
+    const rootFirebaseRef = ref(firebaseDb, "/");
+
+    const fetchAndSyncDevices = async () => {
+      try {
+        // 1. Fetch static structural assets from Supabase (optional metadata layer)
+        const { data: supabaseData, error: dbError } = await supabase
+          .from("devices")
+          .select("*");
+
+        if (dbError) console.warn("Supabase metadata fetch issue, relying on Firebase stream:", dbError);
+
+        // 2. Open a real-time stream subscription on the hardware Firebase root node
+        firebaseListener = onValue(rootFirebaseRef, (snapshot) => {
+          const liveHardwareTree = snapshot.val();
+
+          if (liveHardwareTree && liveHardwareTree.PowerMonitor) {
+            const powerMonitorNode = liveHardwareTree.PowerMonitor;
+
+            // 3. Dynamically map ALL hardware IDs currently transmitting in Firebase
+            const deviceIds = Object.keys(powerMonitorNode);
+
+            const synchronizedDevices = deviceIds.map((deviceId) => {
+              const hardwareMetrics = powerMonitorNode[deviceId]?.realtime || {};
+              // Match with Supabase metadata if it exists, otherwise use empty object
+              const dbDevice = (supabaseData || []).find((d: any) => d.device_id === deviceId) || {};
+
+              return {
+                ...dbDevice,
+                id: deviceId, // Force the ID so the UI mapping picks it up
+                status: hardwareMetrics.status !== undefined 
+                           ? Number(hardwareMetrics.status) 
+                           : Number(dbDevice.status || 0),
+                voltage: hardwareMetrics.voltage !== undefined ? hardwareMetrics.voltage : (dbDevice.voltage || 0),
+                updated_at: hardwareMetrics.timestamp || dbDevice.last_seen || Date.now(),
+                latitude: hardwareMetrics.latitude || dbDevice.latitude,
+                longitude: hardwareMetrics.longitude || dbDevice.longitude,
+              };
+            });
+
+            // Sort by operational timing so active alerts contextually float to the peak
+            const sortedDevices = synchronizedDevices.sort(
+              (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            );
+            
+            setDevices(sortedDevices);
+          } else {
+            // Fallback to purely Supabase data if the Firebase node goes missing
+            setDevices((supabaseData || []).map((d: any) => ({ ...d, id: d.device_id, updated_at: d.last_seen })));
+          }
+          setLoading(false);
+        }, (fbErr) => {
+          console.error("Firebase continuous pipe error:", fbErr);
+          setError(fbErr.message);
+          setLoading(false);
+        });
+      } catch (err: any) {
+        console.error("❌ Error setting up global hybrid engine hooks!");
+        setError(String(err?.message || err));
+        setLoading(false);
+      }
+    };
+
+    fetchAndSyncDevices();
+
+    // Clean up persistent hardware channel streams when component layout tears down
+    return () => {
+      if (firebaseListener) {
+        off(rootFirebaseRef, "value", firebaseListener);
+      }
+    };
+  }, []);
+
+  return { devices, loading, error };
+};
+
+/**
  * Hook to fetch and subscribe to user devices with HYBRID backend integration.
- * Pulls structure from Supabase and syncs hardware variables live from Firebase's PowerMonitor node.
+ * (Legacy/Private feed version - kept intact in case you need user-restricted views later)
  */
 export const useUserDevices = (userId: string) => {
   const [devices, setDevices] = useState<any[]>([]);
@@ -87,7 +173,6 @@ export const useUserDevices = (userId: string) => {
 
     const fetchAndSyncDevices = async () => {
       try {
-        // 1. Fetch static structural assets (Metadata, Names, Base coordinates) from Supabase
         const { data: supabaseData, error: dbError } = await supabase
           .from("devices")
           .select("*");
@@ -95,27 +180,21 @@ export const useUserDevices = (userId: string) => {
         if (dbError) throw dbError;
 
         if (supabaseData) {
-          // 2. Open a real-time stream subscription on the hardware guy's Firebase root node
           firebaseListener = onValue(rootFirebaseRef, (snapshot) => {
             const liveHardwareTree = snapshot.val();
 
-            // Check if the tree exists AND if the PowerMonitor node exists
             if (liveHardwareTree && liveHardwareTree.PowerMonitor) {
               const powerMonitorNode = liveHardwareTree.PowerMonitor;
 
-              // 3. Perform a relational join between local Supabase assets and incoming physical IoT signals
               const synchronizedDevices = supabaseData.map((dbDevice: any) => {
                 const hardwareMetrics = powerMonitorNode[dbDevice.device_id]?.realtime || {};
 
                 return {
                   ...dbDevice,
                   id: dbDevice.device_id,
-                  
-                  // THE FIX: Wrap both in Number() so it is strictly 1 or 0
                   status: hardwareMetrics.status !== undefined 
-                           ? Number(hardwareMetrics.status) 
-                           : Number(dbDevice.status),
-                           
+                             ? Number(hardwareMetrics.status) 
+                             : Number(dbDevice.status),
                   voltage: hardwareMetrics.voltage !== undefined ? hardwareMetrics.voltage : dbDevice.voltage,
                   updated_at: hardwareMetrics.timestamp || dbDevice.last_seen || Date.now(),
                   latitude: hardwareMetrics.latitude || dbDevice.latitude,
@@ -123,13 +202,11 @@ export const useUserDevices = (userId: string) => {
                 };
               });
 
-              // Sort by operational timing so active alerts contextually float to the peak
               const sortedDevices = synchronizedDevices.sort(
                 (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
               );
               setDevices(sortedDevices);
             } else {
-              // Fallback to purely Supabase data if the Firebase node goes missing
               setDevices(supabaseData.map(d => ({ ...d, id: d.device_id, updated_at: d.last_seen })));
             }
             setLoading(false);
@@ -139,10 +216,8 @@ export const useUserDevices = (userId: string) => {
             setLoading(false);
           });
         }
-     } catch (err: any) {
+      } catch (err: any) {
         console.error("❌ Error setting up hybrid engine hooks!");
-        console.error("Exact Error Message:", err?.message || err);
-        console.error("Firebase DB Connected:", !!firebaseDb);
         setError(String(err?.message || err));
         setLoading(false);
       }
@@ -150,7 +225,6 @@ export const useUserDevices = (userId: string) => {
 
     fetchAndSyncDevices();
 
-    // Clean up persistent hardware channel streams when component layout tears down
     return () => {
       if (firebaseListener) {
         off(rootFirebaseRef, "value", firebaseListener);

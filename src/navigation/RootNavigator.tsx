@@ -10,7 +10,7 @@ import PowerStatusNavigator from "./PowerStatusNavigator";
 import SafetyScreen from "../screens/SafetyScreen";
 import FeedTabScreen from "../screens/FeedTabScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
-import ProfileTabScreen from "../screens/ProfileTabScreen";
+import ProfileScreen from "../screens/ProfileScreen"; // Updated import for ProfileScreen
 
 // Import your new screens!
 import JourneyShareScreen from "../screens/JourneyShareScreen";
@@ -139,7 +139,7 @@ const MainTabs = () => {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileTabScreen}
+        component={ProfileScreen}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon focused={focused} activeIcon="account" inactiveIcon="account-outline" isDarkMode={isDarkMode} />

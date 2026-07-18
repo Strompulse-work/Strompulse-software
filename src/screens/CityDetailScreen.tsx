@@ -1,7 +1,7 @@
 /**
- * Communities Screen
+ * CityDetailsScreen
  * Dynamically switches between Light and Dark mode using ThemeContext.
- * Features searchable list of communities with real-time Firebase integration.
+ * Features searchable list of communities with global real-time Firebase integration.
  */
 
 import React, { useState, useEffect } from "react";
@@ -19,24 +19,36 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
 import AuthService from "../services/authService";
-import { useCommunities, useCommunityStats, useUserDevices } from "../hooks/useDeviceData";
+import { useAllGridDevices } from "../hooks/useDeviceData";
 import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
-import { Community } from "../types";
 
-const FILTER_TABS = ["All", "Estates", "Areas", "Schools", "Markets"];
+const FILTER_TABS = ["All", "Estates", "Areas", "Schools"];
 
-// Maps community types to specific MaterialCommunityIcons
-const getCommunityIcon = (type: string, name: string) => {
-  const nameLower = name?.toLowerCase() || "";
-  if (nameLower.includes("ui campus")) return "school-outline";
-  if (nameLower.includes("mokola")) return "storefront-outline";
-  if (nameLower.includes("jericho")) return "home-city-outline";
-  if (nameLower.includes("ring road")) return "map-marker-radius-outline";
-  return "domain";
+// --- GLOBAL HARDWARE TO LOCATION MAPPING ---
+const DEVICE_LOCATIONS: Record<string, { name: string; type: string }> = {
+  "STROM001": { name: "Jericho Quarters", type: "estate" },
+  "STROM002": { name: "Agodi GRA", type: "estate" },
+  "STROM003": { name: "Bodija Estate", type: "estate" },
+  "STROM004": { name: "Challenge", type: "area" },
+  "STROM005": { name: "Mokola", type: "area" },
+  "STROM006": { name: "Oluyole Estate", type: "estate" },
+  "STROM007": { name: "Ring Road Area", type: "area" },
+  "STROM008": { name: "UI Campus", type: "school" },
+  "STROM009": { name: "Mapo Hall", type: "area" },
+  "STROM010": { name: "Eleyele", type: "area" },
 };
 
-const CommunitiesScreen: React.FC = () => {
+// Maps community regions to specific MaterialCommunityIcons
+const getCommunityIcon = (type: string, name: string) => {
+  const nameLower = name?.toLowerCase() || "";
+  if (type === "school" || nameLower.includes("campus") || nameLower.includes("ui")) return "school-outline";
+  if (nameLower.includes("quarters") || nameLower.includes("jericho")) return "home-city-outline";
+  if (type === "estate") return "domain";
+  return "map-marker-radius-outline";
+};
+
+const CityDetailsScreen: React.FC = () => {
   const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme);
 
@@ -45,7 +57,6 @@ const CommunitiesScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All");
 
-  // 1. Fetch user session
   useEffect(() => {
     const getUser = async () => {
       const session = await AuthService.getCurrentSession();
@@ -55,58 +66,17 @@ const CommunitiesScreen: React.FC = () => {
   }, []);
 
   const {
-    communities,
-    loading: communitiesLoading,
-    error: communitiesError,
-  } = useCommunities();
-
-  // 2. Fetch real-time Firebase devices
-  const { devices } = useUserDevices(user?.id || "");
-  const stromDevice = devices.find((d) => d.id === "STROM001");
+    devices,
+    loading: devicesLoading,
+    error: devicesError,
+  } = useAllGridDevices();
 
   const onRefresh = async () => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  // Filter communities based on search and strict selected tab rules
-  const filteredCommunities = communities.filter((c) => {
-    const nameLower = c.name.toLowerCase();
-    
-    const matchesSearch =
-      nameLower.includes(searchQuery.toLowerCase()) ||
-      c.city?.toLowerCase().includes(searchQuery.toLowerCase());
-
-    // Strict Tab Enforcement
-    let matchesTab = false;
-    
-    if (activeTab === "All") {
-      matchesTab = true;
-    } else if (activeTab === "Estates") {
-      // Show Jericho, plus any other general estates
-      matchesTab = nameLower.includes("jericho") || (c as any).type === "estate";
-    
-    } else if (activeTab === "Schools") {
-      // ONLY show UI Campus
-      matchesTab = nameLower.includes("ui campus");
-    } else if (activeTab === "Markets") {
-      // ONLY show Mokola
-      matchesTab = nameLower.includes("mokola");
-    } else if (activeTab === "Areas") {
-      // ONLY show Ring Road
-      matchesTab = nameLower.includes("ring road");
-    }
-
-    return matchesSearch && matchesTab;
-  });
-
-  // PREVENT DUPLICATES: Find the exact index for Jericho, or default to 0 if it doesn't exist
-  const jerichoIndex = filteredCommunities.findIndex((c) => 
-    c.name?.toLowerCase().includes("jericho")
-  );
-  const targetJerichoIndex = jerichoIndex !== -1 ? jerichoIndex : 0;
-
-  if (communitiesLoading) {
+  if (devicesLoading && devices.length === 0) {
     return (
       <View style={[styles.container, styles.center]}>
         <Loading />
@@ -114,13 +84,49 @@ const CommunitiesScreen: React.FC = () => {
     );
   }
 
-  if (communitiesError) {
+  if (devicesError) {
     return (
       <View style={[styles.container, styles.center]}>
-        <ErrorMessage message={communitiesError} />
+        <ErrorMessage message={devicesError} />
       </View>
     );
   }
+
+  // Synchronize internal hardware arrays with localized dictionaries
+  const gridItems = Object.keys(DEVICE_LOCATIONS).map((id) => {
+    const liveDevice = devices.find((d) => d.id === id);
+    const meta = DEVICE_LOCATIONS[id];
+    
+    return {
+      id,
+      name: meta.name,
+      type: meta.type,
+      city: "Ibadan",
+      status: liveDevice ? liveDevice.status : 0,
+      voltage: liveDevice ? liveDevice.voltage : 0,
+    };
+  });
+
+  // Filter global regions based on search queries and selected category filter tabs
+  const filteredGrid = gridItems.filter((item) => {
+    const nameLower = item.name.toLowerCase();
+    const queryLower = searchQuery.toLowerCase();
+    
+    const matchesSearch = nameLower.includes(queryLower) || item.city.toLowerCase().includes(queryLower);
+
+    let matchesTab = false;
+    if (activeTab === "All") {
+      matchesTab = true;
+    } else if (activeTab === "Estates") {
+      matchesTab = item.type === "estate";
+    } else if (activeTab === "Areas") {
+      matchesTab = item.type === "area";
+    } else if (activeTab === "Schools") {
+      matchesTab = item.type === "school";
+    }
+
+    return matchesSearch && matchesTab;
+  });
 
   return (
     <View style={styles.container}>
@@ -160,7 +166,7 @@ const CommunitiesScreen: React.FC = () => {
         )}
       </View>
 
-      {/* Premium Filter Tabs */}
+      {/* Filter Tabs */}
       <View style={styles.tabsContainer}>
         <ScrollView
           horizontal
@@ -187,8 +193,8 @@ const CommunitiesScreen: React.FC = () => {
         </ScrollView>
       </View>
 
-      {/* Communities List */}
-      {filteredCommunities.length === 0 ? (
+      {/* Region Grid List */}
+      {filteredGrid.length === 0 ? (
         <View style={[styles.container, styles.center]}>
           <MaterialCommunityIcons
             name="map-search-outline"
@@ -196,14 +202,14 @@ const CommunitiesScreen: React.FC = () => {
             color={theme.textTertiary}
           />
           <Text
-            style={{ color: theme.textSecondary, marginTop: 16, fontSize: 16 }}
+            style={{ color: theme.textSecondary, marginTop: 16, fontSize: 16, fontFamily: "Sora_400Regular" }}
           >
             No locations match your search.
           </Text>
         </View>
       ) : (
         <FlatList
-          data={filteredCommunities}
+          data={filteredGrid}
           keyExtractor={(item) => item.id}
           refreshControl={
             <RefreshControl
@@ -214,12 +220,8 @@ const CommunitiesScreen: React.FC = () => {
           }
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item, index }) => (
-            <CommunityListItem 
-              community={item} 
-              stromDevice={stromDevice} 
-              isJericho={index === targetJerichoIndex && item.name.toLowerCase().includes("jericho")} 
-            />
+          renderItem={({ item }) => (
+            <RegionListItem region={item} />
           )}
         />
       )}
@@ -228,39 +230,25 @@ const CommunitiesScreen: React.FC = () => {
 };
 
 /**
- * Advanced Floating Card Row - Hooked up to Firebase Real-time Data
+ * Advanced Floating Card Row - Hooked up directly to Global Real-time Hardware Metrics
  */
-const CommunityListItem: React.FC<{ community: Community; stromDevice: any; isJericho: boolean }> = ({
-  community,
-  stromDevice,
-  isJericho
-}) => {
+const RegionListItem: React.FC<{ region: any }> = ({ region }) => {
   const { theme } = useTheme();
   const styles = getStyles(theme);
-  const { stats } = useCommunityStats(community.id);
   
-  // Default all dummies to "ON"
-  let isOnline = true; 
-  let nodeCount = stats?.total_devices || (isJericho ? 1 : Math.floor(Math.random() * 5) + 2); 
-
-  // If this is the ONE specific Jericho card, override with real-time Firebase data!
-  if (isJericho && stromDevice) {
-    const rawStatus = String(stromDevice.status).toLowerCase().trim();
-    isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
-  }
-
-  const displayName = isJericho ? "Jericho Quarters" : community.name;
+  const rawStatus = String(region.status).toLowerCase().trim();
+  const isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
 
   const statusConfig = isOnline
-    ? { color: theme.success, bgColor: theme.successBg, icon: "lightning-bolt" }
-    : { color: theme.error, bgColor: theme.errorBg, icon: "power-plug-off" };
+    ? { color: theme.success, bgColor: theme.successBg, icon: "lightning-bolt", label: "ON" }
+    : { color: theme.error, bgColor: theme.errorBg, icon: "power-plug-off", label: "OFF" };
 
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.7}>
       {/* Left Icon Block */}
       <View style={[styles.iconBox, { backgroundColor: theme.background }]}>
         <MaterialCommunityIcons
-          name={getCommunityIcon(community.type as string, community.name)}
+          name={getCommunityIcon(region.type, region.name)}
           size={26}
           color={theme.textSecondary}
         />
@@ -269,7 +257,7 @@ const CommunityListItem: React.FC<{ community: Community; stromDevice: any; isJe
       {/* Center Details */}
       <View style={styles.cardContent}>
         <Text style={styles.communityName} numberOfLines={1}>
-          {displayName}
+          {region.name}
         </Text>
         <View style={styles.metadataRow}>
           <Ionicons
@@ -278,7 +266,7 @@ const CommunityListItem: React.FC<{ community: Community; stromDevice: any; isJe
             color={theme.textSecondary}
           />
           <Text style={styles.communitySubtext}>
-            {community.city || "Ibadan"}
+            {region.city}
           </Text>
           <Text style={styles.bulletPoint}>•</Text>
           <MaterialCommunityIcons
@@ -286,55 +274,30 @@ const CommunityListItem: React.FC<{ community: Community; stromDevice: any; isJe
             size={14}
             color={theme.textSecondary}
           />
-          <Text style={styles.communitySubtext}>
-            {nodeCount} node{nodeCount > 1 ? "s" : ""}
-          </Text>
+
         </View>
       </View>
 
       {/* Right Side Rich Stats */}
       <View style={styles.cardStats}>
-        {isOnline ? (
-          <>
-            <View
-              style={[
-                styles.statusBadge,
-                { backgroundColor: statusConfig.bgColor },
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={statusConfig.icon as any}
-                size={14}
-                color={statusConfig.color}
-              />
-              <Text style={[styles.statValue, { color: statusConfig.color }]}>
-                ON
-              </Text>
-            </View>
-            <Text style={styles.statLabel}>POWER RESTORED</Text>
-          </>
-        ) : (
-          <>
-            <View
-              style={[
-                styles.statusBadge,
-                { backgroundColor: statusConfig.bgColor },
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={statusConfig.icon as any}
-                size={14}
-                color={statusConfig.color}
-              />
-              <Text style={[styles.statValue, { color: statusConfig.color }]}>
-                OFF
-              </Text>
-            </View>
-            <Text style={[styles.statLabel, { color: theme.error }]}>
-              POWER OUTAGE
-            </Text>
-          </>
-        )}
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: statusConfig.bgColor },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={statusConfig.icon as any}
+            size={14}
+            color={statusConfig.color}
+          />
+          <Text style={[styles.statValue, { color: statusConfig.color }]}>
+            {statusConfig.label}
+          </Text>
+        </View>
+        <Text style={[styles.statLabel, !isOnline && { color: theme.error }]}>
+          {isOnline ? "POWER RESTORED" : "POWER OUTAGE"}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -358,7 +321,7 @@ const getStyles = (theme: any) =>
     },
     headerTitle: {
       fontSize: 28,
-      fontWeight: "800",
+      fontFamily: "Sora_800ExtraBold",
       color: theme.textPrimary,
       letterSpacing: -0.5,
     },
@@ -393,7 +356,7 @@ const getStyles = (theme: any) =>
       flex: 1,
       color: theme.textPrimary,
       fontSize: 16,
-      fontWeight: "500",
+      fontFamily: "Sora_500Medium",
     },
     tabsContainer: {
       marginBottom: 12,
@@ -412,16 +375,16 @@ const getStyles = (theme: any) =>
       borderColor: theme.border,
     },
     activeTab: {
-      backgroundColor: theme.textPrimary, // Inverts based on theme
+      backgroundColor: theme.textPrimary,
       borderColor: theme.textPrimary,
     },
     tabText: {
       color: theme.textSecondary,
       fontSize: 14,
-      fontWeight: "600",
+      fontFamily: "Sora_600SemiBold",
     },
     activeTabText: {
-      color: theme.background, // Text becomes the background color for perfect contrast
+      color: theme.background,
     },
     listContainer: {
       paddingHorizontal: 20,
@@ -463,7 +426,7 @@ const getStyles = (theme: any) =>
     communityName: {
       color: theme.textPrimary,
       fontSize: 17,
-      fontWeight: "700",
+      fontFamily: "Sora_700Bold",
       marginBottom: 6,
       letterSpacing: -0.2,
     },
@@ -474,7 +437,7 @@ const getStyles = (theme: any) =>
     communitySubtext: {
       color: theme.textSecondary,
       fontSize: 13,
-      fontWeight: "500",
+      fontFamily: "Sora_500Medium",
       marginLeft: 4,
     },
     bulletPoint: {
@@ -497,16 +460,16 @@ const getStyles = (theme: any) =>
     },
     statValue: {
       fontSize: 14,
-      fontWeight: "800",
+      fontFamily: "Sora_800ExtraBold",
       marginLeft: 4,
     },
     statLabel: {
       color: theme.textSecondary,
       fontSize: 11,
-      fontWeight: "600",
+      fontFamily: "Sora_600SemiBold",
       textTransform: "uppercase",
       letterSpacing: 0.5,
     },
   });
 
-export default CommunitiesScreen;
+export default CityDetailsScreen;

@@ -31,7 +31,6 @@ const CitiesScreen = ({ navigation }: any) => {
       />
 
       <View style={styles.headerContainer}>
-        
         <Text style={styles.headerTitle}>Communities</Text>
       </View>
 
@@ -111,17 +110,21 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
     screenStep: {
       color: theme.textTertiary,
       fontSize: 11,
-      fontWeight: "800",
+      fontFamily: "Sora_800ExtraBold",
       letterSpacing: 1.5,
       marginBottom: 8,
       textAlign: "center",
     },
-    headerTitle: { fontSize: 32, fontWeight: "800", color: theme.textPrimary },
+    headerTitle: { 
+      fontSize: 32, 
+      fontFamily: "Sora_800ExtraBold", 
+      color: theme.textPrimary 
+    },
     scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
     sectionLabel: {
       color: theme.textSecondary,
       fontSize: 12,
-      fontWeight: "700",
+      fontFamily: "Sora_700Bold",
       letterSpacing: 1,
       marginTop: 20,
       marginBottom: 12,
@@ -147,8 +150,17 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       alignItems: "center",
       marginBottom: 4,
     },
-    cityName: { fontSize: 24, fontWeight: "700", color: theme.textPrimary },
-    stateName: { fontSize: 14, color: theme.textSecondary, marginBottom: 20 },
+    cityName: { 
+      fontSize: 24, 
+      fontFamily: "Sora_700Bold", 
+      color: theme.textPrimary 
+    },
+    stateName: { 
+      fontSize: 14, 
+      fontFamily: "Sora_400Regular",
+      color: theme.textSecondary, 
+      marginBottom: 20 
+    },
     activeFooter: {
       flexDirection: "row",
       justifyContent: "space-between",
@@ -173,7 +185,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
     pilotText: {
       color: theme.success,
       fontSize: 11,
-      fontWeight: "800",
+      fontFamily: "Sora_800ExtraBold",
       letterSpacing: 0.5,
     },
     arrowButton: {
@@ -186,7 +198,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
     },
     comingSoonText: {
       fontSize: 11,
-      fontWeight: "700",
+      fontFamily: "Sora_700Bold",
       color: theme.textTertiary,
       letterSpacing: 0.5,
       marginTop: 10,

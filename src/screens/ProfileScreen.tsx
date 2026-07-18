@@ -1,6 +1,6 @@
 /**
  * Profile Screen v2.0
- * Features: High-contrast UI, Stat Cards, Sectioned Menus, and Light/Dark Mode integration.
+ * Features: High-fidelity layout, Toggle switches, Real-time Linked Devices, and Theme integration.
  */
 
 import React, { useState, useEffect } from "react";
@@ -9,25 +9,31 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Alert,
   TouchableOpacity,
   Platform,
   StatusBar,
+  Switch,
 } from "react-native";
-import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
 import { useTheme } from "../theme/ThemeContext";
+import { useUserDevices } from "../hooks/useDeviceData";
 import { Loading } from "../components/UIComponents";
 import { User } from "../types";
 
 const ProfileScreen = () => {
-  const { theme, isDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const styles = getStyles(theme);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch user info
+  // Notification Toggles State
+  const [outageAlerts, setOutageAlerts] = useState(true);
+  const [restorationAlerts, setRestorationAlerts] = useState(true);
+  const [emailSummaries, setEmailSummaries] = useState(false);
+
+  // Fetch user session
   useEffect(() => {
     const getUser = async () => {
       try {
@@ -44,47 +50,13 @@ const ProfileScreen = () => {
     getUser();
   }, []);
 
-  const handleLogout = () => {
-    Alert.alert(
-      "Log Out",
-      "Are you sure you want to log out of your account?",
-      [
-        { text: "Cancel", onPress: () => {}, style: "cancel" },
-        {
-          text: "Log Out",
-          style: "destructive",
-          onPress: async () => {
-            const result = await AuthService.logout();
-            if (!result.success) {
-              Alert.alert("Error", result.error || "Failed to logout");
-            }
-          },
-        },
-      ],
-    );
-  };
+  // Fetch real-time devices for this user
+  const { devices, loading: devicesLoading } = useUserDevices(user?.id || "");
 
-  const handleChangePassword = () => {
-    Alert.prompt(
-      "Change Password",
-      "Enter your new password (min 6 characters)",
-      async (password) => {
-        if (password && password.length >= 6) {
-          const result = await AuthService.changePassword(password);
-          if (result.success) {
-            Alert.alert("Success", "Your password has been securely updated.");
-          } else {
-            Alert.alert("Error", result.error || "Failed to change password.");
-          }
-        } else {
-          Alert.alert("Error", "Password must be at least 6 characters long.");
-        }
-      },
-      "secure-text",
-    );
-  };
+  // Filter to show ONLY STROM001
+  const linkedDevices = devices.filter((device) => device.id === "STROM001");
 
-  if (loading) {
+  if (loading || (devicesLoading && devices.length === 0)) {
     return (
       <View style={[styles.container, styles.center]}>
         <Loading />
@@ -92,167 +64,165 @@ const ProfileScreen = () => {
     );
   }
 
-  if (!user) {
-    return null;
-  }
-
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: 60 }}
-    >
+    <View style={styles.container}>
       <StatusBar
         barStyle={isDarkMode ? "light-content" : "dark-content"}
         backgroundColor={theme.background}
       />
+      
+      {/* Header Area */}
+      <View style={styles.headerArea}>
+        <Text style={styles.headerTitle}>Profile & Settings</Text>
+      </View>
 
-      {/* Hero Avatar Section */}
-      <View style={styles.avatarSection}>
-        <View style={styles.avatarCircle}>
-          <Text style={styles.avatarText}>
-            {user.full_name?.charAt(0).toUpperCase() || "A"}
-          </Text>
-        </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         
-        <Text style={styles.userName}>{user.full_name || "Awoniyi"}</Text>
-        <Text style={styles.userLocation}>Carlton Gate Estate, Ibadan</Text>
-        
-        <View style={styles.securityBadge}>
-          <MaterialCommunityIcons name="shield-check-outline" size={14} color="#00C48A" />
-          <Text style={styles.securityText}>Strompulse Security</Text>
+        {/* User Info Card */}
+        <View style={styles.userCard}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarText}>
+              {user?.full_name?.charAt(0).toUpperCase() || "T"}
+            </Text>
+          </View>
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{user?.full_name || "Taiwo Afolabi"}</Text>
+            <Text style={styles.userEmail}>{user?.email || "taiwoafolabi609@gmail.com"}</Text>
+            {/* <View style={styles.premiumBadge}>
+              <Text style={styles.premiumText}>PREMIUM MEMBER</Text>
+            </View> */}
+          </View>
         </View>
-      </View>
 
-      {/* Stats Row */}
-      <View style={styles.statsContainer}>
-        <StatCard count="2" label="COMMUNITIES" theme={theme} />
-        <StatCard count="3" label="ALERT CONTACTS" theme={theme} />
-        <StatCard count="7" label="REPORTS" theme={theme} />
-      </View>
+        {/* Linked Devices Section */}
+        {/* <Text style={styles.sectionHeader}>LINKED DEVICES</Text>
+        <View style={styles.cardBlock}>
+          {linkedDevices.length === 0 ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <Text style={{ color: theme.textSecondary, fontFamily: "Sora_400Regular" }}>No active devices found.</Text>
+            </View>
+          ) : (
+            linkedDevices.map((device, index) => {
+              // Bulletproof real-time status check
+              const rawStatus = String(device.status).toLowerCase().trim();
+              const isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
 
-      {/* Account Section */}
-      <View style={styles.menuSection}>
-        <Text style={styles.menuSectionTitle}>ACCOUNT</Text>
-        <View style={styles.menuCard}>
-          <MenuItem 
-            iconName="user" 
-            IconProvider={Feather} 
-            label="Edit Profile" 
-            color={theme.textSecondary} 
-            theme={theme}
-            onPress={handleChangePassword} 
-          />
-          <MenuItem 
-            iconName="bell" 
-            IconProvider={Feather} 
-            label="My Subscriptions" 
-            color="#EAB308" // Gold
-            theme={theme}
-            borderTop 
-          />
-          <MenuItem 
-            iconName="link" 
-            IconProvider={Feather} 
-            label="Invite Friends" 
-            color={theme.textSecondary} 
-            theme={theme}
-            borderTop 
-          />
-          <MenuItem 
-            iconName="lock" 
-            IconProvider={Feather} 
-            label="Privacy Settings" 
-            color="#EAB308" // Gold
-            theme={theme}
-            borderTop 
-          />
+              return (
+                <View key={device.id}>
+                  <View style={styles.deviceRow}>
+                    <View style={styles.deviceRowLeft}>
+                      <MaterialCommunityIcons 
+                        name="router-wireless" 
+                        size={24} 
+                        color={theme.textPrimary} 
+                        style={styles.deviceIcon} 
+                      />
+                      <View>
+                        <Text style={styles.deviceName}>{device.id}</Text>
+                        <Text style={styles.deviceLocation}>{device.address || "Jericho Quarters"}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.statusIndicator}>
+                      <View 
+                        style={[
+                          styles.statusDot, 
+                          { backgroundColor: isOnline ? "#00C48A" : "#EF4444" }
+                        ]} 
+                      />
+                      <Text style={[
+                        styles.statusText, 
+                        { color: isOnline ? "#00C48A" : "#EF4444" }
+                      ]}>
+                        {isOnline ? "ONLINE" : "OFFLINE"}
+                      </Text>
+                    </View>
+                  </View>
+                  {index < linkedDevices.length - 1 && <View style={styles.divider} />}
+                </View>
+              );
+            })
+          )}
+        </View> */}
+
+        {/* App Settings Section */}
+        <Text style={styles.sectionHeader}>APP SETTINGS</Text>
+        <View style={styles.cardBlock}>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleRowLeft}>
+              <MaterialCommunityIcons name="moon-waning-crescent" size={22} color={theme.textPrimary} />
+              <Text style={styles.toggleLabel}>Dark Mode</Text>
+            </View>
+            <Switch
+              value={isDarkMode}
+              onValueChange={() => toggleDarkMode()} // Explicit function call prevents boolean argument errors
+              trackColor={{ false: theme.border, true: "#00C48A" }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
         </View>
-      </View>
 
-      {/* Strompulse Section */}
-      <View style={styles.menuSection}>
-        <Text style={styles.menuSectionTitle}>STROMPULSE</Text>
-        <View style={styles.menuCard}>
-          <MenuItem 
-            iconName="lightning-bolt" 
-            IconProvider={MaterialCommunityIcons} 
-            label="About Strompulse" 
-            color="#EAB308" // Gold
-            theme={theme}
-          />
-          <MenuItem 
-            iconName="help-circle" 
-            IconProvider={Feather} 
-            label="Help & Support" 
-            color="#EF4444" // Red
-            theme={theme}
-            borderTop 
-          />
-          <MenuItem 
-            iconName="star" 
-            IconProvider={Feather} 
-            label="Rate the App" 
-            color="#EAB308" // Gold
-            theme={theme}
-            borderTop 
-          />
-          {/* Preserved Logout Functionality */}
-          <MenuItem 
-            iconName="log-out" 
-            IconProvider={Feather} 
-            label="Log Out" 
-            color="#EF4444" // Red
-            theme={theme}
-            borderTop 
-            onPress={handleLogout}
-          />
+        {/* Notifications Section */}
+        <Text style={styles.sectionHeader}>NOTIFICATIONS</Text>
+        <View style={styles.cardBlock}>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleRowLeft}>
+              <MaterialCommunityIcons name="bell-outline" size={22} color={theme.textPrimary} />
+              <Text style={styles.toggleLabel}>Outage Alerts</Text>
+            </View>
+            <Switch
+              value={outageAlerts}
+              onValueChange={setOutageAlerts}
+              trackColor={{ false: theme.border, true: "#00C48A" }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+          <View style={styles.divider} />
+          
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleRowLeft}>
+              <MaterialCommunityIcons name="lightning-bolt-outline" size={22} color={theme.textPrimary} />
+              <Text style={styles.toggleLabel}>Restoration Alerts</Text>
+            </View>
+            <Switch
+              value={restorationAlerts}
+              onValueChange={setRestorationAlerts}
+              trackColor={{ false: theme.border, true: "#00C48A" }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+          <View style={styles.divider} />
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleRowLeft}>
+              <MaterialCommunityIcons name="email-outline" size={22} color={theme.textPrimary} />
+              <Text style={styles.toggleLabel}>Email Summaries</Text>
+            </View>
+            <Switch
+              value={emailSummaries}
+              onValueChange={setEmailSummaries}
+              trackColor={{ false: theme.border, true: "#00C48A" }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
         </View>
-      </View>
 
-      {/* Footer */}
-      <View style={styles.footerContainer}>
-        <Text style={styles.footerVersion}>Strompulse v1.0.0 • Real-time Power Visibility</Text>
-        <View style={styles.statusIndicator}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusText}>All systems normal</Text>
+        {/* Log Out Button mapped as a card */}
+        <View style={[styles.cardBlock, { marginTop: 12 }]}>
+           <TouchableOpacity 
+             style={styles.toggleRow}
+             onPress={async () => {
+                await AuthService.logout();
+             }}
+           >
+             <View style={styles.toggleRowLeft}>
+               <MaterialCommunityIcons name="logout" size={22} color="#EF4444" />
+               <Text style={[styles.toggleLabel, { color: "#EF4444" }]}>Log Out</Text>
+             </View>
+           </TouchableOpacity>
         </View>
-      </View>
-    </ScrollView>
-  );
-};
 
-/**
- * Reusable Stat Card Component
- */
-const StatCard = ({ count, label, theme }: { count: string, label: string, theme: any }) => {
-  const styles = getStyles(theme);
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statNumber}>{count}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      </ScrollView>
     </View>
-  );
-};
-
-/**
- * Reusable Menu Item Component
- */
-const MenuItem = ({ iconName, IconProvider, label, color, borderTop, theme, onPress }: any) => {
-  const styles = getStyles(theme);
-  return (
-    <TouchableOpacity 
-      style={[styles.menuItem, borderTop && styles.borderTop]} 
-      onPress={onPress}
-      activeOpacity={0.7}
-      disabled={!onPress}
-    >
-      <View style={styles.menuItemLeft}>
-        <IconProvider name={iconName} size={20} color={color} />
-        <Text style={styles.menuItemText}>{label}</Text>
-      </View>
-      <Feather name="chevron-right" size={20} color={theme.textTertiary || theme.border} />
-    </TouchableOpacity>
   );
 };
 
@@ -267,154 +237,153 @@ const getStyles = (theme: any) =>
       justifyContent: "center",
       alignItems: "center",
     },
-    avatarSection: {
+    headerArea: {
       alignItems: "center",
-      marginTop: Platform.OS === "ios" ? 60 : 40,
+      paddingTop: Platform.OS === "ios" ? 60 : 40,
+      paddingBottom: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
     },
-    avatarCircle: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
-      borderWidth: 2,
-      borderColor: "#00C48A", // PRD Accent Green
-      backgroundColor: theme.cardBg,
-      justifyContent: "center",
-      alignItems: "center",
-      shadowColor: "#00C48A",
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.2,
-      shadowRadius: 10,
-      elevation: 5,
-    },
-    avatarText: {
-      fontSize: 32,
-      fontWeight: "800",
-      color: "#00C48A",
-    },
-    userName: {
-      fontSize: 22,
-      fontWeight: "800",
+    headerTitle: {
+      fontSize: 16,
+      fontFamily: "Sora_700Bold",
       color: theme.textPrimary,
-      marginTop: 16,
-      letterSpacing: -0.5,
     },
-    userLocation: {
-      fontSize: 14,
-      fontWeight: "500",
-      color: theme.textSecondary,
-      marginTop: 4,
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingBottom: 100,
+      paddingTop: 24,
     },
-    securityBadge: {
+    userCard: {
       flexDirection: "row",
-      alignItems: "center",
-      marginTop: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: "rgba(0, 196, 138, 0.3)",
-      backgroundColor: "rgba(0, 196, 138, 0.05)",
-    },
-    securityText: {
-      fontSize: 12,
-      fontWeight: "700",
-      color: "#00C48A",
-      marginLeft: 6,
-    },
-    statsContainer: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      marginHorizontal: 20,
-      marginTop: 32,
-    },
-    statCard: {
-      flex: 1,
       backgroundColor: theme.cardBg,
       borderRadius: 16,
+      padding: 20,
       borderWidth: 1,
       borderColor: theme.border,
-      paddingVertical: 16,
       alignItems: "center",
-      marginHorizontal: 4,
+      marginBottom: 32,
     },
-    statNumber: {
-      fontSize: 22,
-      fontWeight: "800",
+    avatarCircle: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: "rgba(0, 196, 138, 0.15)",
+      borderWidth: 1,
+      borderColor: "#00C48A",
+      justifyContent: "center",
+      alignItems: "center",
+      marginRight: 16,
+    },
+    avatarText: {
+      fontSize: 24,
+      fontFamily: "Sora_800ExtraBold",
+      color: "#00C48A",
+    },
+    userInfo: {
+      flex: 1,
+      justifyContent: "center",
+    },
+    userName: {
+      fontSize: 18,
+      fontFamily: "Sora_700Bold",
       color: theme.textPrimary,
+      marginBottom: 4,
     },
-    statLabel: {
-      fontSize: 10,
-      fontWeight: "700",
+    userEmail: {
+      fontSize: 13,
+      fontFamily: "Sora_400Regular",
       color: theme.textSecondary,
-      marginTop: 6,
+      marginBottom: 8,
+    },
+    premiumBadge: {
+      alignSelf: "flex-start",
+      backgroundColor: "rgba(139, 92, 246, 0.15)", // Subtle purple tint
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+    },
+    premiumText: {
+      fontSize: 10,
+      fontFamily: "Sora_800ExtraBold",
+      color: "#8B5CF6",
       letterSpacing: 0.5,
     },
-    menuSection: {
-      marginHorizontal: 20,
-      marginTop: 32,
-    },
-    menuSectionTitle: {
+    sectionHeader: {
       fontSize: 12,
-      fontWeight: "800",
+      fontFamily: "Sora_800ExtraBold",
       color: theme.textSecondary,
-      marginBottom: 12,
       letterSpacing: 1,
+      marginBottom: 12,
       marginLeft: 4,
     },
-    menuCard: {
+    cardBlock: {
       backgroundColor: theme.cardBg,
       borderRadius: 16,
       borderWidth: 1,
       borderColor: theme.border,
       overflow: "hidden",
+      marginBottom: 32,
     },
-    menuItem: {
+    deviceRow: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
       padding: 16,
-      backgroundColor: theme.cardBg,
     },
-    menuItemLeft: {
+    deviceRowLeft: {
       flexDirection: "row",
       alignItems: "center",
     },
-    menuItemText: {
+    deviceIcon: {
+      marginRight: 16,
+    },
+    deviceName: {
       fontSize: 15,
-      fontWeight: "600",
+      fontFamily: "Sora_700Bold",
       color: theme.textPrimary,
-      marginLeft: 16,
+      marginBottom: 4,
     },
-    borderTop: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
-    },
-    footerContainer: {
-      alignItems: "center",
-      marginTop: 40,
-      opacity: 0.8,
-    },
-    footerVersion: {
+    deviceLocation: {
       fontSize: 12,
-      fontWeight: "500",
+      fontFamily: "Sora_400Regular",
       color: theme.textSecondary,
-      marginBottom: 8,
     },
     statusIndicator: {
       flexDirection: "row",
       alignItems: "center",
     },
     statusDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: "#00C48A",
+      width: 8,
+      height: 8,
+      borderRadius: 4,
       marginRight: 6,
     },
     statusText: {
-      fontSize: 12,
-      fontWeight: "700",
-      color: "#00C48A",
+      fontSize: 10,
+      fontFamily: "Sora_800ExtraBold",
+      letterSpacing: 0.5,
+    },
+    toggleRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: 16,
+    },
+    toggleRowLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    toggleLabel: {
+      fontSize: 15,
+      fontFamily: "Sora_600SemiBold",
+      color: theme.textPrimary,
+      marginLeft: 16,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: theme.border,
+      marginLeft: 54, // Aligns divider with text, skips icons
     },
   });
 

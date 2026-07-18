@@ -380,12 +380,16 @@ const styles = StyleSheet.create({
   titleContainer: { marginBottom: 32, alignItems: "flex-start" },
   title: {
     fontSize: 38,
-    fontWeight: "900",
+    fontFamily: "Sora_800ExtraBold",
     color: THEME.textPrimary,
     letterSpacing: -0.5,
     marginBottom: 8,
   },
-  subtitle: { fontSize: 16, color: THEME.textSecondary, fontWeight: "500" },
+  subtitle: { 
+    fontSize: 16, 
+    color: THEME.textSecondary, 
+    fontFamily: "Sora_500Medium" 
+  },
   formContainer: { gap: 16, marginBottom: 24 },
   inputWrapper: {
     flexDirection: "row",
@@ -401,14 +405,14 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    fontWeight: "500",
+    fontFamily: "Sora_500Medium",
     color: THEME.textPrimary,
     padding: 0,
   },
   errorText: {
     color: THEME.error,
     fontSize: 13,
-    fontWeight: "500",
+    fontFamily: "Sora_500Medium",
     marginTop: -8,
     marginLeft: 4,
   },
@@ -430,7 +434,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0,
     elevation: 0,
   },
-  createButtonText: { fontSize: 18, fontWeight: "bold", color: "#FFFFFF" },
+  createButtonText: { 
+    fontSize: 18, 
+    fontFamily: "Sora_700Bold", 
+    color: "#FFFFFF" 
+  },
   dividerContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -441,7 +449,7 @@ const styles = StyleSheet.create({
     color: THEME.textSecondary,
     paddingHorizontal: 16,
     fontSize: 13,
-    fontWeight: "600",
+    fontFamily: "Sora_600SemiBold",
   },
   googleButton: {
     backgroundColor: THEME.background,
@@ -456,7 +464,7 @@ const styles = StyleSheet.create({
   },
   googleButtonText: {
     fontSize: 16,
-    fontWeight: "bold",
+    fontFamily: "Sora_700Bold",
     color: THEME.textPrimary,
   },
   signInContainer: {
@@ -465,8 +473,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 32,
   },
-  signInText: { fontSize: 15, color: THEME.textSecondary, fontWeight: "500" },
-  signInLink: { fontSize: 15, fontWeight: "bold", color: THEME.success },
+  signInText: { 
+    fontSize: 15, 
+    color: THEME.textSecondary, 
+    fontFamily: "Sora_500Medium" 
+  },
+  signInLink: { 
+    fontSize: 15, 
+    fontFamily: "Sora_700Bold", 
+    color: THEME.success 
+  },
 });
 
 export default SignupScreen;

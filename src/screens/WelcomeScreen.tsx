@@ -69,7 +69,7 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
           {/* Minimalist Login Link */}
           <TouchableOpacity onPress={handleLogIn} style={styles.loginLink}>
             <Text style={styles.loginText}>
-              Already have an account? <Text style={{ fontWeight: "bold" }}>Log in</Text>
+              Already have an account? <Text style={{ fontFamily: "Sora_700Bold" }}>Log in</Text>
             </Text>
           </TouchableOpacity>
         </View>
@@ -105,13 +105,13 @@ const styles = StyleSheet.create({
   subTextLight: {
     fontSize: 26,
     color: THEME.textPrimary,
-    fontWeight: "600",
+    fontFamily: "Sora_600SemiBold",
     marginBottom: -2, 
   },
   subTextBold: {
     fontSize: 38,
     color: THEME.textPrimary,
-    fontWeight: "900", // Heavy bold to match the mockup
+    fontFamily: "Sora_800ExtraBold", // Heavy bold to match the mockup
     marginBottom: 32,
     letterSpacing: -0.5,
   },
@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: "Sora_700Bold",
     color: "#FFFFFF", // White text on the green button
   },
   loginLink: {
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: THEME.textPrimary,
     opacity: 0.8,
-    fontWeight: "500",
+    fontFamily: "Sora_500Medium",
   },
 });
 

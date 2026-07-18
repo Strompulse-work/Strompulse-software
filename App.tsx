@@ -5,10 +5,23 @@
  */
 
 import React, { useEffect, useState } from "react";
+// 1. Import React Native components needed for the global override
+import { Text, TextInput } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
+
+// 2. Import the Sora fonts
+import {
+  useFonts,
+  Sora_400Regular,
+  Sora_500Medium,
+  Sora_600SemiBold,
+  Sora_700Bold,
+  Sora_800ExtraBold,
+} from "@expo-google-fonts/sora";
+
 import { supabase } from "./src/config/supabase";
 import AuthService from "./src/services/authService";
 import { ThemeProvider } from "./src/theme/ThemeContext";
@@ -17,13 +30,44 @@ import RootNavigator from "./src/navigation/RootNavigator";
 import { Colors } from "./src/styles/theme";
 import CustomSplashScreen from "./src/screens/CustomSplashScreen";
 
+// Prevent the native splash screen from auto-hiding before fonts are ready
+SplashScreen.preventAutoHideAsync();
+
+// 3. GLOBAL FONT OVERRIDE
+// This forces every Text and TextInput component to use Sora by default
+const customTextProps = {
+  style: {
+    fontFamily: "Sora_400Regular",
+  },
+};
+
+// @ts-ignore
+Text.defaultProps = Text.defaultProps || {};
+// @ts-ignore
+Text.defaultProps.style = { ...(Text.defaultProps.style || {}), ...customTextProps.style };
+
+// @ts-ignore
+TextInput.defaultProps = TextInput.defaultProps || {};
+// @ts-ignore
+TextInput.defaultProps.style = { ...(TextInput.defaultProps.style || {}), ...customTextProps.style };
+
+
 export default function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // 4. Load the fonts into memory
+  const [fontsLoaded, fontError] = useFonts({
+    Sora_400Regular,
+    Sora_500Medium,
+    Sora_600SemiBold,
+    Sora_700Bold,
+    Sora_800ExtraBold,
+  });
+
   useEffect(() => {
-    // Prevent the native splash screen from auto-hiding immediately
-    SplashScreen.preventAutoHideAsync();
+    // Wait until fonts are successfully loaded or failed before running your boot sequence
+    if (!fontsLoaded && !fontError) return;
 
     const bootstrapAsync = async () => {
       try {
@@ -31,8 +75,6 @@ export default function App() {
         await SplashScreen.hideAsync();
 
         // 2. Run the Auth check AND a 2-second timer at the exact same time.
-        // This guarantees the splash screen stays visible for exactly 2 seconds, 
-        // mimicking the professional WhatsApp/Instagram loading flow.
         const [isAuthenticated] = await Promise.all([
           AuthService.isAuthenticated(),
           new Promise((resolve) => setTimeout(resolve, 2000)), 
@@ -66,7 +108,12 @@ export default function App() {
       subscription?.unsubscribe();
       RealtimeService.unsubscribeAll();
     };
-  }, []);
+  }, [fontsLoaded, fontError]); // Re-run this effect when font status changes
+
+  // Keep the native splash screen locked until fonts are ready so we don't get a flash of missing fonts
+  if (!fontsLoaded && !fontError) {
+    return null;
+  }
 
   // Show the custom splash screen while the 2-second timer and auth check are running
   if (isLoading) {
