@@ -2,6 +2,7 @@
  * CityDetailsScreen
  * Dynamically switches between Light and Dark mode using ThemeContext.
  * Features searchable list of communities with global real-time Firebase integration.
+ * Integrated with 60-second heartbeat Online/Offline logic.
  */
 
 import React, { useState, useEffect } from "react";
@@ -19,7 +20,7 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
 import AuthService from "../services/authService";
-import { useAllGridDevices } from "../hooks/useDeviceData";
+import { useAllGridDevices, checkIsDeviceOnline } from "../hooks/useDeviceData";
 import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 
@@ -56,6 +57,7 @@ const CityDetailsScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All");
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   useEffect(() => {
     const getUser = async () => {
@@ -63,6 +65,12 @@ const CityDetailsScreen: React.FC = () => {
       if (session) setUser(session.user);
     };
     getUser();
+  }, []);
+
+  // Ticking Clock to force re-evaluations of offline thresholds smoothly
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const {
@@ -104,6 +112,7 @@ const CityDetailsScreen: React.FC = () => {
       city: "Ibadan",
       status: liveDevice ? liveDevice.status : 0,
       voltage: liveDevice ? liveDevice.voltage : 0,
+      timestamp: liveDevice ? (liveDevice.updated_at || liveDevice.timestamp) : 0,
     };
   });
 
@@ -211,6 +220,7 @@ const CityDetailsScreen: React.FC = () => {
         <FlatList
           data={filteredGrid}
           keyExtractor={(item) => item.id}
+          extraData={{ filteredGrid, currentTime }} // Forces re-render on clock tick
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -236,8 +246,8 @@ const RegionListItem: React.FC<{ region: any }> = ({ region }) => {
   const { theme } = useTheme();
   const styles = getStyles(theme);
   
-  const rawStatus = String(region.status).toLowerCase().trim();
-  const isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
+  // Apply 60-second heartbeat check directly
+  const isOnline = checkIsDeviceOnline({ status: region.status, timestamp: region.timestamp }, 60);
 
   const statusConfig = isOnline
     ? { color: theme.success, bgColor: theme.successBg, icon: "lightning-bolt", label: "ON" }

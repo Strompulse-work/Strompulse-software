@@ -3,6 +3,7 @@
  * Dynamically switches between Light and Dark mode using ThemeContext.
  * Features auto-ticking relative timestamps and active sorting.
  * Global Grid Version: Shows all 10 locations to all users.
+ * Integrated with 60-second heartbeat Online/Offline logic.
  */
 
 import React, { useEffect, useState } from "react";
@@ -17,10 +18,9 @@ import {
   StatusBar,
   Platform,
 } from "react-native";
-import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import AuthService from "../services/authService";
-// CHANGED: We will use a new global hook instead of the user-restricted one
-import { useAllGridDevices } from "../hooks/useDeviceData"; 
+import { useAllGridDevices, checkIsDeviceOnline, parseStromTimestamp } from "../hooks/useDeviceData"; 
 import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
 
@@ -40,28 +40,16 @@ const DEVICE_LOCATIONS: Record<string, string> = {
   "STROM010": "Eleyele",
 };
 
-// Helper to parse both standard dates AND the custom IoT hardware format (DDMMYYYYHHMMSS)
-const parseDeviceTime = (dateInput: string | number) => {
-  if (!dateInput) return 0;
-  const tsStr = String(dateInput);
-  
-  if (tsStr.length === 14 && /^\d+$/.test(tsStr)) {
-    const day = parseInt(tsStr.substring(0, 2), 10);
-    const month = parseInt(tsStr.substring(2, 4), 10) - 1; 
-    const year = parseInt(tsStr.substring(4, 8), 10);
-    const hour = parseInt(tsStr.substring(8, 10), 10);
-    const minute = parseInt(tsStr.substring(10, 12), 10);
-    const second = parseInt(tsStr.substring(12, 14), 10);
-    return new Date(year, month, day, hour, minute, second).getTime();
-  }
-  
-  return new Date(dateInput).getTime() || 0;
+// Helper to convert the parsed Date into raw milliseconds for sorting and math
+const getTimestampMs = (dateInput: string | number | undefined) => {
+  const d = parseStromTimestamp(dateInput);
+  return d ? d.getTime() : 0;
 };
 
 // Advanced Relative Time formatter
 const getRelativeTime = (dateInput: string | number, nowTime: number, isOnline: boolean) => {
-  const past = parseDeviceTime(dateInput);
-  if (!past || isNaN(past)) return "Unknown";
+  const past = getTimestampMs(dateInput);
+  if (!past) return "Unknown";
 
   const diffInSeconds = Math.floor(Math.max(nowTime - past, 0) / 1000);
   let timeString = "";
@@ -79,9 +67,9 @@ const getRelativeTime = (dateInput: string | number, nowTime: number, isOnline: 
 
 // Safely grabs the most recent timestamp to sort by
 const getLatestTimestamp = (device: any) => {
-  const timestamp = parseDeviceTime(device.timestamp);
-  const lastSeen = parseDeviceTime(device.last_seen);
-  const updatedAt = parseDeviceTime(device.updated_at);
+  const timestamp = getTimestampMs(device.timestamp);
+  const lastSeen = getTimestampMs(device.last_seen);
+  const updatedAt = getTimestampMs(device.updated_at);
   return Math.max(timestamp, lastSeen, updatedAt, 0);
 };
 
@@ -110,7 +98,7 @@ const FeedScreen: React.FC = () => {
     getUser();
   }, []);
 
-  // 2. Ticking Clock
+  // 2. Ticking Clock (Forces re-renders to evaluate offline threshold smoothly)
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -195,7 +183,7 @@ const FeedScreen: React.FC = () => {
       ) : (
         <FlatList
           data={feedItems}
-          extraData={feedItems}
+          extraData={{ feedItems, currentTime }} // Ensure updates happen when clock ticks
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
           refreshControl={
@@ -220,10 +208,11 @@ const FeedCard: React.FC<{ device: any; currentTime: number }> = ({ device, curr
   const { theme } = useTheme();
   const styles = getStyles(theme);
   
-  const rawStatus = String(device.status).toLowerCase().trim();
-  const isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
-  
   const displayTime = device.timestamp || device.updated_at || device.last_seen || Date.now();
+
+  // Evaluates device status dynamically on every second tick using the 60-second rule.
+  // If the device loses connection, it will automatically switch to offline without needing a Firebase update.
+  const isOnline = checkIsDeviceOnline({ status: device.status, timestamp: displayTime }, 60);
 
   const locationName = DEVICE_LOCATIONS[device.id] || `Unknown Grid (${device.id})`;
 
@@ -267,7 +256,6 @@ const FeedCard: React.FC<{ device: any; currentTime: number }> = ({ device, curr
               size={12} 
               color={theme.textTertiary} 
             />
-            {/* Inline style font fix applied here */}
             <Text style={{ fontSize: 10, color: theme.textTertiary, fontFamily: "Sora_600SemiBold", marginLeft: 2, letterSpacing: 0.3 }}>
               Ref: Local Transformer
             </Text>

@@ -1,7 +1,8 @@
 /**
  * Insights Screen (Global Grid Version)
  * Aggregates real-time power metrics across all 10 STROM devices.
- * Features: 2 Real-time dynamic line charts (Stability Trend & Outage Events).
+ * Features: 4 Real-time stat widgets & 2 dynamic gradient line charts.
+ * Integrated with 60-second heartbeat Online/Offline logic.
  */
 
 import React, { useState } from "react";
@@ -16,7 +17,7 @@ import {
   StatusBar,
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useAllGridDevices } from "../hooks/useDeviceData";
 import { useTheme } from "../theme/ThemeContext";
 import { Loading, ErrorMessage } from "../components/UIComponents";
@@ -52,14 +53,13 @@ const InsightsScreen: React.FC = () => {
     );
   }
 
-  // 2. Real-time Aggregation Logic
-  // Calculate how many devices are currently online vs offline
-  const onlineDevices = devices.filter((d) => String(d.status) === "1" || String(d.status).toLowerCase() === "on");
+  // 2. Real-time Aggregation Logic using the 60s Heartbeat (d.isOnline)
+  const onlineDevices = devices.filter((d) => d.isOnline);
   const totalNodes = devices.length || 10;
   const offlineCount = totalNodes - onlineDevices.length;
   const gridUptimePercentage = Math.round((onlineDevices.length / totalNodes) * 100);
   
-  const isGridHealthy = gridUptimePercentage > 50;
+  const isGridHealthy = gridUptimePercentage >= 50;
   const statusColor = isGridHealthy ? theme.success : theme.error;
   const statusBgColor = isGridHealthy ? theme.successBg : theme.errorBg;
 
@@ -78,6 +78,7 @@ const InsightsScreen: React.FC = () => {
         <Text style={styles.headerSubtitle}>Real-time performance across all 10 nodes</Text>
       </View>
 
+      {/* 2x2 Stats Grid */}
       <View style={styles.statsGrid}>
         {/* Active Nodes Widget */}
         <View style={styles.statCard}>
@@ -100,6 +101,30 @@ const InsightsScreen: React.FC = () => {
             {gridUptimePercentage}%
           </Text>
         </View>
+
+        {/* Current Outages Widget */}
+        <View style={styles.statCard}>
+          <View style={[styles.iconBox, { backgroundColor: theme.errorBg }]}>
+            <MaterialCommunityIcons name="power-plug-off" size={20} color={theme.error} />
+          </View>
+          <Text style={styles.statLabel}>CURRENT OUTAGES</Text>
+          <Text style={[styles.statValue, { color: theme.error }]}>
+            {offlineCount} <Text style={styles.statUnit}>nodes</Text>
+          </Text>
+        </View>
+
+        {/* Grid Status Widget */}
+        <View style={[styles.statCard, { backgroundColor: isGridHealthy ? theme.textPrimary : theme.error }]}>
+          <View style={[styles.iconBox, { backgroundColor: "rgba(255,255,255,0.15)" }]}>
+            <MaterialCommunityIcons name={isGridHealthy ? "shield-check" : "shield-alert"} size={20} color={theme.background} />
+          </View>
+          <Text style={[styles.statLabel, { color: theme.background, opacity: 0.9 }]}>
+            GRID STATUS
+          </Text>
+          <Text style={[styles.statValue, { color: theme.background, fontSize: 22 }]}>
+            {isGridHealthy ? "STABLE" : "UNSTABLE"}
+          </Text>
+        </View>
       </View>
 
       {/* CHART 1: Grid Stability Trend */}
@@ -109,11 +134,14 @@ const InsightsScreen: React.FC = () => {
             <Text style={styles.chartTitle}>Grid Stability Trend</Text>
             <Text style={styles.chartDateRange}>This Week</Text>
           </View>
+          <View style={[styles.trendBadge, { backgroundColor: theme.successBg }]}>
+            <Ionicons name="trending-up" size={14} color={theme.success} />
+            <Text style={[styles.trendText, { color: theme.success }]}>Active</Text>
+          </View>
         </View>
         <LineChart
           data={{
             labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-            // Appending the real-time uptime percentage to the end of the week
             datasets: [{ data: [65, 70, 60, 80, 75, 85, gridUptimePercentage] }],
           }}
           width={screenWidth - 48}
@@ -122,14 +150,19 @@ const InsightsScreen: React.FC = () => {
             backgroundColor: theme.cardBg,
             backgroundGradientFrom: theme.cardBg,
             backgroundGradientTo: theme.cardBg,
+            fillShadowGradientFrom: theme.success,
+            fillShadowGradientFromOpacity: 0.2,
+            fillShadowGradientTo: theme.success,
+            fillShadowGradientToOpacity: 0,
             decimalPlaces: 0,
-            color: (opacity = 1) => `rgba(16, 197, 91, ${opacity})`, // Green
+            color: (opacity = 1) => `rgba(16, 197, 91, ${opacity})`,
             labelColor: () => theme.textSecondary,
-            propsForDots: { r: "4", strokeWidth: "2", stroke: theme.cardBg },
-            propsForBackgroundLines: { stroke: theme.border, strokeDasharray: "4" },
+            propsForDots: { r: "0" }, // Hides dots for a cleaner wavy line
+            propsForBackgroundLines: { stroke: theme.border, strokeDasharray: "4", strokeWidth: "1" },
           }}
           bezier
           style={styles.chartStyle}
+          withVerticalLines={false}
         />
       </View>
 
@@ -144,7 +177,6 @@ const InsightsScreen: React.FC = () => {
         <LineChart
           data={{
             labels: ["Wk 1", "Wk 2", "Wk 3", "Wk 4"],
-            // Appending the real-time offline nodes count to the current week
             datasets: [{ data: [12, 8, 14, offlineCount] }],
           }}
           width={screenWidth - 48}
@@ -153,14 +185,19 @@ const InsightsScreen: React.FC = () => {
             backgroundColor: theme.cardBg,
             backgroundGradientFrom: theme.cardBg,
             backgroundGradientTo: theme.cardBg,
+            fillShadowGradientFrom: theme.error,
+            fillShadowGradientFromOpacity: 0.2,
+            fillShadowGradientTo: theme.error,
+            fillShadowGradientToOpacity: 0,
             decimalPlaces: 0,
-            color: (opacity = 1) => `rgba(225, 29, 72, ${opacity})`, // Red/Rose
+            color: (opacity = 1) => `rgba(225, 29, 72, ${opacity})`,
             labelColor: () => theme.textSecondary,
-            propsForDots: { r: "4", strokeWidth: "2", stroke: theme.cardBg },
-            propsForBackgroundLines: { stroke: theme.border, strokeDasharray: "4" },
+            propsForDots: { r: "0" },
+            propsForBackgroundLines: { stroke: theme.border, strokeDasharray: "4", strokeWidth: "1" },
           }}
           bezier
           style={styles.chartStyle}
+          withVerticalLines={false}
         />
       </View>
 
@@ -187,7 +224,8 @@ const getStyles = (theme: any) => StyleSheet.create({
   headerTitle: { 
     fontSize: 28, 
     fontFamily: "Sora_800ExtraBold", 
-    color: theme.textPrimary 
+    color: theme.textPrimary,
+    letterSpacing: -0.5,
   },
   headerSubtitle: { 
     fontSize: 15, 
@@ -196,10 +234,11 @@ const getStyles = (theme: any) => StyleSheet.create({
     marginTop: 4 
   },
   statsGrid: { 
-    flexDirection: "row", 
+    flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: 20, 
     justifyContent: "space-between", 
-    marginBottom: 20 
+    marginBottom: 8 
   },
   statCard: { 
     width: "48%", 
@@ -208,8 +247,9 @@ const getStyles = (theme: any) => StyleSheet.create({
     padding: 16, 
     borderWidth: 1, 
     borderColor: theme.border,
+    marginBottom: 16,
     ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 8 },
+      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8 },
       android: { elevation: 2 },
     }),
   },
@@ -225,12 +265,14 @@ const getStyles = (theme: any) => StyleSheet.create({
     color: theme.textSecondary, 
     fontSize: 11, 
     fontFamily: "Sora_700Bold", 
-    marginBottom: 4 
+    marginBottom: 4,
+    letterSpacing: 0.5,
   },
   statValue: { 
     color: theme.textPrimary, 
     fontSize: 26, 
-    fontFamily: "Sora_800ExtraBold" 
+    fontFamily: "Sora_800ExtraBold",
+    letterSpacing: -0.5,
   },
   statUnit: { 
     fontSize: 14, 
@@ -246,7 +288,7 @@ const getStyles = (theme: any) => StyleSheet.create({
     borderWidth: 1, 
     borderColor: theme.border,
     ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 12 },
+      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.06, shadowRadius: 12 },
       android: { elevation: 3 },
     }),
   },
@@ -268,6 +310,18 @@ const getStyles = (theme: any) => StyleSheet.create({
     fontFamily: "Sora_500Medium", 
     marginTop: 2 
   },
+  trendBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  trendText: {
+    fontSize: 12,
+    fontFamily: "Sora_700Bold",
+    marginLeft: 4,
+  },
   chartStyle: { 
     borderRadius: 16, 
     paddingRight: 20 
@@ -275,4 +329,3 @@ const getStyles = (theme: any) => StyleSheet.create({
 });
 
 export default InsightsScreen;
-

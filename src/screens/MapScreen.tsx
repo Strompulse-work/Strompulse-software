@@ -3,6 +3,7 @@
  * Features: Real-time STROM global grid monitoring, MapView integration, 
  * Dynamic Status Circles, matching FeedScreen locations, Sora typography,
  * and an interactive bottom details card on node selection.
+ * Integrated with 60-second heartbeat Online/Offline logic.
  */
 
 import React, { useEffect, useState } from "react";
@@ -18,7 +19,7 @@ import {
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
-import { useAllGridDevices } from "../hooks/useDeviceData"; 
+import { useAllGridDevices, checkIsDeviceOnline } from "../hooks/useDeviceData"; 
 import { Loading } from "../components/UIComponents";
 
 const { width, height } = Dimensions.get("window");
@@ -51,6 +52,13 @@ const MapScreen = () => {
 
   // State to track which node is currently selected/pressed
   const [selectedNode, setSelectedNode] = useState<GridNode | null>(null);
+  
+  // Ticking Clock to force re-evaluations of offline thresholds smoothly
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Fetch real-time global device statuses mapping exactly what FeedScreen sees
   const { devices, loading } = useAllGridDevices();
@@ -69,8 +77,11 @@ const MapScreen = () => {
     
     let isOnline = false;
     if (realDevice) {
-      const rawStatus = String(realDevice.status).toLowerCase().trim();
-      isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
+      // Apply 60-second heartbeat check directly
+      isOnline = checkIsDeviceOnline({ 
+        status: realDevice.status, 
+        timestamp: realDevice.updated_at || realDevice.timestamp 
+      }, 60);
     }
 
     return { ...node, isOnline };
@@ -134,7 +145,6 @@ const MapScreen = () => {
           return (
             <React.Fragment key={device.id}>
               {/* Coverage Circle */}
-             {/* Coverage Circle */}
               <Circle
                 center={{ latitude: device.latitude, longitude: device.longitude }}
                 radius={1200}
@@ -320,7 +330,6 @@ const getStyles = (theme: any) =>
         android: { elevation: 3 },
       }),
     },
-    // High fidelity detail panel modeled straight from mapcard.png
     // High fidelity detail panel modeled straight from mapcard.png
     detailCard: {
       position: "absolute",

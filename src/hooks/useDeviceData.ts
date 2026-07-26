@@ -1,6 +1,7 @@
 /**
  * Custom Hooks for Data Fetching and Realtime Subscriptions
  * Hybrid Backend Upgrade: Static relationships from Supabase + Zero-Latency hardware stream from Firebase.
+ * Includes Real-Time Heartbeat Logic for Online/Offline Status.
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -26,6 +27,67 @@ interface UseAsyncState<T> {
   error: string | null;
   data: T | null;
 }
+
+// ============================================================================
+// STROM DEVICE HEARTBEAT UTILITIES
+// ============================================================================
+
+/**
+ * Parses STROM DDMMYYYYHHMMSS timestamp string into a JavaScript Date object
+ */
+export const parseStromTimestamp = (tsStr: string | number | undefined): Date | null => {
+  if (!tsStr) return null;
+  const str = String(tsStr);
+
+  // Handle STROM DDMMYYYYHHMMSS format (14 digits)
+  if (str.length === 14 && /^\d+$/.test(str)) {
+    const day = parseInt(str.substring(0, 2), 10);
+    const month = parseInt(str.substring(2, 4), 10) - 1; // JS Months are 0-indexed
+    const year = parseInt(str.substring(4, 8), 10);
+    const hours = parseInt(str.substring(8, 10), 10);
+    const minutes = parseInt(str.substring(10, 12), 10);
+    const seconds = parseInt(str.substring(12, 14), 10);
+
+    return new Date(year, month, day, hours, minutes, seconds);
+  }
+
+  // Fallback for standard ISO or standard date formats
+  const fallbackDate = new Date(str);
+  return isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+};
+
+/**
+ * Calculates whether a STROM device is Online or Offline based on timestamp diff
+ */
+export const checkIsDeviceOnline = (
+  hardwareMetrics: any,
+  thresholdSeconds: number = 60
+): boolean => {
+  if (!hardwareMetrics) return false;
+
+  // 1. Device must report status as "1" (Active)
+  const rawStatus = String(hardwareMetrics.status).trim();
+  const reportedActive =
+    rawStatus === "1" ||
+    rawStatus.toLowerCase() === "true" ||
+    rawStatus.toLowerCase() === "on";
+    
+  if (!reportedActive) return false;
+
+  // 2. Perform Heartbeat / Time Difference check
+  const lastPingDate = parseStromTimestamp(hardwareMetrics.timestamp);
+  if (!lastPingDate) return false;
+
+  const now = new Date();
+  const diffInSeconds = Math.abs((now.getTime() - lastPingDate.getTime()) / 1000);
+
+  // Online ONLY if it pinged within the threshold
+  return diffInSeconds <= thresholdSeconds;
+};
+
+// ============================================================================
+// HOOKS
+// ============================================================================
 
 /**
  * Generic async hook for one-off data fetching
@@ -101,12 +163,15 @@ export const useAllGridDevices = () => {
 
             const synchronizedDevices = deviceIds.map((deviceId) => {
               const hardwareMetrics = powerMonitorNode[deviceId]?.realtime || {};
-              // Match with Supabase metadata if it exists, otherwise use empty object
               const dbDevice = (supabaseData || []).find((d: any) => d.device_id === deviceId) || {};
+              
+              // 4. Compute heartbeat status
+              const isOnline = checkIsDeviceOnline(hardwareMetrics, 60);
 
               return {
                 ...dbDevice,
-                id: deviceId, // Force the ID so the UI mapping picks it up
+                id: deviceId, 
+                isOnline, // Computed property injected directly into device object
                 status: hardwareMetrics.status !== undefined 
                            ? Number(hardwareMetrics.status) 
                            : Number(dbDevice.status || 0),
@@ -124,8 +189,7 @@ export const useAllGridDevices = () => {
             
             setDevices(sortedDevices);
           } else {
-            // Fallback to purely Supabase data if the Firebase node goes missing
-            setDevices((supabaseData || []).map((d: any) => ({ ...d, id: d.device_id, updated_at: d.last_seen })));
+            setDevices((supabaseData || []).map((d: any) => ({ ...d, id: d.device_id, isOnline: false, updated_at: d.last_seen })));
           }
           setLoading(false);
         }, (fbErr) => {
@@ -142,7 +206,6 @@ export const useAllGridDevices = () => {
 
     fetchAndSyncDevices();
 
-    // Clean up persistent hardware channel streams when component layout tears down
     return () => {
       if (firebaseListener) {
         off(rootFirebaseRef, "value", firebaseListener);
@@ -155,7 +218,6 @@ export const useAllGridDevices = () => {
 
 /**
  * Hook to fetch and subscribe to user devices with HYBRID backend integration.
- * (Legacy/Private feed version - kept intact in case you need user-restricted views later)
  */
 export const useUserDevices = (userId: string) => {
   const [devices, setDevices] = useState<any[]>([]);
@@ -188,10 +250,14 @@ export const useUserDevices = (userId: string) => {
 
               const synchronizedDevices = supabaseData.map((dbDevice: any) => {
                 const hardwareMetrics = powerMonitorNode[dbDevice.device_id]?.realtime || {};
+                
+                // Compute heartbeat status
+                const isOnline = checkIsDeviceOnline(hardwareMetrics, 60);
 
                 return {
                   ...dbDevice,
                   id: dbDevice.device_id,
+                  isOnline, // Computed property
                   status: hardwareMetrics.status !== undefined 
                              ? Number(hardwareMetrics.status) 
                              : Number(dbDevice.status),
@@ -207,7 +273,7 @@ export const useUserDevices = (userId: string) => {
               );
               setDevices(sortedDevices);
             } else {
-              setDevices(supabaseData.map(d => ({ ...d, id: d.device_id, updated_at: d.last_seen })));
+              setDevices(supabaseData.map(d => ({ ...d, id: d.device_id, isOnline: false, updated_at: d.last_seen })));
             }
             setLoading(false);
           }, (fbErr) => {
