@@ -12,6 +12,19 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://evfstgmzwdhtwqogaknp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV2ZnN0Z216d2RodHdxb2dha25wIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTk3OTk0MSwiZXhwIjoyMDkxNTU1OTQxfQ.X2h69aNvt1wTGD7xXl0kw78yeN30OtxL5BXfG66ejSQ",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "your-google-maps-api-key",
+        "EXPO_PUBLIC_APP_ENV": "development",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBWfrHdLs-yisJcKcBYWQCujzXmsvdFJYE",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "hardwarecode.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_DATABASE_URL": "https://hardwarecode-default-rtdb.firebaseio.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "hardwarecode",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "hardwarecode.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "432540632736",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:432540632736:web:67458ac6d6792fc8d72bc5"
       }
     },
     "production": {
