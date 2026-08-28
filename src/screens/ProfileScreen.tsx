@@ -1,8 +1,3 @@
-/**
- * Profile Screen v2.0
- * Features: High-fidelity layout, Toggle switches, Real-time Linked Devices, and Theme integration.
- */
-
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -13,50 +8,103 @@ import {
   Platform,
   StatusBar,
   Switch,
+  Image,
+  Alert,
+  SafeAreaView
 } from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import AuthService from "../services/authService";
 import { useTheme } from "../theme/ThemeContext";
-import { useUserDevices } from "../hooks/useDeviceData";
 import { Loading } from "../components/UIComponents";
 import { User } from "../types";
 
-const ProfileScreen = () => {
+const ProfileScreen = ({ navigation, route }: any) => {
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
-  const styles = getStyles(theme);
+  const styles = getStyles(theme, isDarkMode);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentLocation, setCurrentLocation] = useState<string>("Locating...");
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
-  // Notification Toggles State
-  const [outageAlerts, setOutageAlerts] = useState(true);
-  const [restorationAlerts, setRestorationAlerts] = useState(true);
-  const [emailSummaries, setEmailSummaries] = useState(false);
-
-  // Fetch user session
   useEffect(() => {
-    const getUser = async () => {
+    if (route.params?.updatedName) {
+      setUser((prev: any) => ({ ...prev, full_name: route.params.updatedName }));
+    }
+    if (route.params?.updatedImage !== undefined) {
+      setAvatarUri(route.params.updatedImage);
+    }
+  }, [route.params?.updatedName, route.params?.updatedImage]);
+
+  useEffect(() => {
+    const initializeProfile = async () => {
       try {
         const session = await AuthService.getCurrentSession();
         if (session) {
           setUser(session.user);
+          if (!avatarUri && session.user.avatar_url) {
+            setAvatarUri(session.user.avatar_url);
+          }
+        }
+
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          setCurrentLocation("Ibadan, Oyo State");
+          return;
+        }
+
+        let location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        let response = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+
+        if (response && response.length > 0) {
+          const address = response[0];
+          const locality = address.district || address.subregion || address.city || "Ibadan";
+          const region = address.region || "Oyo State";
+          setCurrentLocation(`${locality}, ${region}`);
+        } else {
+          setCurrentLocation("Ibadan, Oyo State");
         }
       } catch (err) {
-        console.error("Error fetching user:", err);
+        console.error("Error initializing profile data:", err);
+        setCurrentLocation("Ibadan, Oyo State");
       } finally {
         setLoading(false);
       }
     };
-    getUser();
+
+    initializeProfile();
   }, []);
 
-  // Fetch real-time devices for this user
-  const { devices, loading: devicesLoading } = useUserDevices(user?.id || "");
+  const handleLogoutPress = () => {
+    Alert.alert(
+      "Log Out",
+      "Are you sure you want to log out of your account?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Log Out",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await AuthService.logout();
+            } catch (err) {
+              console.error("Error logging out:", err);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
 
-  // Filter to show ONLY STROM001
-  const linkedDevices = devices.filter((device) => device.id === "STROM001");
-
-  if (loading || (devicesLoading && devices.length === 0)) {
+  if (loading) {
     return (
       <View style={[styles.container, styles.center]}>
         <Loading />
@@ -64,327 +112,217 @@ const ProfileScreen = () => {
     );
   }
 
+  const MenuCard = ({ icon, title, rightElement, onPress, isLast = false, isDestructive = false }: any) => (
+    <TouchableOpacity 
+      style={[styles.menuItem, !isLast && styles.menuItemBorder]} 
+      onPress={onPress} 
+      disabled={!onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.menuItemLeft}>
+        <MaterialCommunityIcons name={icon} size={22} color={isDestructive ? "#EF4444" : theme.textPrimary} style={{ marginRight: 16 }} />
+        <Text style={[styles.menuTitle, isDestructive && { color: "#EF4444" }]}>{title}</Text>
+      </View>
+      {rightElement ? (
+        rightElement
+      ) : (
+        <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+      )}
+    </TouchableOpacity>
+  );
+
+  const MenuGroup = ({ children }: any) => (
+    <View style={styles.menuGroup}>
+      {children}
+    </View>
+  );
+
   return (
-    <View style={styles.container}>
-      <StatusBar
-        barStyle={isDarkMode ? "light-content" : "dark-content"}
-        backgroundColor={theme.background}
-      />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={theme.background} />
       
-      {/* Header Area */}
-      <View style={styles.headerArea}>
-        <Text style={styles.headerTitle}>Profile & Settings</Text>
+      {/* Clean Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
+          <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Profile</Text>
+        <TouchableOpacity style={styles.iconBtn}>
+          <MaterialCommunityIcons name="bell" size={22} color={theme.textPrimary} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         
-        {/* User Info Card */}
-        <View style={styles.userCard}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarText}>
-              {user?.full_name?.charAt(0).toUpperCase() || "T"}
-            </Text>
-          </View>
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>{user?.full_name || "Taiwo Afolabi"}</Text>
-            <Text style={styles.userEmail}>{user?.email || "taiwoafolabi609@gmail.com"}</Text>
-            {/* <View style={styles.premiumBadge}>
-              <Text style={styles.premiumText}>PREMIUM MEMBER</Text>
-            </View> */}
-          </View>
-        </View>
-
-        {/* Linked Devices Section */}
-        {/* <Text style={styles.sectionHeader}>LINKED DEVICES</Text>
-        <View style={styles.cardBlock}>
-          {linkedDevices.length === 0 ? (
-            <View style={{ padding: 20, alignItems: 'center' }}>
-              <Text style={{ color: theme.textSecondary, fontFamily: "Sora_400Regular" }}>No active devices found.</Text>
+        {/* Centered Avatar Section */}
+        <View style={styles.profileSection}>
+          <View style={styles.avatarContainer}>
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Text style={styles.avatarText}>
+                  {user?.full_name?.charAt(0).toUpperCase() || "E"}
+                </Text>
+              </View>
+            )}
+            <View style={styles.cameraBadge}>
+              <MaterialCommunityIcons name="camera" size={12} color="#FFF" />
             </View>
-          ) : (
-            linkedDevices.map((device, index) => {
-              // Bulletproof real-time status check
-              const rawStatus = String(device.status).toLowerCase().trim();
-              const isOnline = rawStatus === "1" || rawStatus === "true" || rawStatus === "on";
-
-              return (
-                <View key={device.id}>
-                  <View style={styles.deviceRow}>
-                    <View style={styles.deviceRowLeft}>
-                      <MaterialCommunityIcons 
-                        name="router-wireless" 
-                        size={24} 
-                        color={theme.textPrimary} 
-                        style={styles.deviceIcon} 
-                      />
-                      <View>
-                        <Text style={styles.deviceName}>{device.id}</Text>
-                        <Text style={styles.deviceLocation}>{device.address || "Jericho Quarters"}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.statusIndicator}>
-                      <View 
-                        style={[
-                          styles.statusDot, 
-                          { backgroundColor: isOnline ? "#00C48A" : "#EF4444" }
-                        ]} 
-                      />
-                      <Text style={[
-                        styles.statusText, 
-                        { color: isOnline ? "#00C48A" : "#EF4444" }
-                      ]}>
-                        {isOnline ? "ONLINE" : "OFFLINE"}
-                      </Text>
-                    </View>
-                  </View>
-                  {index < linkedDevices.length - 1 && <View style={styles.divider} />}
-                </View>
-              );
-            })
-          )}
-        </View> */}
-
-        {/* App Settings Section */}
-        <Text style={styles.sectionHeader}>APP SETTINGS</Text>
-        <View style={styles.cardBlock}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleRowLeft}>
-              <MaterialCommunityIcons name="moon-waning-crescent" size={22} color={theme.textPrimary} />
-              <Text style={styles.toggleLabel}>Dark Mode</Text>
-            </View>
-            <Switch
-              value={isDarkMode}
-              onValueChange={() => toggleDarkMode()} // Explicit function call prevents boolean argument errors
-              trackColor={{ false: theme.border, true: "#00C48A" }}
-              thumbColor="#FFFFFF"
-            />
           </View>
-        </View>
-
-        {/* Notifications Section */}
-        <Text style={styles.sectionHeader}>NOTIFICATIONS</Text>
-        <View style={styles.cardBlock}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleRowLeft}>
-              <MaterialCommunityIcons name="bell-outline" size={22} color={theme.textPrimary} />
-              <Text style={styles.toggleLabel}>Outage Alerts</Text>
-            </View>
-            <Switch
-              value={outageAlerts}
-              onValueChange={setOutageAlerts}
-              trackColor={{ false: theme.border, true: "#00C48A" }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.divider} />
           
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleRowLeft}>
-              <MaterialCommunityIcons name="lightning-bolt-outline" size={22} color={theme.textPrimary} />
-              <Text style={styles.toggleLabel}>Restoration Alerts</Text>
-            </View>
-            <Switch
-              value={restorationAlerts}
-              onValueChange={setRestorationAlerts}
-              trackColor={{ false: theme.border, true: "#00C48A" }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.divider} />
+          <Text style={styles.userName}>{user?.full_name || "Explorer"}</Text>
+          <Text style={styles.userLocation}>{currentLocation}</Text>
 
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleRowLeft}>
-              <MaterialCommunityIcons name="email-outline" size={22} color={theme.textPrimary} />
-              <Text style={styles.toggleLabel}>Email Summaries</Text>
-            </View>
-            <Switch
-              value={emailSummaries}
-              onValueChange={setEmailSummaries}
-              trackColor={{ false: theme.border, true: "#00C48A" }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
+          <TouchableOpacity 
+            style={styles.editProfileBtn}
+            onPress={() => navigation.navigate("EditProfileScreen", {
+              currentName: user?.full_name,
+              currentImage: avatarUri,
+            })}
+          >
+            <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Log Out Button mapped as a card */}
-        <View style={[styles.cardBlock, { marginTop: 12 }]}>
-           <TouchableOpacity 
-             style={styles.toggleRow}
-             onPress={async () => {
-                await AuthService.logout();
-             }}
-           >
-             <View style={styles.toggleRowLeft}>
-               <MaterialCommunityIcons name="logout" size={22} color="#EF4444" />
-               <Text style={[styles.toggleLabel, { color: "#EF4444" }]}>Log Out</Text>
-             </View>
-           </TouchableOpacity>
-        </View>
+        {/* Menu Groups */}
+        <MenuGroup>
+          <MenuCard icon="clock-time-four" title="My Activity" />
+          <MenuCard icon="bookmark" title="My Subscriptions" />
+          <MenuCard icon="credit-card-outline" title="Payment Methods" isLast={true} />
+        </MenuGroup>
+
+        <MenuGroup>
+          <MenuCard icon="cog" title="Settings" />
+          <MenuCard icon="shield-check" title="Privacy & Security" />
+          <MenuCard 
+            icon="theme-light-dark" 
+            title="Dark Mode" 
+            isLast={true}
+            rightElement={
+              <Switch
+                value={isDarkMode}
+                onValueChange={() => toggleDarkMode()}
+                trackColor={{ false: theme.border, true: "#00C48A" }}
+                thumbColor="#FFFFFF"
+              />
+            }
+          />
+        </MenuGroup>
+
+        <MenuGroup>
+          <MenuCard icon="information" title="About Strompulse" onPress={() => navigation.navigate("AboutScreen")} />
+          <MenuCard icon="help-circle" title="Help & Support" isLast={true} />
+        </MenuGroup>
+
+        <MenuGroup>
+          <MenuCard 
+            icon="logout-variant" 
+            title="Log out" 
+            isLast={true} 
+            isDestructive={true}
+            onPress={handleLogoutPress} 
+          />
+        </MenuGroup>
+
+        {/* Footer */}
+        <Text style={styles.versionText}>Version 3.0.0 (Build 1042)</Text>
 
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 
-// Generate styles dynamically based on the injected theme
-const getStyles = (theme: any) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.background,
-    },
-    center: {
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    headerArea: {
-      alignItems: "center",
-      paddingTop: Platform.OS === "ios" ? 60 : 40,
-      paddingBottom: 20,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-    },
-    headerTitle: {
-      fontSize: 16,
-      fontFamily: "Sora_700Bold",
-      color: theme.textPrimary,
-    },
-    scrollContent: {
-      paddingHorizontal: 20,
-      paddingBottom: 100,
-      paddingTop: 24,
-    },
-    userCard: {
-      flexDirection: "row",
-      backgroundColor: theme.cardBg,
-      borderRadius: 16,
-      padding: 20,
-      borderWidth: 1,
-      borderColor: theme.border,
-      alignItems: "center",
-      marginBottom: 32,
-    },
-    avatarCircle: {
-      width: 60,
-      height: 60,
-      borderRadius: 30,
-      backgroundColor: "rgba(0, 196, 138, 0.15)",
-      borderWidth: 1,
-      borderColor: "#00C48A",
-      justifyContent: "center",
-      alignItems: "center",
-      marginRight: 16,
-    },
-    avatarText: {
-      fontSize: 24,
-      fontFamily: "Sora_800ExtraBold",
-      color: "#00C48A",
-    },
-    userInfo: {
-      flex: 1,
-      justifyContent: "center",
-    },
-    userName: {
-      fontSize: 18,
-      fontFamily: "Sora_700Bold",
-      color: theme.textPrimary,
-      marginBottom: 4,
-    },
-    userEmail: {
-      fontSize: 13,
-      fontFamily: "Sora_400Regular",
-      color: theme.textSecondary,
-      marginBottom: 8,
-    },
-    premiumBadge: {
-      alignSelf: "flex-start",
-      backgroundColor: "rgba(139, 92, 246, 0.15)", // Subtle purple tint
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 6,
-    },
-    premiumText: {
-      fontSize: 10,
-      fontFamily: "Sora_800ExtraBold",
-      color: "#8B5CF6",
-      letterSpacing: 0.5,
-    },
-    sectionHeader: {
-      fontSize: 12,
-      fontFamily: "Sora_800ExtraBold",
-      color: theme.textSecondary,
-      letterSpacing: 1,
-      marginBottom: 12,
-      marginLeft: 4,
-    },
-    cardBlock: {
-      backgroundColor: theme.cardBg,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: theme.border,
-      overflow: "hidden",
-      marginBottom: 32,
-    },
-    deviceRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: 16,
-    },
-    deviceRowLeft: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    deviceIcon: {
-      marginRight: 16,
-    },
-    deviceName: {
-      fontSize: 15,
-      fontFamily: "Sora_700Bold",
-      color: theme.textPrimary,
-      marginBottom: 4,
-    },
-    deviceLocation: {
-      fontSize: 12,
-      fontFamily: "Sora_400Regular",
-      color: theme.textSecondary,
-    },
-    statusIndicator: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    statusDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      marginRight: 6,
-    },
-    statusText: {
-      fontSize: 10,
-      fontFamily: "Sora_800ExtraBold",
-      letterSpacing: 0.5,
-    },
-    toggleRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: 16,
-    },
-    toggleRowLeft: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    toggleLabel: {
-      fontSize: 15,
-      fontFamily: "Sora_600SemiBold",
-      color: theme.textPrimary,
-      marginLeft: 16,
-    },
-    divider: {
-      height: 1,
-      backgroundColor: theme.border,
-      marginLeft: 54, // Aligns divider with text, skips icons
-    },
-  });
+const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F4F6F8" },
+  container: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F4F6F8" },
+  center: { justifyContent: "center", alignItems: "center" },
+  
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? 20 : 10,
+    paddingBottom: 20,
+  },
+  iconBtn: { width: 40, height: 40, justifyContent: "center", alignItems: "center" },
+  headerTitle: { fontSize: 16, fontFamily: "Sora_700Bold", color: theme.textPrimary },
+
+  scrollContent: { paddingBottom: 40 },
+
+  /* Profile Avatar Section */
+  profileSection: { alignItems: "center", marginBottom: 32, marginTop: 10 },
+  avatarContainer: { position: "relative", marginBottom: 16 },
+  avatarImage: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#00C48A" },
+  avatarPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#064E3B",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: "#00C48A",
+  },
+  avatarText: { fontSize: 40, fontFamily: "Sora_800ExtraBold", color: "#FFFFFF" },
+  cameraBadge: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    backgroundColor: "#00C48A",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: isDarkMode ? "#0B0F0D" : "#F4F6F8",
+  },
+  userName: { fontSize: 20, fontFamily: "Sora_700Bold", color: theme.textPrimary, marginBottom: 4 },
+  userLocation: { fontSize: 13, fontFamily: "Sora_500Medium", color: theme.textSecondary, marginBottom: 16 },
+  editProfileBtn: {
+    backgroundColor: isDarkMode ? "#1A221E" : "#E2E8F0",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  editProfileBtnText: { fontSize: 12, fontFamily: "Sora_600SemiBold", color: theme.textPrimary },
+
+  /* Card Menus */
+  menuGroup: {
+    backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF",
+    marginHorizontal: 20,
+    borderRadius: 24,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  menuItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+  },
+  menuItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: isDarkMode ? "#1F2E27" : "#F1F5F9",
+  },
+  menuItemLeft: { flexDirection: "row", alignItems: "center" },
+  menuTitle: { fontSize: 14, fontFamily: "Sora_600SemiBold", color: theme.textPrimary },
+
+  /* Footer */
+  versionText: {
+    textAlign: "center",
+    fontSize: 12,
+    fontFamily: "Sora_500Medium",
+    color: theme.textSecondary,
+    marginTop: 10,
+  },
+});
 
 export default ProfileScreen;

@@ -1,6 +1,6 @@
 /**
- * Safety Settings Screen v2.0
- * Features: Privacy toggles, background triggers, and live message previews.
+ * Safety Settings Screen v3.0
+ * Features: Matches prd2.png strictly with Sora typography and clean layout.
  */
 
 import React, { useState } from "react";
@@ -14,13 +14,14 @@ import {
   Switch,
   ScrollView,
 } from "react-native";
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 
 const SafetySettingsScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme);
 
+  // States matching the PRD screenshot (Location ON, Background OFF)
   const [locationSharing, setLocationSharing] = useState(true);
   const [backgroundTrigger, setBackgroundTrigger] = useState(false);
 
@@ -38,12 +39,9 @@ const SafetySettingsScreen = ({ navigation }: any) => {
           activeOpacity={0.7}
           onPress={() => navigation.goBack()}
         >
-          <Feather name="chevron-left" size={24} color={theme.textPrimary} />
+          <MaterialCommunityIcons name="chevron-left" size={28} color={theme.textPrimary} />
         </TouchableOpacity>
-        <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>Safety Settings</Text>
-          <Text style={styles.headerSubtitle}>TRIGGERS & PRIVACY</Text>
-        </View>
+        <Text style={styles.headerTitle}>Safety Settings</Text>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -52,8 +50,8 @@ const SafetySettingsScreen = ({ navigation }: any) => {
         <Text style={styles.sectionTitle}>PRIVACY</Text>
         <View style={styles.settingCard}>
           <View style={styles.settingLeft}>
-            <View style={[styles.iconBox, { backgroundColor: "rgba(0, 196, 138, 0.1)" }]}>
-              <Feather name="map-pin" size={18} color="#00C48A" />
+            <View style={[styles.iconBox, { backgroundColor: "#ECFDF5" }]}>
+              <MaterialCommunityIcons name="map-marker-outline" size={22} color="#00C48A" />
             </View>
             <View style={styles.textStack}>
               <Text style={styles.settingTitle}>Location Sharing</Text>
@@ -72,12 +70,12 @@ const SafetySettingsScreen = ({ navigation }: any) => {
         <Text style={styles.sectionTitle}>BACKGROUND TRIGGER</Text>
         <View style={styles.settingCard}>
           <View style={styles.settingLeft}>
-            <View style={[styles.iconBox, { backgroundColor: "rgba(234, 179, 8, 0.1)" }]}>
-              <Feather name="lock" size={18} color="#EAB308" />
+            <View style={[styles.iconBox, { backgroundColor: "#FEF3C7" }]}>
+              <MaterialCommunityIcons name="lock-outline" size={22} color="#D97706" />
             </View>
             <View style={styles.textStack}>
               <Text style={styles.settingTitle}>Trigger Without App Open</Text>
-              <Text style={styles.settingSub}>Activate SOS from background</Text>
+              <Text style={styles.settingSub}>Android only in v2.0</Text>
             </View>
           </View>
           <Switch
@@ -86,20 +84,6 @@ const SafetySettingsScreen = ({ navigation }: any) => {
             trackColor={{ false: theme.border, true: "#00C48A" }}
             thumbColor={"#FFFFFF"}
           />
-        </View>
-
-        {/* SOS Message Preview Section */}
-        <Text style={styles.sectionTitle}>SOS MESSAGE PREVIEW</Text>
-        <Text style={styles.previewHelperText}>Recipients will receive:</Text>
-        
-        <View style={styles.previewCard}>
-          <Text style={styles.previewTextLine}>
-            🚨 <Text style={{ fontWeight: "800" }}>EMERGENCY</Text> from <Text style={{ color: "#EF4444", fontWeight: "700" }}>Awoniyi</Text> via Strompulse
-          </Text>
-          <Text style={styles.previewTextLine}>
-            📍 <Text style={{ color: "#00C48A", fontWeight: "700" }}>Carlton Gate Estate, Ibadan</Text>
-          </Text>
-          <Text style={styles.previewFooter}>Tap to track in Strompulse</Text>
         </View>
 
       </ScrollView>
@@ -116,13 +100,13 @@ const getStyles = (theme: any) =>
     header: {
       flexDirection: "row",
       alignItems: "center",
-      paddingHorizontal: 24,
+      paddingHorizontal: 20,
       marginTop: Platform.OS === "ios" ? 60 : 40,
       marginBottom: 32,
     },
     backButton: {
-      width: 40,
-      height: 40,
+      width: 44,
+      height: 44,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: theme.border,
@@ -131,36 +115,21 @@ const getStyles = (theme: any) =>
       backgroundColor: theme.cardBg,
       marginRight: 16,
     },
-    headerTextContainer: {
-      flex: 1,
-    },
     headerTitle: {
-      fontSize: 24,
-      fontWeight: "800",
-      fontFamily: "Arial",
+      fontSize: 22,
+      fontFamily: "Sora_700Bold",
       color: theme.textPrimary,
-      letterSpacing: -0.5,
-    },
-    headerSubtitle: {
-      fontSize: 10,
-      fontWeight: "800",
-      fontFamily: "Arial",
-      color: theme.textSecondary,
-      letterSpacing: 1,
-      marginTop: 2,
     },
     scrollContent: {
-      paddingHorizontal: 24,
+      paddingHorizontal: 20,
       paddingBottom: 40,
     },
     sectionTitle: {
       fontSize: 11,
-      fontWeight: "800",
-      fontFamily: "Arial",
+      fontFamily: "Sora_700Bold",
       color: theme.textSecondary,
-      letterSpacing: 1,
+      letterSpacing: 1.5,
       marginBottom: 12,
-      marginTop: 8,
       marginLeft: 4,
     },
     settingCard: {
@@ -181,8 +150,8 @@ const getStyles = (theme: any) =>
       paddingRight: 16,
     },
     iconBox: {
-      width: 40,
-      height: 40,
+      width: 44,
+      height: 44,
       borderRadius: 12,
       justifyContent: "center",
       alignItems: "center",
@@ -190,45 +159,18 @@ const getStyles = (theme: any) =>
     },
     textStack: {
       flex: 1,
+      justifyContent: "center",
     },
     settingTitle: {
-      fontSize: 16,
-      fontWeight: "800",
-      fontFamily: "Arial",
+      fontSize: 15,
+      fontFamily: "Sora_700Bold",
       color: theme.textPrimary,
       marginBottom: 4,
     },
     settingSub: {
       fontSize: 12,
-      fontFamily: "Arial",
+      fontFamily: "Sora_400Regular",
       color: theme.textSecondary,
-    },
-    previewHelperText: {
-      fontSize: 13,
-      fontFamily: "Arial",
-      color: theme.textSecondary,
-      marginBottom: 12,
-      marginLeft: 4,
-    },
-    previewCard: {
-      backgroundColor: "rgba(239, 68, 68, 0.05)",
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: "rgba(239, 68, 68, 0.2)",
-      padding: 20,
-    },
-    previewTextLine: {
-      fontSize: 14,
-      fontFamily: "Arial",
-      color: theme.textPrimary,
-      lineHeight: 24,
-      marginBottom: 8,
-    },
-    previewFooter: {
-      fontSize: 12,
-      fontFamily: "Arial",
-      color: theme.textSecondary,
-      marginTop: 8,
     },
   });
 
