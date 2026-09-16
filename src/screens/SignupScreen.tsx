@@ -1,7 +1,7 @@
 /**
  * Signup Screen
  * Clean Light Theme: Solid white background, light gray inputs, heavy dark headers.
- * Supports Email, Phone (Auto E.164 Formatting), and Google OAuth
+ * Supports Email and Google OAuth with automatic phone-linking interception.
  */
 
 import React, { useState } from "react";
@@ -27,7 +27,6 @@ import AuthService from "../services/authService";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Signup">;
 
-// Updated Theme Colors for Light UI (Matching WelcomeScreen)
 const THEME = {
   success: "#10C55B",
   textPrimary: "#1A1A1A",
@@ -38,19 +37,9 @@ const THEME = {
   error: "#FF3B30",
 };
 
-// Helper to auto-format Nigerian numbers for Twilio
-const formatToE164 = (phone: string) => {
-  let cleaned = phone.replace(/[^\d+]/g, "");
-  if (cleaned.startsWith("+")) return cleaned;
-  if (cleaned.startsWith("0") && cleaned.length === 11)
-    return "+234" + cleaned.substring(1);
-  if (cleaned.startsWith("234") && cleaned.length === 13) return "+" + cleaned;
-  return "+" + cleaned;
-};
-
 const SignupScreen: React.FC<Props> = ({ navigation }) => {
   const [fullName, setFullName] = useState("");
-  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -58,15 +47,13 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  const isPhone = /^\d+$/.test(identifier.replace(/[\s\-\+]/g, ""));
-
   const handleSignup = async () => {
     if (!fullName.trim())
       return Alert.alert("Validation", "Please enter your full name");
-    if (!identifier.trim())
+    if (!email.trim())
       return Alert.alert(
         "Validation",
-        "Please enter your email or phone number",
+        "Please enter your email address",
       );
     if (!password) return Alert.alert("Validation", "Please enter a password");
     if (password.length < 6)
@@ -79,12 +66,10 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
 
     setLoading(true);
     try {
-      const submitIdentifier = isPhone
-        ? formatToE164(identifier.trim())
-        : identifier.trim();
+      const submitEmail = email.trim();
 
       const result = await AuthService.signupWithEmail(
-        submitIdentifier,
+        submitEmail,
         password,
         fullName.trim(),
       );
@@ -94,23 +79,19 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
         return;
       }
 
-      // Auto-login successful (Confirmations OFF)
+      // Auto-login successful (Confirmations OFF) -> Send to LinkPhone to capture number
       if (result.success && result.data) {
-        Alert.alert(
-          "Account Created",
-          "Welcome! Your account has been created successfully.",
-          [{ text: "OK" }],
-        );
+        (navigation.replace as any)("LinkPhone");
         return;
       }
 
       // OTP generated and sent (Confirmations ON) -> Push to Verify Screen
       if (result.success && !result.data) {
-        Alert.alert("Check Your Device!", "We sent you a verification code.", [
+        Alert.alert("Check Your Email!", "We sent you a verification code.", [
           {
             text: "Enter Code",
             onPress: () =>
-              navigation.navigate("Verify", { identifier: submitIdentifier }),
+              navigation.navigate("Verify", { identifier: submitEmail }),
           },
         ]);
         return;
@@ -131,6 +112,14 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
           "Google Auth Error",
           result.error || "Could not connect to Google.",
         );
+      } else if (result.success) {
+        // --- PHONE INTERCEPTION CHECK FOR GOOGLE SIGNUP ---
+        const session = await AuthService.getCurrentSession();
+        const currentUser = session?.user;
+
+        if (!currentUser?.phone) {
+          (navigation.replace as any)("LinkPhone");
+        }
       }
     } catch (error) {
       Alert.alert("Google Auth Error", "An unexpected error occurred.");
@@ -141,7 +130,7 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
 
   const isFormValid =
     fullName.trim() &&
-    identifier.trim() &&
+    email.trim() &&
     password &&
     password === confirmPassword &&
     password.length >= 6;
@@ -164,7 +153,6 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
             showsVerticalScrollIndicator={false}
             bounces={false}
           >
-            {/* UPDATED HEADER: Now houses the back button and the logo */}
             <View style={styles.header}>
               <TouchableOpacity
                 onPress={() => navigation.navigate("Welcome")}
@@ -212,19 +200,19 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
 
                 <View style={styles.inputWrapper}>
                   <MaterialIcons
-                    name={isPhone ? "phone" : "mail-outline"}
+                    name="mail-outline"
                     size={22}
                     color={THEME.textSecondary}
                     style={styles.inputIcon}
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="Email or Phone Number"
+                    placeholder="Email Address"
                     placeholderTextColor={THEME.textSecondary}
-                    value={identifier}
-                    onChangeText={(text) => setIdentifier(text.toLowerCase())}
+                    value={email}
+                    onChangeText={(text) => setEmail(text.toLowerCase())}
                     editable={!loading}
-                    keyboardType="default"
+                    keyboardType="email-address"
                     autoCapitalize="none"
                   />
                 </View>
@@ -367,7 +355,7 @@ const styles = StyleSheet.create({
     paddingLeft: 6, 
   },
   headerLogo: {
-    width: 44, // Keeps it neatly sized with the back button
+    width: 44, 
     height: 44,
     resizeMode: "contain",
   },

@@ -247,7 +247,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     paddingBottom: 20,
   },
   iconBtn: { width: 40, height: 40, justifyContent: "center", alignItems: "center" },
-  headerTitle: { fontSize: 16, fontFamily: "Sora_700Bold", color: theme.textPrimary },
+  headerTitle: { fontSize: 16, fontFamily: "Chirp-Bold", color: theme.textPrimary },
 
   scrollContent: { paddingBottom: 40 },
 
@@ -265,7 +265,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderWidth: 3,
     borderColor: "#00C48A",
   },
-  avatarText: { fontSize: 40, fontFamily: "Sora_800ExtraBold", color: "#FFFFFF" },
+  avatarText: { fontSize: 40, fontFamily: "Chirp-Heavy", color: "#FFFFFF" },
   cameraBadge: {
     position: "absolute",
     bottom: 2,
@@ -279,15 +279,15 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderWidth: 2,
     borderColor: isDarkMode ? "#0B0F0D" : "#F4F6F8",
   },
-  userName: { fontSize: 20, fontFamily: "Sora_700Bold", color: theme.textPrimary, marginBottom: 4 },
-  userLocation: { fontSize: 13, fontFamily: "Sora_500Medium", color: theme.textSecondary, marginBottom: 16 },
+  userName: { fontSize: 20, fontFamily: "Chirp-Bold", color: theme.textPrimary, marginBottom: 4 },
+  userLocation: { fontSize: 13, fontFamily: "Chirp-Medium", color: theme.textSecondary, marginBottom: 16 },
   editProfileBtn: {
     backgroundColor: isDarkMode ? "#1A221E" : "#E2E8F0",
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
   },
-  editProfileBtnText: { fontSize: 12, fontFamily: "Sora_600SemiBold", color: theme.textPrimary },
+  editProfileBtnText: { fontSize: 12, fontFamily: "Chirp-Bold", color: theme.textPrimary },
 
   /* Card Menus */
   menuGroup: {
@@ -313,13 +313,13 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderBottomColor: isDarkMode ? "#1F2E27" : "#F1F5F9",
   },
   menuItemLeft: { flexDirection: "row", alignItems: "center" },
-  menuTitle: { fontSize: 14, fontFamily: "Sora_600SemiBold", color: theme.textPrimary },
+  menuTitle: { fontSize: 14, fontFamily: "Chirp-Bold", color: theme.textPrimary },
 
   /* Footer */
   versionText: {
     textAlign: "center",
     fontSize: 12,
-    fontFamily: "Sora_500Medium",
+    fontFamily: "Chirp-Medium",
     color: theme.textSecondary,
     marginTop: 10,
   },

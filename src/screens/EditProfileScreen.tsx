@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -185,7 +185,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       paddingBottom: 20,
     },
     iconBtn: { width: 40, height: 40, justifyContent: "center", alignItems: "center" },
-    headerTitle: { fontSize: 16, fontFamily: "Sora_700Bold", color: theme.textPrimary },
+    headerTitle: { fontSize: 16, fontFamily: "Chirp-Bold", color: theme.textPrimary },
     
     scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
     
@@ -202,7 +202,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       borderWidth: 3,
       borderColor: "#00C48A",
     },
-    avatarPlaceholderText: { fontSize: 40, fontFamily: "Sora_800ExtraBold", color: "#FFFFFF" },
+    avatarPlaceholderText: { fontSize: 40, fontFamily: "Chirp-Heavy", color: "#FFFFFF" },
     cameraBadge: {
       position: "absolute",
       bottom: 2,
@@ -216,10 +216,10 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       borderWidth: 2,
       borderColor: isDarkMode ? "#0B0F0D" : "#F4F6F8",
     },
-    changePhotoText: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: theme.textSecondary },
+    changePhotoText: { fontSize: 13, fontFamily: "Chirp-Bold", color: theme.textSecondary },
 
     inputGroup: { marginBottom: 20 },
-    inputLabel: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: theme.textSecondary, marginBottom: 8, marginLeft: 4 },
+    inputLabel: { fontSize: 13, fontFamily: "Chirp-Bold", color: theme.textSecondary, marginBottom: 8, marginLeft: 4 },
     textInputWrapper: {
       flexDirection: "row",
       alignItems: "center",
@@ -233,12 +233,12 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       shadowRadius: 5,
       elevation: 1,
     },
-    textInput: { flex: 1, fontSize: 15, fontFamily: "Sora_500Medium", color: theme.textPrimary },
+    textInput: { flex: 1, fontSize: 15, fontFamily: "Chirp-Medium", color: theme.textPrimary },
 
     versionText: {
       textAlign: "center",
       fontSize: 12,
-      fontFamily: "Sora_500Medium",
+      fontFamily: "Chirp-Medium",
       color: theme.textSecondary,
       marginTop: 20,
     },
@@ -261,7 +261,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       shadowRadius: 10, 
       elevation: 5 
     },
-    footerBtnText: { color: "#FFFFFF", fontSize: 15, fontFamily: "Sora_700Bold" },
+    footerBtnText: { color: "#FFFFFF", fontSize: 15, fontFamily: "Chirp-Bold" },
   });
 
 export default EditProfileScreen;

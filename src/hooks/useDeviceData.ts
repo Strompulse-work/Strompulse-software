@@ -2,17 +2,6 @@
  * Custom Hooks for Data Fetching and Realtime Subscriptions
  * Hybrid Backend Upgrade: Static relationships from Supabase + Zero-Latency hardware stream from Firebase.
  * Includes Real-Time Heartbeat Logic for Online/Offline Status.
- *
- * FIXES APPLIED (see inline comments marked FIX:):
- * 1. Firebase root path corrected — devices (STROM006, STROM007, ...) live directly
- *    at the database root, NOT under a "PowerMonitor" node. The old code checked
- *    liveHardwareTree.PowerMonitor, which is always undefined, so every device
- *    silently fell back to stale Supabase-only data with isOnline forced to false.
- * 2. Heartbeat threshold changed from 60s to 180s to match the actual spec
- *    (device pings ~every 30s, treat as offline after 180s of silence).
- * 3. Sorting now parses the STROM timestamp format instead of calling
- *    `new Date(rawString)` directly, which returned Invalid Date (NaN) and
- *    produced an unreliable sort order.
  */
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -40,46 +29,43 @@ interface UseAsyncState<T> {
 }
 
 // ============================================================================
+// BASE DATABASE ANCHOR NODES MAPPING
+// ============================================================================
+
+export const DEVICE_LOCATIONS: Record<string, { name: string; type: string; lat: number; lng: number; roads: string[] }> = {
+  "STROM001": { name: "Jericho Quarters", type: "estate", lat: 7.3970, lng: 3.8650, roads: ["Kudeti", "Onireke", "Jericho GRA"] },
+  "STROM002": { name: "Agodi GRA", type: "estate", lat: 7.4080, lng: 3.9050, roads: ["Parliament", "Secretariat", "Ikolaba"] },
+  "STROM003": { name: "Bodija Estate", type: "estate", lat: 7.4100, lng: 3.9000, roads: ["Awolowo Road", "Osuntokun", "Housing Corp"] },
+  "STROM004": { name: "Challenge", type: "area", lat: 7.3600, lng: 3.8800, roads: ["Ring Rd", "Lagos Ibadan Exp", "Molete"] },
+  "STROM005": { name: "Mokola", type: "area", lat: 7.3950, lng: 3.8850, roads: ["Sabo", "Queen Elizabeth Road", "Oremeji"] },
+  "STROM006": { name: "Oluyole Estate", type: "estate", lat: 7.3500, lng: 3.8650, roads: ["Mobil", "Adeoyo", "Ring Road"] },
+  "STROM007": { name: "Ring Road Area", type: "area", lat: 7.3650, lng: 3.8600, roads: ["State Hospital", "Liberty Stadium", "Oni and Sons"] },
+  "STROM008": { name: "UI Campus", type: "school", lat: 7.4420, lng: 3.9000, roads: ["Bello", "Tafawa Balewa Way", "Agbowa"] },
+  "STROM009": { name: "Mapo Hall", type: "area", lat: 7.3750, lng: 3.8950, roads: ["Bere", "Oja Oba Market", "Oje"] },
+  "STROM010": { name: "Eleyele", type: "area", lat: 7.4050, lng: 3.8550, roads: ["Waterworks", "Jericho Rd", "Polytechnic Rd"] },
+  "STROM011": { name: "MONATAN", type: "area", lat: 7.3880, lng: 3.8750, roads: ["New Ife Road", "Old Ife Road"] },
+  "STROM012": { name: "OKETEDO", type: "area", lat: 7.3780, lng: 3.9100, roads: ["Oyo Road", "Agbowo Road"] },
+};
+
+// ============================================================================
 // STROM DEVICE HEARTBEAT UTILITIES
 // ============================================================================
 
-const STROM_OFFLINE_THRESHOLD_SECONDS = 180; // FIX: was scattered as 60 at call sites
-
-// FIX: the hardware writes its timestamp in WAT (Nigeria time, UTC+1, no DST)
-// regardless of what timezone the phone/server running this code is set to.
-// Confirmed from a live device: Firebase timestamp read 21:19:43 WAT while
-// the reading machine's clock showed 20:18 — a ~61 minute gap, i.e. exactly
-// the WAT offset. That gap alone was enough to push every device past the
-// 180s offline threshold, so a perfectly live device reported "Power Outage".
+const STROM_OFFLINE_THRESHOLD_SECONDS = 65; 
 const STROM_DEVICE_UTC_OFFSET_MINUTES = 60; // WAT = UTC+1
 
-/**
- * Parses STROM DDMMYYYYHHMMSS timestamp string into a JavaScript Date object.
- *
- * IMPORTANT: uses Date.UTC() and then subtracts the WAT offset, so the
- * result is a correct absolute instant NO MATTER what timezone the runtime
- * (phone, dev machine, server) itself is set to. The previous version used
- * `new Date(y, m, d, h, mi, s)`, which silently interprets those numbers as
- * local time of whatever machine runs the code — correct only by accident
- * when that machine happens to be set to WAT, and wrong (by the exact
- * zone gap) everywhere else. That was the root cause of the false
- * "Power Outage" reading on a live device.
- */
 export const parseStromTimestamp = (tsStr: string | number | undefined): Date | null => {
   if (!tsStr) return null;
   const str = String(tsStr);
 
-  // Handle STROM DDMMYYYYHHMMSS format (14 digits)
   if (str.length === 14 && /^\d+$/.test(str)) {
     const day = parseInt(str.substring(0, 2), 10);
-    const month = parseInt(str.substring(2, 4), 10) - 1; // JS Months are 0-indexed
+    const month = parseInt(str.substring(2, 4), 10) - 1; 
     const year = parseInt(str.substring(4, 8), 10);
     const hours = parseInt(str.substring(8, 10), 10);
     const minutes = parseInt(str.substring(10, 12), 10);
     const seconds = parseInt(str.substring(12, 14), 10);
 
-    // Treat (year, month, day, hours, minutes, seconds) as WAT wall-clock
-    // time, then convert to the true UTC instant it represents.
     const utcMillis =
       Date.UTC(year, month, day, hours, minutes, seconds) -
       STROM_DEVICE_UTC_OFFSET_MINUTES * 60 * 1000;
@@ -88,141 +74,217 @@ export const parseStromTimestamp = (tsStr: string | number | undefined): Date | 
     return isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  // Fallback for standard ISO or standard date formats
   const fallbackDate = new Date(str);
   return isNaN(fallbackDate.getTime()) ? null : fallbackDate;
 };
 
-/**
- * Calculates a STROM device's connection state: 'online' | 'offline' | 'checking'.
- *
- * 'checking' covers the ~60s warm-up window on the fallback path (no
- * serverReceivedAt yet) where we've seen at most one change and can't yet
- * tell a genuine live device from a one-off touch. Use this three-state
- * result to show a neutral "Checking…" UI during warm-up instead of a
- * false "Power Outage", while still resolving to a definite online/offline
- * once confirmed (or once the grace window expires with no confirmation).
- *
- * FIX (v6): see prior notes — prefers the Cloud-Function-stamped
- * `serverReceivedAt` (instant, no warm-up needed) and only falls back to
- * change-counting when that field isn't present yet.
- */
 export type ConnectionState = 'online' | 'offline' | 'checking';
-
-export type HeartbeatTracker = Record<
-  string,
-  { rawTimestamp: string; lastChangeAt: number; consecutiveGenuineChanges: number; firstSeenAt: number }
->;
-
-const MIN_PLAUSIBLE_GAP_SECONDS = 10; // fallback path only
-const REQUIRED_CONSECUTIVE_CHANGES = 2; // fallback path only
-const CHECKING_GRACE_SECONDS = 90; // fallback path only — how long to show "checking" before giving up and calling it offline
+export type HeartbeatTracker = Record<string, 'online' | 'offline'>;
+const STROM_ONLINE_CONFIRM_SECONDS = 35; 
 
 export const getDeviceConnectionState = (
   hardwareMetrics: any,
   deviceId: string,
   tracker: HeartbeatTracker,
-  thresholdSeconds: number = STROM_OFFLINE_THRESHOLD_SECONDS
+  thresholdSeconds: number = STROM_OFFLINE_THRESHOLD_SECONDS,
+  hasConnectivityIssue: boolean = false
 ): ConnectionState => {
+  if (hasConnectivityIssue) return 'checking';
   if (!hardwareMetrics) return 'offline';
 
-  // 1. Device must report status as "1" (Active)
   const rawStatus = String(hardwareMetrics.status).trim();
   const reportedActive =
     rawStatus === "1" ||
     rawStatus.toLowerCase() === "true" ||
     rawStatus.toLowerCase() === "on";
 
-  if (!reportedActive) return 'offline';
+  if (!reportedActive) {
+    tracker[deviceId] = 'offline';
+    return 'offline';
+  }
 
-  // 2a. PREFERRED PATH: authoritative server timestamp, stamped by the
-  // Cloud Function. Correct and instant on a single read — no warm-up.
+  let secondsSinceUpdate: number | null = null;
+
   if (typeof hardwareMetrics.serverReceivedAt === "number") {
-    const secondsSinceServerWrite = (Date.now() - hardwareMetrics.serverReceivedAt) / 1000;
-    return secondsSinceServerWrite <= thresholdSeconds ? 'online' : 'offline';
+    secondsSinceUpdate = (Date.now() - hardwareMetrics.serverReceivedAt) / 1000;
+  } else if (hardwareMetrics.timestamp) {
+    const parsed = parseStromTimestamp(hardwareMetrics.timestamp);
+    if (parsed) {
+      secondsSinceUpdate = (Date.now() - parsed.getTime()) / 1000;
+    }
   }
 
-  // 2b. FALLBACK PATH: no serverReceivedAt yet — change-counting with a
-  // 'checking' state during the confirmation window instead of a false
-  // 'offline'.
-  const rawTimestamp = hardwareMetrics.timestamp;
-  if (!rawTimestamp) return 'offline';
-  const tsString = String(rawTimestamp);
-
-  const now = Date.now();
-  const prev = tracker[deviceId];
-
-  if (!prev) {
-    tracker[deviceId] = { rawTimestamp: tsString, lastChangeAt: now, consecutiveGenuineChanges: 0, firstSeenAt: now };
-    return 'checking';
+  if (secondsSinceUpdate === null) {
+    tracker[deviceId] = 'offline';
+    return 'offline';
   }
 
-  let streak = prev.consecutiveGenuineChanges;
-  let lastChangeAt = prev.lastChangeAt;
+  const prevState = tracker[deviceId] || 'offline';
 
-  if (prev.rawTimestamp !== tsString) {
-    const gap = (now - prev.lastChangeAt) / 1000;
-    const plausible = gap >= MIN_PLAUSIBLE_GAP_SECONDS && gap <= thresholdSeconds;
-    streak = plausible ? prev.consecutiveGenuineChanges + 1 : 0;
-    lastChangeAt = now;
+  if (prevState === 'online') {
+    if (secondsSinceUpdate <= thresholdSeconds) return 'online';
+    tracker[deviceId] = 'offline';
+    return 'offline';
   }
 
-  tracker[deviceId] = { rawTimestamp: tsString, lastChangeAt, consecutiveGenuineChanges: streak, firstSeenAt: prev.firstSeenAt };
-
-  if (streak >= REQUIRED_CONSECUTIVE_CHANGES) {
-    const secondsSinceChange = (now - lastChangeAt) / 1000;
-    return secondsSinceChange <= thresholdSeconds ? 'online' : 'offline';
+  if (secondsSinceUpdate <= STROM_ONLINE_CONFIRM_SECONDS) {
+    tracker[deviceId] = 'online';
+    return 'online';
   }
-
-  // Not yet confirmed — show 'checking' until the grace window runs out,
-  // then give up and call it offline rather than checking forever.
-  const secondsSinceFirstSeen = (now - prev.firstSeenAt) / 1000;
-  return secondsSinceFirstSeen <= CHECKING_GRACE_SECONDS ? 'checking' : 'offline';
+  return 'offline';
 };
 
-/**
- * Back-compat boolean wrapper — 'checking' counts as not-yet-online here,
- * for any call site that hasn't been updated to use the 3-state version.
- */
 export const checkIsDeviceOnline = (
   hardwareMetrics: any,
   deviceId: string,
   tracker: HeartbeatTracker,
-  thresholdSeconds: number = STROM_OFFLINE_THRESHOLD_SECONDS
+  thresholdSeconds: number = STROM_OFFLINE_THRESHOLD_SECONDS,
+  hasConnectivityIssue: boolean = false
 ): boolean => {
-  return getDeviceConnectionState(hardwareMetrics, deviceId, tracker, thresholdSeconds) === 'online';
+  return getDeviceConnectionState(hardwareMetrics, deviceId, tracker, thresholdSeconds, hasConnectivityIssue) === 'online';
 };
 
-/**
- * FIX: SHARED across every screen — module-level, not per-hook-instance.
- * Before this, ElectricityScreen and CommunityZonesScreen each called
- * useAllGridDevices() independently, and each got its OWN private
- * tracker via useRef. That meant a device already confirmed online on
- * the Communities list would reset back to "checking"/"offline" the
- * moment you navigated into its detail screen, which mounts a fresh
- * hook instance with empty tracker state. Declaring this once at module
- * scope means every screen reads and writes the SAME record for a given
- * device, so a confirmation made on one screen is immediately visible
- * on every other screen — no re-confirmation, no inconsistency.
- */
 const sharedHeartbeatTracker: HeartbeatTracker = {};
 
-/**
- * FIX: safe millis extraction for sorting — handles both the raw STROM
- * timestamp string and any ISO/epoch fallback value without ever returning NaN.
- */
 const safeTimeMillis = (value: any): number => {
   const parsed = parseStromTimestamp(value);
   return parsed ? parsed.getTime() : 0;
 };
 
 // ============================================================================
-// HOOKS
+// HISTORY-BASED ANALYTICS
 // ============================================================================
 
-/**
- * Generic async hook for one-off data fetching
- */
+export type AnalyticsRange = 'Today';
+
+export interface PowerFlowBucket {
+  label: string;
+  restorationCount: number;
+  stabilityScore: number; 
+  isStable: boolean;
+  isFuture: boolean;
+}
+
+export interface HistoryAnalytics {
+  bucketLabels: string[];
+  buckets: PowerFlowBucket[];
+  totalRestorationsInRange: number;
+  latestRestorationAt: Date | null;
+  currentStreakMs: number | null;
+  hasAnyData: boolean;
+  isCurrentlyOnline: boolean;
+}
+
+export const computeHistoryAnalytics = (
+  historyNode: Record<string, any> | undefined | null,
+  range: AnalyticsRange,
+  isCurrentlyOnline: boolean
+): HistoryAnalytics => {
+  const rawKeys = historyNode ? Object.keys(historyNode) : [];
+  const hasAnyData = rawKeys.length > 0;
+
+  const restorationDates = rawKeys
+    .map((key) => parseStromTimestamp(key))
+    .filter((d): d is Date => d !== null)
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  const latestRestorationAt = restorationDates.length > 0 ? restorationDates[restorationDates.length - 1] : null;
+
+  const currentStreakMs = isCurrentlyOnline && latestRestorationAt
+    ? Date.now() - latestRestorationAt.getTime()
+    : null;
+
+  const WAT_OFFSET_MS = 60 * 60 * 1000; 
+  const nowUtcMs = Date.now();
+  const watWallClock = new Date(nowUtcMs + WAT_OFFSET_MS); 
+  const watMidnightAsWallClock = Date.UTC(watWallClock.getUTCFullYear(), watWallClock.getUTCMonth(), watWallClock.getUTCDate());
+  const startOfDay = watMidnightAsWallClock - WAT_OFFSET_MS; 
+
+  const HOUR_LABELS = ['12 AM', '4 AM', '8 AM', '12 PM', '4 PM', '8 PM'];
+  const bucketLabels = HOUR_LABELS;
+  const bucketBoundaries: number[] = [0, 4, 8, 12, 16, 20, 24].map((h) => startOfDay + h * 3600 * 1000);
+
+  let currentBucketIndex = bucketLabels.length - 1;
+  for (let i = 0; i < bucketLabels.length; i++) {
+    if (nowUtcMs >= bucketBoundaries[i] && nowUtcMs < bucketBoundaries[i + 1]) {
+      currentBucketIndex = i;
+      break;
+    }
+  }
+
+  const upSinceMs = isCurrentlyOnline && latestRestorationAt ? latestRestorationAt.getTime() : null;
+
+  const buckets: PowerFlowBucket[] = bucketLabels.map((label, i) => {
+    const rangeStart = bucketBoundaries[i];
+    const rangeEnd = bucketBoundaries[i + 1];
+    const restorationCount = restorationDates.filter((d) => {
+      const t = d.getTime();
+      return t >= rangeStart && t < rangeEnd;
+    }).length;
+
+    const stabilityScore = hasAnyData ? Math.max(20, 100 - restorationCount * 25) : 0;
+
+    const isFuture = rangeStart > nowUtcMs;
+    const isCurrentBucket = i === currentBucketIndex;
+
+    let isStable: boolean;
+    if (isFuture) {
+      isStable = false; 
+    } else if (isCurrentBucket && isCurrentlyOnline) {
+      isStable = true;
+    } else if (isCurrentlyOnline && upSinceMs !== null && rangeEnd > upSinceMs) {
+      isStable = true;
+    } else {
+      isStable = hasAnyData && restorationCount > 0;
+    }
+
+    return { label, restorationCount, stabilityScore, isStable, isFuture };
+  });
+
+  const totalRestorationsInRange = buckets.reduce((sum, b) => sum + b.restorationCount, 0);
+
+  return { bucketLabels, buckets, totalRestorationsInRange, latestRestorationAt, currentStreakMs, hasAnyData, isCurrentlyOnline };
+};
+
+export const computeAggregatedHistoryAnalytics = (
+  devicesWithHistory: Array<{ history?: Record<string, any> | undefined | null; isOnline: boolean }>
+): HistoryAnalytics => {
+  const perDevice = devicesWithHistory.map((d) => computeHistoryAnalytics(d.history, 'Today', d.isOnline));
+
+  const bucketLabels = perDevice[0]?.bucketLabels || ['12 AM', '4 AM', '8 AM', '12 PM', '4 PM', '8 PM'];
+
+  const buckets: PowerFlowBucket[] = bucketLabels.map((label, i) => {
+    const scores = perDevice.map((pd) => pd.buckets[i]?.stabilityScore ?? 0);
+    const stabilityScore = scores.length > 0 ? scores.reduce((sum, s) => sum + s, 0) / scores.length : 0;
+    const restorationCount = perDevice.reduce((sum, pd) => sum + (pd.buckets[i]?.restorationCount || 0), 0);
+    const isStable = perDevice.some((pd) => pd.buckets[i]?.isStable);
+    const isFuture = perDevice.length > 0 && perDevice.every((pd) => pd.buckets[i]?.isFuture);
+    return { label, restorationCount, stabilityScore, isStable, isFuture };
+  });
+
+  const totalRestorationsInRange = buckets.reduce((sum, b) => sum + b.restorationCount, 0);
+  const hasAnyData = perDevice.some((pd) => pd.hasAnyData);
+
+  const allRestorationDates = perDevice
+    .map((pd) => pd.latestRestorationAt)
+    .filter((d): d is Date => d !== null);
+  const latestRestorationAt = allRestorationDates.length > 0
+    ? new Date(Math.max(...allRestorationDates.map((d) => d.getTime())))
+    : null;
+
+  const allCurrentlyOnline = devicesWithHistory.length > 0 && devicesWithHistory.every((d) => d.isOnline);
+
+  return { bucketLabels, buckets, totalRestorationsInRange, latestRestorationAt, currentStreakMs: null, hasAnyData, isCurrentlyOnline: allCurrentlyOnline };
+};
+
+export const formatDurationShort = (ms: number): string => {
+  const totalMinutes = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+};
+
 export const useAsync = <T>(
   handler: () => Promise<any>,
   immediate: boolean = true,
@@ -260,14 +322,6 @@ export const useAsync = <T>(
   return state;
 };
 
-/**
- * FIX: Extracts the map of { deviceId: { realtime, history, ... } } from the
- * raw Firebase root snapshot. Devices live directly at the root (STROM006,
- * STROM007, STROM008, ...) — there is no "PowerMonitor" wrapper node. We
- * still check for a PowerMonitor node first for backward compatibility in
- * case that structure is reintroduced later, but default to treating the
- * root itself as the device map, filtered to keys that look like device IDs.
- */
 const extractPowerMonitorNode = (liveHardwareTree: any): Record<string, any> | null => {
   if (!liveHardwareTree) return null;
 
@@ -275,7 +329,6 @@ const extractPowerMonitorNode = (liveHardwareTree: any): Record<string, any> | n
     return liveHardwareTree.PowerMonitor;
   }
 
-  // Root-level device map (matches actual current DB structure: STROM006, STROM007, ...)
   const deviceLikeEntries = Object.keys(liveHardwareTree).filter((key) =>
     /^STROM\d+$/i.test(key)
   );
@@ -289,83 +342,96 @@ const extractPowerMonitorNode = (liveHardwareTree: any): Record<string, any> | n
   return rootAsDeviceMap;
 };
 
-/**
- * Hook to fetch all grid devices globally.
- * Bypasses user-specific restrictions and pulls everything directly from the Firebase stream.
- */
 export const useAllGridDevices = () => {
   const [devices, setDevices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // FIX: uses the module-level sharedHeartbeatTracker, not a private
-  // per-instance ref — see note above sharedHeartbeatTracker's declaration.
+  const lastPowerMonitorNodeRef = useRef<Record<string, any> | null>(null);
+  const supabaseDataRef = useRef<any[]>([]);
+  const hasConnectivityIssueRef = useRef<boolean>(false);
 
   useEffect(() => {
     let firebaseListener: any;
+    let pollInterval: any;
     const rootFirebaseRef = ref(firebaseDb, "/");
+
+    const buildAndSetDevices = () => {
+      const powerMonitorNode = lastPowerMonitorNodeRef.current;
+      const supabaseData = supabaseDataRef.current || [];
+      const hasConnectivityIssue = hasConnectivityIssueRef.current;
+
+      // Base nodes list (Anchor nodes STROM001 - STROM012)
+      const baseDeviceIds = Object.keys(DEVICE_LOCATIONS);
+      const incomingIds = powerMonitorNode ? Object.keys(powerMonitorNode) : [];
+      const allDistinctIds = Array.from(new Set([...baseDeviceIds, ...incomingIds]));
+
+      const synchronizedDevices = allDistinctIds.map((deviceId) => {
+        const hardwareMetrics = powerMonitorNode?.[deviceId]?.realtime || null;
+        const dbDevice = supabaseData.find((d: any) => d.device_id === deviceId || d.id === deviceId) || {};
+
+        const connectionState = getDeviceConnectionState(
+          hardwareMetrics,
+          deviceId,
+          sharedHeartbeatTracker,
+          STROM_OFFLINE_THRESHOLD_SECONDS,
+          hasConnectivityIssue
+        );
+
+        const isOnline = connectionState === 'online';
+
+        return {
+          ...dbDevice,
+          id: deviceId,
+          isOnline,
+          connectionState,
+          status: hardwareMetrics?.status !== undefined
+            ? Number(hardwareMetrics.status)
+            : Number(dbDevice.status || 0),
+          voltage: hardwareMetrics?.voltage !== undefined
+            ? hardwareMetrics.voltage
+            : (dbDevice.voltage || 0),
+          updated_at: hardwareMetrics?.timestamp || dbDevice.last_seen || Date.now(),
+          latitude: hardwareMetrics?.latitude || dbDevice.latitude,
+          longitude: hardwareMetrics?.longitude || dbDevice.longitude,
+          history: powerMonitorNode?.[deviceId]?.history || {},
+        };
+      });
+
+      const sortedDevices = synchronizedDevices.sort(
+        (a, b) => safeTimeMillis(b.updated_at) - safeTimeMillis(a.updated_at)
+      );
+
+      setDevices(sortedDevices);
+      setLoading(false);
+    };
 
     const fetchAndSyncDevices = async () => {
       try {
-        // 1. Fetch static structural assets from Supabase (optional metadata layer)
-        const { data: supabaseData, error: dbError } = await supabase
+        const { data: supabaseData } = await supabase
           .from("devices")
           .select("*");
 
-        if (dbError) console.warn("Supabase metadata fetch issue, relying on Firebase stream:", dbError);
+        supabaseDataRef.current = supabaseData || [];
 
-        // 2. Open a real-time stream subscription on the hardware Firebase root node
-        firebaseListener = onValue(rootFirebaseRef, (snapshot) => {
-          const liveHardwareTree = snapshot.val();
-          const powerMonitorNode = extractPowerMonitorNode(liveHardwareTree); // FIX
-
-          if (powerMonitorNode) {
-            // 3. Dynamically map ALL hardware IDs currently transmitting in Firebase
-            const deviceIds = Object.keys(powerMonitorNode);
-
-            const synchronizedDevices = deviceIds.map((deviceId) => {
-              const hardwareMetrics = powerMonitorNode[deviceId]?.realtime || {};
-              const dbDevice = (supabaseData || []).find((d: any) => d.device_id === deviceId) || {};
-
-              // 4. Compute connection state using OUR clock, not the device's.
-              // Exposes both the new 3-state field (for screens that want a
-              // "Checking…" UI) and the old boolean (for anything that isn't
-              // updated yet) — isOnline stays false during 'checking', so
-              // nothing breaks for screens not yet using connectionState.
-              const connectionState = getDeviceConnectionState(hardwareMetrics, deviceId, sharedHeartbeatTracker); // FIX
-              const isOnline = connectionState === 'online';
-
-              return {
-                ...dbDevice,
-                id: deviceId,
-                isOnline, // Computed property injected directly into device object
-                connectionState, // 'online' | 'offline' | 'checking'
-                status: hardwareMetrics.status !== undefined
-                           ? Number(hardwareMetrics.status)
-                           : Number(dbDevice.status || 0),
-                voltage: hardwareMetrics.voltage !== undefined ? hardwareMetrics.voltage : (dbDevice.voltage || 0),
-                updated_at: hardwareMetrics.timestamp || dbDevice.last_seen || Date.now(),
-                latitude: hardwareMetrics.latitude || dbDevice.latitude,
-                longitude: hardwareMetrics.longitude || dbDevice.longitude,
-              };
-            });
-
-            // FIX: sort using safeTimeMillis instead of new Date(rawString).getTime()
-            const sortedDevices = synchronizedDevices.sort(
-              (a, b) => safeTimeMillis(b.updated_at) - safeTimeMillis(a.updated_at)
-            );
-
-            setDevices(sortedDevices);
-          } else {
-            setDevices((supabaseData || []).map((d: any) => ({ ...d, id: d.device_id, isOnline: false, updated_at: d.last_seen })));
+        firebaseListener = onValue(
+          rootFirebaseRef,
+          (snapshot) => {
+            const liveHardwareTree = snapshot.val();
+            lastPowerMonitorNodeRef.current = extractPowerMonitorNode(liveHardwareTree);
+            hasConnectivityIssueRef.current = false;
+            setError(null);
+            buildAndSetDevices();
+          },
+          (fbErr) => {
+            console.error("Firebase Read Error:", fbErr.message);
+            hasConnectivityIssueRef.current = true;
+            setError(fbErr.message);
+            buildAndSetDevices();
           }
-          setLoading(false);
-        }, (fbErr) => {
-          console.error("Firebase continuous pipe error:", fbErr);
-          setError(fbErr.message);
-          setLoading(false);
-        });
+        );
+
+        pollInterval = setInterval(buildAndSetDevices, 2000);
       } catch (err: any) {
-        console.error("❌ Error setting up global hybrid engine hooks!");
         setError(String(err?.message || err));
         setLoading(false);
       }
@@ -377,21 +443,22 @@ export const useAllGridDevices = () => {
       if (firebaseListener) {
         off(rootFirebaseRef, "value", firebaseListener);
       }
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
     };
   }, []);
 
   return { devices, loading, error };
 };
 
-/**
- * Hook to fetch and subscribe to user devices with HYBRID backend integration.
- */
 export const useUserDevices = (userId: string) => {
   const [devices, setDevices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // FIX: shares sharedHeartbeatTracker with useAllGridDevices — same device
-  // seen from either hook is judged by the same confirmation history.
+  const lastPowerMonitorNodeRef = useRef<Record<string, any> | null>(null);
+  const supabaseDataRef = useRef<any[]>([]);
+  const hasConnectivityIssueRef = useRef<boolean>(false); 
 
   useEffect(() => {
     if (!userId) {
@@ -400,7 +467,45 @@ export const useUserDevices = (userId: string) => {
     }
 
     let firebaseListener: any;
+    let pollInterval: any;
     const rootFirebaseRef = ref(firebaseDb, "/");
+
+    const buildAndSetDevices = () => {
+      const powerMonitorNode = lastPowerMonitorNodeRef.current;
+      const supabaseData = supabaseDataRef.current;
+      const hasConnectivityIssue = hasConnectivityIssueRef.current;
+
+      if (powerMonitorNode) {
+        const synchronizedDevices = supabaseData.map((dbDevice: any) => {
+          const hardwareMetrics = powerMonitorNode[dbDevice.device_id]?.realtime || {};
+          const connectionState = getDeviceConnectionState(hardwareMetrics, dbDevice.device_id, sharedHeartbeatTracker, undefined, hasConnectivityIssue);
+          const isOnline = connectionState === 'online';
+
+          return {
+            ...dbDevice,
+            id: dbDevice.device_id,
+            isOnline,
+            connectionState,
+            status: hardwareMetrics.status !== undefined
+                       ? Number(hardwareMetrics.status)
+                       : Number(dbDevice.status),
+            voltage: hardwareMetrics.voltage !== undefined ? hardwareMetrics.voltage : dbDevice.voltage,
+            updated_at: hardwareMetrics.timestamp || dbDevice.last_seen || Date.now(),
+            latitude: hardwareMetrics.latitude || dbDevice.latitude,
+            longitude: hardwareMetrics.longitude || dbDevice.longitude,
+            history: powerMonitorNode[dbDevice.device_id]?.history || {}, 
+          };
+        });
+
+        const sortedDevices = synchronizedDevices.sort(
+          (a, b) => safeTimeMillis(b.updated_at) - safeTimeMillis(a.updated_at)
+        );
+        setDevices(sortedDevices);
+      } else {
+        setDevices(supabaseData.map((d: any) => ({ ...d, id: d.device_id, isOnline: false, connectionState: hasConnectivityIssue ? 'checking' : 'offline', updated_at: d.last_seen })));
+      }
+      setLoading(false);
+    };
 
     const fetchAndSyncDevices = async () => {
       try {
@@ -411,50 +516,24 @@ export const useUserDevices = (userId: string) => {
         if (dbError) throw dbError;
 
         if (supabaseData) {
+          supabaseDataRef.current = supabaseData;
+
           firebaseListener = onValue(rootFirebaseRef, (snapshot) => {
             const liveHardwareTree = snapshot.val();
-            const powerMonitorNode = extractPowerMonitorNode(liveHardwareTree); // FIX
-
-            if (powerMonitorNode) {
-              const synchronizedDevices = supabaseData.map((dbDevice: any) => {
-                const hardwareMetrics = powerMonitorNode[dbDevice.device_id]?.realtime || {};
-
-                // Compute connection state using OUR clock, not the device's.
-                const connectionState = getDeviceConnectionState(hardwareMetrics, dbDevice.device_id, sharedHeartbeatTracker); // FIX
-                const isOnline = connectionState === 'online';
-
-                return {
-                  ...dbDevice,
-                  id: dbDevice.device_id,
-                  isOnline, // Computed property
-                  connectionState, // 'online' | 'offline' | 'checking'
-                  status: hardwareMetrics.status !== undefined
-                             ? Number(hardwareMetrics.status)
-                             : Number(dbDevice.status),
-                  voltage: hardwareMetrics.voltage !== undefined ? hardwareMetrics.voltage : dbDevice.voltage,
-                  updated_at: hardwareMetrics.timestamp || dbDevice.last_seen || Date.now(),
-                  latitude: hardwareMetrics.latitude || dbDevice.latitude,
-                  longitude: hardwareMetrics.longitude || dbDevice.longitude,
-                };
-              });
-
-              // FIX: sort using safeTimeMillis instead of new Date(rawString).getTime()
-              const sortedDevices = synchronizedDevices.sort(
-                (a, b) => safeTimeMillis(b.updated_at) - safeTimeMillis(a.updated_at)
-              );
-              setDevices(sortedDevices);
-            } else {
-              setDevices(supabaseData.map(d => ({ ...d, id: d.device_id, isOnline: false, updated_at: d.last_seen })));
-            }
-            setLoading(false);
+            lastPowerMonitorNodeRef.current = extractPowerMonitorNode(liveHardwareTree); 
+            hasConnectivityIssueRef.current = false;
+            setError(null);
+            buildAndSetDevices();
           }, (fbErr) => {
-            console.error("Firebase continuous pipe error:", fbErr);
+            hasConnectivityIssueRef.current = true;
             setError(fbErr.message);
+            buildAndSetDevices();
             setLoading(false);
           });
+
+          pollInterval = setInterval(buildAndSetDevices, 2000);
         }
       } catch (err: any) {
-        console.error("❌ Error setting up hybrid engine hooks!");
         setError(String(err?.message || err));
         setLoading(false);
       }
@@ -466,15 +545,15 @@ export const useUserDevices = (userId: string) => {
       if (firebaseListener) {
         off(rootFirebaseRef, "value", firebaseListener);
       }
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
     };
   }, [userId]);
 
   return { devices, loading, error };
 };
 
-/**
- * Hook to fetch and subscribe to device events (Raw ON/OFF logs)
- */
 export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
   const [events, setEvents] = useState<PowerEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -529,9 +608,6 @@ export const useDeviceEvents = (deviceId: string, limit: number = 5) => {
   return { events, loading, error };
 };
 
-/**
- * Hook to fetch outages and update in real-time
- */
 export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
   const [outages, setOutages] = useState<Outage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -594,9 +670,6 @@ export const useDeviceOutages = (deviceId: string, limit: number = 10) => {
   return { outages, loading, error };
 };
 
-/**
- * Hook to fetch all communities (Auto-updates when new communities are added)
- */
 export const useCommunities = () => {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
@@ -626,7 +699,7 @@ export const useCommunities = () => {
         "postgres_changes",
         { event: "*", schema: "public", table: "communities" },
         () => {
-          fetch(); // Refetch the list when a new community is created/updated
+          fetch(); 
         },
       )
       .subscribe();
@@ -639,9 +712,6 @@ export const useCommunities = () => {
   return { communities, loading, error };
 };
 
-/**
- * Hook to fetch community statistics (Auto-recalculates when a device in the community changes)
- */
 export const useCommunityStats = (communityId: string) => {
   const [stats, setStats] = useState<CommunityStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -668,7 +738,6 @@ export const useCommunityStats = (communityId: string) => {
 
     fetchStats();
 
-    // Trigger a backend stats recalculation whenever a device inside THIS community changes status
     const channel = supabase
       .channel(`live-community-stats-${communityId}`)
       .on(
@@ -693,10 +762,6 @@ export const useCommunityStats = (communityId: string) => {
   return { stats, loading, error };
 };
 
-/**
- * Hook to fetch insights/analytics for a device.
- * Refetches if an outage record updates (e.g., duration changes).
- */
 export const useInsights = (deviceId: string) => {
   const [insights, setInsights] = useState<InsightsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -725,7 +790,6 @@ export const useInsights = (deviceId: string) => {
 
     fetch();
 
-    // Update insights if any outages for this device change
     const channel = supabase
       .channel(`live-insights-${deviceId}`)
       .on(
@@ -750,9 +814,6 @@ export const useInsights = (deviceId: string) => {
   return { insights, loading, error };
 };
 
-/**
- * Hook for polling device status at intervals (Fallback mechanism)
- */
 export const useDeviceStatusPolling = (
   deviceId: string,
   intervalMs: number = 30000,

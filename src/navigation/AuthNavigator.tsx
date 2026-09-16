@@ -21,6 +21,7 @@ export type AuthStackParamList = {
   Welcome: undefined;
   Login: undefined;
   Signup: undefined;
+  LinkPhone: undefined;
   Verify: { identifier: string }; // Required to pass the phone/email to the verify screen
 };
 

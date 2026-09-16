@@ -23,9 +23,9 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop, Circle as SvgCircle } from "react-native-svg";
+import Svg, { Path, Rect } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
-import { useAllGridDevices } from "../hooks/useDeviceData";
+import { useAllGridDevices, computeAggregatedHistoryAnalytics } from "../hooks/useDeviceData";
 import { Loading } from "../components/UIComponents";
 import CustomMapView from "../components/CustomMapView";
 import AuthService from "../services/authService";
@@ -33,7 +33,6 @@ import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { height, width } = Dimensions.get("window");
-const HEADER_HEIGHT = height * 0.35; 
 
 // --- Base Database (Anchor Nodes) ---
 const DEVICE_LOCATIONS: Record<string, { name: string; type: string; lat: number; lng: number; roads: string[] }> = {
@@ -50,14 +49,6 @@ const DEVICE_LOCATIONS: Record<string, { name: string; type: string; lat: number
   "STROM011": { name: "MONATAN", type: "area", lat: 7.3880, lng: 3.8750, roads: ["New Ife Road", "Old Ife Road"] },
   "STROM012": { name: "OKETEDO", type: "area", lat: 7.3780, lng: 3.9100, roads: ["Oyo Road", "Agbowo Road"] },
 };
-
-// NOTE: local timestamp parsing / staleness logic has been REMOVED from
-// this screen. Online, offline, AND checking state all come straight
-// from useAllGridDevices() (liveDevice.connectionState), which uses a
-// tracker SHARED across every screen in the app (hooks/useDeviceData.ts)
-// — so a device confirmed online here stays confirmed on every other
-// screen too, and a device still in its confirmation window shows a
-// neutral "Checking..." state instead of a false "Power Outage".
 
 const CHECKING_COLOR = "#F59E0B";
 
@@ -77,12 +68,62 @@ const MarqueeBanner = ({ text, isDarkMode }: { text: string, isDarkMode: boolean
       <MaterialCommunityIcons name="lightning-bolt" size={18} color="#00C48A" style={{ marginRight: 12, zIndex: 2 }} />
       <View style={{ flex: 1, overflow: "hidden", justifyContent: "center" }}>
         <Animated.View style={{ transform: [{ translateX }], width: 600 }}>
-          <Text style={{ fontSize: 12, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#A7F3D0" : "#064E3B" }} numberOfLines={1}>{text}</Text>
+          <Text style={{ fontSize: 12, fontFamily: "Chirp-Bold", color: isDarkMode ? "#A7F3D0" : "#064E3B" }} numberOfLines={1}>{text}</Text>
         </Animated.View>
       </View>
     </View>
   );
 };
+
+const SyncNotice = ({ visible, isDarkMode }: { visible: boolean; isDarkMode: boolean }) => {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(fadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(fadeAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+    }
+  }, [visible, fadeAnim]);
+
+  if (!visible) return null;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles_syncNotice.container,
+        { opacity: fadeAnim, backgroundColor: isDarkMode ? "rgba(26,34,30,0.96)" : "rgba(30,41,59,0.96)" },
+      ]}
+    >
+      <MaterialCommunityIcons name="sync" size={14} color="#A7F3D0" style={{ marginRight: 8 }} />
+      <Text style={styles_syncNotice.text}>
+        Syncing live status — some areas may take up to 70s to fully update
+      </Text>
+    </Animated.View>
+  );
+};
+
+const styles_syncNotice = StyleSheet.create({
+  container: {
+    position: "absolute",
+    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 90 : 110,
+    left: 20,
+    right: 20,
+    zIndex: 200,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  text: {
+    fontSize: 11,
+    fontFamily: "Chirp-Bold",
+    color: "#F8FAFC",
+  },
+});
 
 const ElectricityScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
@@ -100,7 +141,6 @@ const ElectricityScreen = ({ navigation }: any) => {
   const [communitySearchQuery, setCommunitySearchQuery] = useState("");
   const [communityFilter, setCommunityFilter] = useState<"All" | "Stable" | "Outage">("All");
 
-  const [analyticsTime, setAnalyticsTime] = useState<"Today" | "This Week" | "This Month">("Today");
   const [isCityDropdownOpen, setIsCityDropdownOpen] = useState(false);
   const [apiSearchResults, setApiSearchResults] = useState<any[]>([]);
   const [isSearchingApi, setIsSearchingApi] = useState(false);
@@ -116,10 +156,16 @@ const ElectricityScreen = ({ navigation }: any) => {
   const [isLocSearching, setIsLocSearching] = useState(false);
   const [selectedLocResult, setSelectedLocResult] = useState<any>(null);
 
-  // --- NEW: Reporting States ---
   const [isReportModalVisible, setIsReportModalVisible] = useState(false);
   const [reportArea, setReportArea] = useState("");
   const [reportStatus, setReportStatus] = useState<"stable" | "outage" | null>(null);
+
+  const [showSyncNotice, setShowSyncNotice] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSyncNotice(false), 6000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const initializeProfileAndLocation = async () => {
@@ -190,8 +236,6 @@ const ElectricityScreen = ({ navigation }: any) => {
     return nearest;
   };
 
-  // FIX: connectionState ('online' | 'offline' | 'checking') comes straight
-  // from the hook — one shared source of truth across every screen.
   const gridItems = Object.keys(DEVICE_LOCATIONS).map((id) => {
     const liveDevice = devices.find((d) => d.id === id || d.id?.toUpperCase() === id.toUpperCase());
     const meta = DEVICE_LOCATIONS[id];
@@ -216,7 +260,8 @@ const ElectricityScreen = ({ navigation }: any) => {
 
     return { 
       id, name: meta.name, type: meta.type, lat: meta.lat, lng: meta.lng, roads: meta.roads, city: "Ibadan", 
-      isOnline, isChecking, connectionState, uptime: realUptime, outOfCoverage, isPartial, finalStatusText 
+      isOnline, isChecking, connectionState, uptime: realUptime, outOfCoverage, isPartial, finalStatusText,
+      history: liveDevice?.history, 
     };
   });
 
@@ -303,13 +348,10 @@ const ElectricityScreen = ({ navigation }: any) => {
 
   const totalDevices = gridItems.length;
   const onlineDevices = gridItems.filter(item => item.isOnline).length;
-  const avgUptime = totalDevices > 0 ? Math.round(gridItems.reduce((acc, d) => acc + d.uptime, 0) / totalDevices) : 0;
-
-  const dynamicInsightOne = {
-    title: onlineDevices < totalDevices ? "Partial Stability" : "Steadier today",
-    desc: onlineDevices < totalDevices ? "Grid is recovering with moderate outages." : "Public reports indicate more consistent conditions across the city.",
-    icon: "wave", color: "#00C48A", bg: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", cardBg: isDarkMode ? "#1A221E" : "#FFFFFF"
-  };
+  
+  const historyAnalytics = computeAggregatedHistoryAnalytics(
+    gridItems.map((item) => ({ history: item.history, isOnline: item.isOnline }))
+  );
 
   const combinedSearchResults: any[] = [];
   if (mapSearchQuery.trim().length > 0) {
@@ -334,9 +376,6 @@ const ElectricityScreen = ({ navigation }: any) => {
     });
   }
 
-  // FIX: checking devices are excluded from BOTH the "Stable" and "Outage"
-  // buckets (they show up under "All" only) — neither label is accurate
-  // for a device we haven't confirmed yet.
   const filteredCommunities = gridItems.filter((item) => {
     const matchesSearch = item.name.toLowerCase().includes(communitySearchQuery.toLowerCase());
     let matchesFilter = true;
@@ -364,9 +403,6 @@ const ElectricityScreen = ({ navigation }: any) => {
 
   const isCurrentlyPinned = selectedAreaId ? pinnedItems.some(pin => pin.areaId === selectedAreaId && pin.streetName === selectedStreetName) : false;
 
-  // FIX: AreaCard now takes isChecking and renders a distinct amber
-  // "checking" state (spinner instead of icon) instead of ever falsely
-  // showing red "Power Outage" during the confirmation window.
   const AreaCard = ({ id, name, status, isOnline, isChecking, isPartial, outOfCoverage, uptime }: any) => {
     let color = isOnline ? "#00C48A" : "#EF4444";
     let bgColor = isOnline ? (isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2");
@@ -396,7 +432,7 @@ const ElectricityScreen = ({ navigation }: any) => {
 
         <TouchableOpacity 
           activeOpacity={0.8}
-          onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: id, isOnline: isOnline, uptime: uptime })}
+          onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: id, areaName: name, isOnline: isOnline, uptime: uptime })}
           style={styles.areaDetailsBtnEnd}
         >
           <Text style={styles.areaDetailsBtnTextEnd}>Details</Text>
@@ -406,71 +442,123 @@ const ElectricityScreen = ({ navigation }: any) => {
   };
 
   const CurvedLineChart = () => {
-    const endY = 120 - (avgUptime * 1.2); 
-    const pathData = analyticsTime === "Today" 
-      ? `M 0 100 C 40 110, 80 40, 140 60 C 200 80, 240 100, 320 ${endY}`
-      : analyticsTime === "This Week"
-      ? `M 0 80 C 50 40, 100 120, 160 50 C 220 20, 260 80, 320 ${endY}`
-      : `M 0 50 C 60 80, 120 20, 180 60 C 240 100, 280 40, 320 ${endY}`;
+    const buckets = historyAnalytics.buckets;
+    const chartTop = 30;   
+    const chartBottom = 120; 
+    const midY = (chartTop + chartBottom) / 2;
+    const slotWidth = 320 / buckets.length;
+    const futureColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
 
-    const xAxisLabels = analyticsTime === "Today" ? ["Morning", "Afternoon", "Evening", "Night"] : analyticsTime === "This Week" ? ["Mon", "Wed", "Fri", "Sun"] : ["Week 1", "Week 2", "Week 3", "Week 4"];
+    const levelFor = (stable: boolean) => (stable ? chartTop : chartBottom);
+    const colorFor = (stable: boolean) => (stable ? "#00C48A" : "#EF4444");
+
+    type Seg = { x1: number; y1: number; x2: number; y2: number; color: string; dashed?: boolean };
+    const segments: Seg[] = [];
+    buckets.forEach((bucket, i) => {
+      const x1 = slotWidth * i;
+      const x2 = slotWidth * (i + 1);
+
+      if (bucket.isFuture) {
+        segments.push({ x1, y1: midY, x2, y2: midY, color: futureColor, dashed: true });
+        return;
+      }
+
+      const y = levelFor(bucket.isStable);
+      segments.push({ x1, y1: y, x2, y2: y, color: colorFor(bucket.isStable) });
+
+      if (i > 0 && !buckets[i - 1].isFuture) {
+        const prevY = levelFor(buckets[i - 1].isStable);
+        if (prevY !== y) {
+          segments.push({ x1, y1: prevY, x2: x1, y2: y, color: colorFor(bucket.isStable) });
+        }
+      }
+    });
 
     return (
       <View style={styles.curvedChartContainer}>
         <View style={styles.chartTopRow}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <View style={styles.chartIconBox}>
-              <MaterialCommunityIcons name="chart-bell-curve-cumulative" size={18} color="#00C48A" />
+              <MaterialCommunityIcons name="chart-line" size={18} color="#00C48A" />
             </View>
             <View style={{ marginLeft: 12 }}>
               <Text style={styles.chartTitleText}>City Power Flow</Text>
-              <Text style={styles.chartSubtitleText}>{analyticsTime}'s public trend</Text>
+              <Text style={styles.chartSubtitleText}>Today's on/off pattern across all {totalDevices} areas</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.timeframeBtn} onPress={() => setAnalyticsTime(analyticsTime === "Today" ? "This Week" : "Today")}>
-            <Text style={styles.timeframeText}>{analyticsTime}</Text>
-            <MaterialCommunityIcons name="chevron-down" size={16} color={theme.textSecondary} />
-          </TouchableOpacity>
         </View>
 
         <View style={styles.svgContainer}>
           <Svg width="100%" height="150" viewBox="0 0 320 150">
-            <Defs>
-              <SvgGradient id="grad" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor="#00C48A" stopOpacity="1" />
-                <Stop offset="0.5" stopColor="#3B82F6" stopOpacity="1" />
-                <Stop offset="1" stopColor="#8B5CF6" stopOpacity="1" />
-              </SvgGradient>
-            </Defs>
-            <Path d={pathData} fill="none" stroke="url(#grad)" strokeWidth="4" strokeLinecap="round" />
-            <SvgCircle cx="140" cy={analyticsTime === "Today" ? "60" : "50"} r="6" fill={isDarkMode ? "#121A16" : "#FFF"} stroke="#3B82F6" strokeWidth="3" />
-            <SvgCircle cx="320" cy={endY} r="6" fill={isDarkMode ? "#121A16" : "#FFF"} stroke="#8B5CF6" strokeWidth="3" />
+            <Rect x={0} y={chartTop} width={320} height={1} fill={isDarkMode ? "#22302A" : "#F1F5F9"} />
+            <Rect x={0} y={chartBottom} width={320} height={1.5} fill={isDarkMode ? "#2D3B34" : "#E2E8F0"} />
+            {segments.map((seg, i) => (
+              <Path
+                key={i}
+                d={`M ${seg.x1} ${seg.y1} L ${seg.x2} ${seg.y2}`}
+                stroke={seg.color}
+                strokeWidth={seg.dashed ? "2" : "4"}
+                strokeLinecap="round"
+                strokeDasharray={seg.dashed ? "4,4" : undefined}
+              />
+            ))}
           </Svg>
           <View style={styles.chartXAxis}>
-            {xAxisLabels.map((label, index) => <Text key={index} style={styles.chartXText}>{label}</Text>)}
+            {historyAnalytics.bucketLabels.map((label, index) => <Text key={index} style={styles.chartXText}>{label}</Text>)}
           </View>
         </View>
       </View>
     );
   };
 
+  const renderSegmentedControl = () => (
+    <View style={styles.segmentedControlContainer}>
+      {(["map", "areas", "stats"] as const).map((tab) => {
+        const isActive = activeTab === tab;
+        const labels = { map: "Map", areas: "Communities", stats: "Analytics" };
+        const icons = { map: "compass-outline", areas: "account-group-outline", stats: "chart-pie" };
+        return (
+          <TouchableOpacity
+            key={tab}
+            activeOpacity={0.8}
+            onPress={() => setActiveTab(tab)}
+            style={[styles.segmentButton, isActive && styles.segmentButtonActive]}
+          >
+            <MaterialCommunityIcons 
+              name={icons[tab] as any} 
+              size={16} 
+              color={isActive ? theme.textPrimary : (isDarkMode ? "#94A3B8" : "#64748B")} 
+              style={{ marginRight: 6 }} 
+            />
+            <Text style={[styles.segmentText, isActive && styles.segmentTextActive]}>
+              {labels[tab]}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
   return (
     <View style={styles.containerDetails}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      
-      <Image source={require("../../assets/images/gridstrom3.png")} style={styles.bgImageParallax} resizeMode="cover" />
-      <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={StyleSheet.absoluteFillObject} />
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={theme.background} />
 
-      <SafeAreaView style={styles.floatingHeaderDetails}>
-        <View style={styles.headerContainer}>
+      <SyncNotice visible={showSyncNotice} isDarkMode={isDarkMode} />
+
+      <SafeAreaView style={styles.safeArea}>
+        
+        {/* SPACIOUS, CENTERED HEADER */}
+        
+        <View style={styles.header}>
           <View style={styles.headerLeftColumn}>
-            <Text style={styles.greetingText}>{greeting},</Text>
-            <Text style={styles.heroGreeting}>{displayName.split(' ')[0]}</Text>
+            
+            {/* The greeting vertically stacks perfectly right above the pill natively */}
+           <Text style={styles.miniGreetingText}>{greeting}, {displayName.split(' ')[0]}</Text>
             
             <TouchableOpacity style={styles.citySelectorPill} onPress={() => setIsCityDropdownOpen(!isCityDropdownOpen)}>
               <View style={styles.liveDotGreen} />
               <Text style={styles.citySelectorText}>Ibadan</Text>
-              <MaterialCommunityIcons name={isCityDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#FFFFFF" style={{ marginLeft: 4 }} />
+              <MaterialCommunityIcons name={isCityDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={theme.textPrimary} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
 
             {isCityDropdownOpen && (
@@ -492,30 +580,30 @@ const ElectricityScreen = ({ navigation }: any) => {
             )}
           </View>
           
+          <View style={styles.headerCenterColumn}>
+            <Text style={styles.headerTitle}>Strompulse</Text>
+            <Text style={styles.headerSubtitle}>Live electricity status</Text>
+          </View>
+
           <View style={styles.headerRightColumn}>
             <TouchableOpacity style={styles.profileAvatarContainer} onPress={() => navigation.navigate("Profile")}>
               {renderProfileAvatar()}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.privateLoginBtn} onPress={() => navigation.navigate("PrivateDashboard")}>
-              <MaterialCommunityIcons name="lock" size={20} color="#FFF" style={{ marginRight: 4 }} />
-              <Text style={styles.privateLoginText}>STROMER Login</Text>
-            </TouchableOpacity>
           </View>
         </View>
-      </SafeAreaView>
 
-      <ScrollView 
-        showsVerticalScrollIndicator={false} 
-        contentContainerStyle={{ flexGrow: 1 }}
-        bounces={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C48A" />}
-      >
-        <View style={{ height: HEADER_HEIGHT }} />
+        {/* ROUNDED SEGMENTED CONTROL TABS WITH ICONS */}
+        {renderSegmentedControl()}
 
-        <View style={styles.sheetContentDetails}>
-          
+        <ScrollView 
+          showsVerticalScrollIndicator={false} 
+          contentContainerStyle={styles.scrollContent}
+          bounces={true}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C48A" />}
+        >
+          {/* DEFAULT LOCATION CARD */}
           <View style={styles.defaultLocContainer}>
             {!defaultLocation ? (
               <TouchableOpacity activeOpacity={0.8} onPress={() => setIsLocModalVisible(true)} style={styles.defLocCardEmpty}>
@@ -532,9 +620,6 @@ const ElectricityScreen = ({ navigation }: any) => {
                 <Text style={styles.defLocSetBtnText}>Set ›</Text>
               </TouchableOpacity>
             ) : (
-              // FIX: default-location card now has a third visual state for
-              // 'checking' — amber, with a spinner instead of the lightning
-              // bolt / plug-off icon, instead of ever falsely showing red.
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={() => setIsLocModalVisible(true)}
@@ -580,23 +665,6 @@ const ElectricityScreen = ({ navigation }: any) => {
             )}
           </View>
 
-          <View style={{ paddingHorizontal: 20, marginBottom: 24 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modernTabBar}>
-              <TouchableOpacity style={[styles.modernTabBtn, activeTab === "map" && styles.modernTabBtnActive]} onPress={() => setActiveTab("map")}>
-                <MaterialCommunityIcons name="compass-outline" size={16} color={activeTab === "map" ? "#FFF" : theme.textSecondary} />
-                <Text style={[styles.modernTabBtnText, activeTab === "map" && styles.modernTabBtnTextActive]}>Grid Map</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modernTabBtn, activeTab === "areas" && styles.modernTabBtnActive]} onPress={() => setActiveTab("areas")}>
-                <MaterialCommunityIcons name="account-group-outline" size={16} color={activeTab === "areas" ? "#FFF" : theme.textSecondary} />
-                <Text style={[styles.modernTabBtnText, activeTab === "areas" && styles.modernTabBtnTextActive]}>Communities</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modernTabBtn, activeTab === "stats" && styles.modernTabBtnActive]} onPress={() => setActiveTab("stats")}>
-                <MaterialCommunityIcons name="chart-pie" size={16} color={activeTab === "stats" ? "#FFF" : theme.textSecondary} />
-                <Text style={[styles.modernTabBtnText, activeTab === "stats" && styles.modernTabBtnTextActive]}>Analytics</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-
           {/* MAP TAB */}
           {activeTab === "map" && (
             <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
@@ -622,11 +690,11 @@ const ElectricityScreen = ({ navigation }: any) => {
                   {isSearchingApi && combinedSearchResults.length === 0 ? (
                     <View style={{ padding: 20, alignItems: 'center' }}>
                         <ActivityIndicator size="small" color="#00C48A" />
-                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 8, fontFamily: "Sora_400Regular" }}>Scanning map databases...</Text>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 8, fontFamily: "Chirp-Regular" }}>Scanning map databases...</Text>
                     </View>
                   ) : combinedSearchResults.length === 0 ? (
                     <View style={{ padding: 20, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 12, color: theme.textSecondary, fontFamily: "Sora_400Regular" }}>No exact street found in Ibadan.</Text>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, fontFamily: "Chirp-Regular" }}>No exact street found in Ibadan.</Text>
                     </View>
                   ) : (
                     combinedSearchResults.map((item, idx) => (
@@ -709,7 +777,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                           <Text style={styles.pinnedStatusText}>{selectedAreaData.finalStatusText}</Text>
                         </View>
                       </View>
-                      <TouchableOpacity style={styles.travelCardBtnLargeMap} onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: selectedAreaData.id, isOnline: selectedAreaData.isOnline, uptime: selectedAreaData.uptime })}>
+                      <TouchableOpacity style={styles.travelCardBtnLargeMap} onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: selectedAreaData.id, areaName: selectedStreetName || selectedAreaData.name, isOnline: selectedAreaData.isOnline, uptime: selectedAreaData.uptime })}>
                         <Text style={styles.travelCardBtnTextLarge}>View Community Details</Text>
                       </TouchableOpacity>
                     </View>
@@ -723,7 +791,6 @@ const ElectricityScreen = ({ navigation }: any) => {
           {activeTab === "areas" && (
             <View style={{ paddingBottom: 20 }}>
               
-              {/* Report Power Status Prompt Card */}
               <TouchableOpacity activeOpacity={0.8} onPress={() => setIsReportModalVisible(true)} style={styles.reportPromptCard}>
                 <View style={styles.reportPromptIconBox}>
                   <Text style={{ fontSize: 20 }}>📢</Text>
@@ -754,12 +821,14 @@ const ElectricityScreen = ({ navigation }: any) => {
                 </TouchableOpacity>
               </View>
 
+             
+
               {filteredCommunities.length > 0 ? (
                 filteredCommunities.map((item) => (
                   <AreaCard key={item.id} id={item.id} name={item.name} status={item.finalStatusText} isOnline={item.isOnline} isChecking={item.isChecking} isPartial={item.isPartial} outOfCoverage={item.outOfCoverage} uptime={item.uptime} />
                 ))
               ) : (
-                <View style={{ alignItems: 'center', marginTop: 40, marginBottom: 40 }}><Text style={{ fontSize: 13, fontFamily: "Sora_500Medium", color: theme.textSecondary }}>No communities match your search.</Text></View>
+                <View style={{ alignItems: 'center', marginTop: 40, marginBottom: 40 }}><Text style={{ fontSize: 13, fontFamily: "Chirp-Medium", color: theme.textSecondary }}>No communities match your search.</Text></View>
               )}
             </View>
           )}
@@ -770,26 +839,30 @@ const ElectricityScreen = ({ navigation }: any) => {
               <CurvedLineChart />
               <Text style={styles.sectionHeader}>Today's insights</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.insightsScroll}>
-                <View style={[styles.insightCard, { backgroundColor: dynamicInsightOne.cardBg }]}>
-                  <View style={[styles.insightIconBox, { backgroundColor: dynamicInsightOne.bg }]}><MaterialCommunityIcons name={dynamicInsightOne.icon as any} size={18} color={dynamicInsightOne.color} /></View>
-                  <Text style={[styles.insightCardTitle, { color: dynamicInsightOne.color }]}>{dynamicInsightOne.title}</Text>
-                  <Text style={styles.insightCardDesc}>{dynamicInsightOne.desc}</Text>
+                <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#ECFDF5" }]}>
+                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5" }]}><MaterialCommunityIcons name="lightning-bolt" size={18} color="#00C48A" /></View>
+                  <Text style={[styles.insightCardTitle, { color: "#00C48A" }]}>Areas stable now</Text>
+                  <Text style={styles.insightCardDesc}>{onlineDevices} of {totalDevices} areas currently showing stable power.</Text>
                 </View>
                 <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#F5F3FF" }]}>
-                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(139,92,246,0.15)" : "#EDE9FE" }]}><MaterialCommunityIcons name="clock-outline" size={18} color={isDarkMode ? "#A78BFA" : "#8B5CF6"} /></View>
-                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#A78BFA" : "#8B5CF6" }]}>Peak activity window</Text>
-                  <Text style={styles.insightCardDesc}>Higher activity is usually expected during evening hours.</Text>
+                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(139,92,246,0.15)" : "#EDE9FE" }]}><MaterialCommunityIcons name="restart" size={18} color={isDarkMode ? "#A78BFA" : "#8B5CF6"} /></View>
+                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#A78BFA" : "#8B5CF6" }]}>Restorations today</Text>
+                  <Text style={styles.insightCardDesc}>{historyAnalytics.totalRestorationsInRange} power-restoration event{historyAnalytics.totalRestorationsInRange === 1 ? '' : 's'} across all areas — each implies a prior outage.</Text>
                 </View>
                 <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#F0F9FF", marginRight: 20 }]}>
-                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(2,132,199,0.15)" : "#E0F2FE" }]}><MaterialCommunityIcons name="rhombus-outline" size={18} color={isDarkMode ? "#38BDF8" : "#0284C7"} /></View>
-                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#38BDF8" : "#0284C7" }]}>Current power outages</Text>
-                  <Text style={styles.insightCardDesc}>A few communities currently have public power-outage notices.</Text>
+                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(2,132,199,0.15)" : "#E0F2FE" }]}><MaterialCommunityIcons name="chart-bar" size={18} color={isDarkMode ? "#38BDF8" : "#0284C7"} /></View>
+                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#38BDF8" : "#0284C7" }]}>Least stable window</Text>
+                  <Text style={styles.insightCardDesc}>
+                    {historyAnalytics.buckets.some(b => b.restorationCount > 0)
+                      ? `${historyAnalytics.buckets.reduce((worst, b) => b.restorationCount > worst.restorationCount ? b : worst).label} had the most restorations.`
+                      : "No instability detected in this period."}
+                  </Text>
                 </View>
               </ScrollView>
               <Text style={styles.sectionHeader}>Neighbourhood outlook</Text>
               <View style={styles.outlookCard}>
-                {gridItems.slice(0, 4).map((item, index) => (
-                  <View key={item.id} style={[styles.outlookRow, index !== 3 && { borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9" }]}>
+                {gridItems.map((item, index) => (
+                  <View key={item.id} style={[styles.outlookRow, index !== gridItems.length - 1 && { borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9" }]}>
                     <View style={styles.outlookLeft}><Text style={styles.outlookName}>{item.name}</Text><Text style={styles.outlookStatus}>{item.finalStatusText}</Text></View>
                     <View style={styles.outlookBarContainer}><View style={[styles.outlookBarFill, { width: `${item.uptime}%`, backgroundColor: item.isOnline ? "#00C48A" : item.isChecking ? CHECKING_COLOR : (item.isPartial ? "#F59E0B" : "#EF4444") }]} /></View>
                     <MaterialCommunityIcons name="sine-wave" size={20} color={item.isOnline ? "#00C48A" : item.isChecking ? CHECKING_COLOR : "#EF4444"} style={{ marginLeft: 16, opacity: 0.6 }} />
@@ -799,7 +872,6 @@ const ElectricityScreen = ({ navigation }: any) => {
             </View>
           )}
 
-          {/* Sticky Request Device Footer */}
           <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("RequestDeviceScreen")} style={styles.requestWrapper}>
             <LinearGradient colors={["#00C48A", "#064E3B"]} style={styles.requestCardGradient}>
                <View style={styles.requestIconBoxDark}><MaterialCommunityIcons name="power-plug" size={28} color="#00C48A" /></View>
@@ -815,8 +887,9 @@ const ElectricityScreen = ({ navigation }: any) => {
           </TouchableOpacity>
 
           <MarqueeBanner text="Coming next: Lagos · Abuja · Osogbo · Abeokuta · Ilorin" isDarkMode={isDarkMode} />
-        </View>
-      </ScrollView>
+        </ScrollView>
+
+      </SafeAreaView>
 
       {/* --- REPORT POWER STATUS MODAL --- */}
       <Modal visible={isReportModalVisible} animationType="slide" transparent={true} onRequestClose={() => setIsReportModalVisible(false)}>
@@ -974,127 +1047,110 @@ const ElectricityScreen = ({ navigation }: any) => {
 };
 
 const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
-  containerDetails: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#D0DDE5" },
-  scrollContent: { paddingBottom: 100 },
-  bgImageParallax: { ...StyleSheet.absoluteFillObject, width: "100%", height: HEADER_HEIGHT + 60 },
+  containerDetails: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : theme.background },
   
-  floatingHeaderDetails: { position: "absolute", top: Platform.OS === 'android' ? StatusBar.currentHeight : 20, left: 0, right: 0, zIndex: 100 },
-  headerContainer: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 20 },
-  headerLeftColumn: { position: "relative", zIndex: 50 },
-  greetingText: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: "rgba(255,255,255,0.8)", marginBottom: 2 },
-  heroGreeting: { fontSize: 28, fontFamily: "Sora_800ExtraBold", color: "#FFFFFF", letterSpacing: -0.5, marginBottom: 12 },
+  safeArea: { flex: 1 },
   
-  citySelectorPill: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, alignSelf: "flex-start" },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 50 : 20, paddingBottom: 20, zIndex: 10 },
+  headerLeftColumn: { flex: 1, alignItems: "flex-start", justifyContent: "center" },
+  headerCenterColumn: { flex: 2, alignItems: "center", justifyContent: "center" },
+  headerRightColumn: { flex: 1, alignItems: "flex-end", justifyContent: "center" },
+  
+  miniGreetingText: { fontSize: 12, fontFamily: "Chirp-Medium", color: theme.textSecondary, marginBottom: 4, marginLeft: 4 },
+  
+  headerTitle: { fontSize: 25, fontFamily: "Sora_600SemiBold", fontWeight: "900", color: theme.textPrimary, textAlign: "center", letterSpacing: -0.5 },
+  headerSubtitle: { fontSize: 13, fontFamily: "Chirp-Medium", color: theme.textSecondary, marginTop: 2, textAlign: "center" },
+  
+  citySelectorPill: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
   liveDotGreen: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#00C48A", marginRight: 6 },
-  citySelectorText: { fontSize: 12, fontFamily: "Sora_700Bold", color: "#FFFFFF" },
+  citySelectorText: { fontSize: 12, fontFamily: "Chirp-Bold", color: theme.textPrimary },
   
-  dropdownContainer: { position: "absolute", top: 85, left: 0, width: 150, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, zIndex: 100 },
+  dropdownContainer: { position: "absolute", top: 50, left: 0, width: 150, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, zIndex: 100 },
   dropdownItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 14, borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
-  dropdownItemText: { fontSize: 13, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  dropdownItemSub: { fontSize: 9, fontFamily: "Sora_500Medium", marginTop: 2, color: isDarkMode ? "#94A3B8" : "#64748B" },
+  dropdownItemText: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  dropdownItemSub: { fontSize: 9, fontFamily: "Chirp-Medium", marginTop: 2, color: isDarkMode ? "#94A3B8" : "#64748B" },
 
-  headerRightColumn: { alignItems: "flex-end" },
-  profileAvatarContainer: { shadowColor: "#00C48A", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5, marginBottom: 8 },
-  profileAvatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: "#00C48A" },
-  profileAvatarFallback: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: "#00C48A", backgroundColor: "#064E3B", justifyContent: "center", alignItems: "center" },
-  profileAvatarFallbackText: { fontSize: 18, fontFamily: "Sora_700Bold", color: "#FFF" },
-  privateLoginBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#00C48A", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, shadowColor: "#00C48A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4, elevation: 4 },
-  privateLoginText: { fontSize: 11, fontFamily: "Sora_700Bold", color: "#FFF" },
+  profileAvatarContainer: { shadowColor: "#00C48A", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 3 },
+  profileAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: "#00C48A" },
+  profileAvatarFallback: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: "#00C48A", backgroundColor: "#064E3B", justifyContent: "center", alignItems: "center" },
+  profileAvatarFallbackText: { fontSize: 14, fontFamily: "Chirp-Bold", color: "#FFF" },
 
-  sheetContentDetails: { backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderTopLeftRadius: 40, borderTopRightRadius: 40, paddingTop: 30, minHeight: height - HEADER_HEIGHT + 40 },
+  segmentedControlContainer: { flexDirection: "row", backgroundColor: isDarkMode ? "#1A221E" : "#F1F5F9", borderRadius: 30, marginHorizontal: 20, padding: 4, marginBottom: 16 },
+  segmentButton: { flex: 1, flexDirection: "row", paddingVertical: 12, alignItems: "center", justifyContent: "center", borderRadius: 26 },
+  segmentButtonActive: { backgroundColor: isDarkMode ? "#2D3B34" : "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  segmentText: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  segmentTextActive: { color: theme.textPrimary, fontFamily: "Chirp-Heavy" },
+
+  scrollContent: { paddingBottom: 100, paddingTop: 10 },
   
-  // --- DEFAULT LOCATION UI STYLES ---
   defaultLocContainer: { paddingHorizontal: 20, marginBottom: 24 },
   defLocCardEmpty: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, borderRadius: 24, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC" },
   defLocIconBoxEmpty: { width: 40, height: 40, borderRadius: 20, backgroundColor: isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2", justifyContent: "center", alignItems: "center", position: "relative" },
   defLocIconDot: { position: "absolute", bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", borderWidth: 2, borderColor: "#00C48A" },
-  defLocEmptyTitle: { fontSize: 13, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  defLocEmptySub: { fontSize: 11, fontFamily: "Sora_500Medium", color: isDarkMode ? "#94A3B8" : "#64748B", marginTop: 2 },
-  defLocSetBtnText: { fontSize: 12, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  defLocEmptyTitle: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  defLocEmptySub: { fontSize: 11, fontFamily: "Chirp-Medium", color: isDarkMode ? "#94A3B8" : "#64748B", marginTop: 2 },
+  defLocSetBtnText: { fontSize: 12, fontFamily: "Chirp-Bold", color: isDarkMode ? "#94A3B8" : "#64748B" },
 
   defLocCardActive: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, borderRadius: 24, borderWidth: 1 },
   defLocIconBoxActive: { width: 40, height: 40, borderRadius: 20, justifyContent: "center", alignItems: "center", position: "relative" },
   defLocStatusDotActive: { position: "absolute", bottom: -2, right: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: isDarkMode ? "#1A221E" : "#FFFFFF" },
-  defLocActiveTitle: { fontSize: 15, fontFamily: "Sora_800ExtraBold" },
-  defLocActiveSub: { fontSize: 11, fontFamily: "Sora_500Medium", marginTop: 2 },
+  defLocActiveTitle: { fontSize: 15, fontFamily: "Chirp-Heavy" },
+  defLocActiveSub: { fontSize: 11, fontFamily: "Chirp-Medium", marginTop: 2 },
   defLocChangeBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  defLocChangeText: { fontSize: 11, fontFamily: "Sora_700Bold" },
+  defLocChangeText: { fontSize: 11, fontFamily: "Chirp-Bold" },
 
-  // --- REPORT PROMPT UI STYLES ---
   reportPromptCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 20, marginBottom: 20, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC" },
   reportPromptIconBox: { width: 44, height: 44, borderRadius: 22, backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "#FFFFFF", justifyContent: "center", alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
-  reportPromptTitle: { fontSize: 14, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B", marginBottom: 2 },
-  reportPromptSub: { fontSize: 11, fontFamily: "Sora_500Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  reportPromptTitle: { fontSize: 14, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B", marginBottom: 2 },
+  reportPromptSub: { fontSize: 11, fontFamily: "Chirp-Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  
+  featuredUpdateCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 20, marginBottom: 16, backgroundColor: isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5", borderRadius: 16, padding: 16, borderWidth: 1, borderColor: isDarkMode ? "#064E3B" : "#A7F3D0", overflow: "hidden" },
+  featuredLeftBorder: { position: "absolute", left: 0, top: 0, bottom: 0, width: 6, backgroundColor: "#00C48A" },
+  featuredIconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: isDarkMode ? "#064E3B" : "#D1FAE5", justifyContent: "center", alignItems: "center" },
+  featuredUpdateLabel: { fontSize: 9, fontFamily: "Chirp-Bold", color: "#00C48A", letterSpacing: 0.5, marginBottom: 4 },
+  featuredUpdateTitle: { fontSize: 15, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B", marginBottom: 4 },
+  featuredUpdateSub: { fontSize: 11, fontFamily: "Chirp-Regular", color: isDarkMode ? "#94A3B8" : "#64748B", lineHeight: 16 },
 
-  // --- MODAL STYLES ---
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalDismissArea: { flex: 1 },
   modalContent: { backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingHorizontal: 24, paddingTop: 12, height: height * 0.8 },
   modalDragIndicator: { width: 40, height: 4, borderRadius: 2, backgroundColor: isDarkMode ? "#2D3B34" : "#E2E8F0", alignSelf: "center", marginBottom: 16 },
-  modalCloseBtn: { position: "absolute", top: 10, right: 2, width: 36, height: 36, borderRadius: 18, backgroundColor: isDarkMode ? "#1A221E" : "#F1F5F9", justifyContent: "center", alignItems: "center", zIndex: 10 },
-  modalTitle: { fontSize: 20, fontFamily: "Sora_800ExtraBold", color: isDarkMode ? "#F8FAFC" : "#1E293B", marginBottom: 8, paddingRight: 40 },
-  modalSubtitle: { fontSize: 12, fontFamily: "Sora_400Regular", color: isDarkMode ? "#94A3B8" : "#64748B", lineHeight: 18, marginBottom: 24, paddingRight: 20 },
-  modalLabel: { fontSize: 10, fontFamily: "Sora_700Bold", color: isDarkMode ? "#64748B" : "#94A3B8", letterSpacing: 1, marginBottom: 8 },
+  modalCloseBtn: { position: "absolute", top: 24, right: 24, width: 36, height: 36, borderRadius: 18, backgroundColor: isDarkMode ? "#1A221E" : "#F1F5F9", justifyContent: "center", alignItems: "center", zIndex: 10 },
+  modalTitle: { fontSize: 20, fontFamily: "Chirp-Heavy", color: isDarkMode ? "#F8FAFC" : "#1E293B", marginBottom: 8, paddingRight: 40 },
+  modalSubtitle: { fontSize: 12, fontFamily: "Chirp-Regular", color: isDarkMode ? "#94A3B8" : "#64748B", lineHeight: 18, marginBottom: 24, paddingRight: 20 },
+  modalLabel: { fontSize: 10, fontFamily: "Chirp-Bold", color: isDarkMode ? "#64748B" : "#94A3B8", letterSpacing: 1, marginBottom: 8 },
   modalInputWrapper: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", borderRadius: 16, paddingHorizontal: 16, height: 56, marginBottom: 16, backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC" },
-  modalInput: { flex: 1, fontSize: 14, fontFamily: "Sora_500Medium", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  modalInput: { flex: 1, fontSize: 14, fontFamily: "Chirp-Medium", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
   modalSubmitBtn: { flexDirection: "row", backgroundColor: "#00C48A", height: 56, borderRadius: 16, justifyContent: "center", alignItems: "center", marginBottom: 24 },
   modalSubmitBtnDisabled: { backgroundColor: isDarkMode ? "#1A221E" : "#E2E8F0" },
-  modalSubmitText: { color: "#FFFFFF", fontSize: 14, fontFamily: "Sora_700Bold" },
-  modalSectionLabel: { fontSize: 12, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#94A3B8" : "#64748B", marginBottom: 12 },
+  modalSubmitText: { color: "#FFFFFF", fontSize: 14, fontFamily: "Chirp-Bold" },
+  modalSectionLabel: { fontSize: 12, fontFamily: "Chirp-Bold", color: isDarkMode ? "#94A3B8" : "#64748B", marginBottom: 12 },
   
-  // Modal Toggles (Reporting)
   reportToggleRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
   reportToggleBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", height: 56, borderRadius: 16, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF" },
   reportToggleBtnStable: { borderColor: "#00C48A", backgroundColor: isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5" },
   reportToggleBtnOutage: { borderColor: "#EF4444", backgroundColor: isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2" },
   reportToggleDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  reportToggleText: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  reportToggleText: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#94A3B8" : "#64748B" },
 
   modalListItem: { flexDirection: "row", alignItems: "center", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
   modalListIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5", justifyContent: "center", alignItems: "center", marginRight: 12 },
-  modalListName: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#F8FAFC" : "#1E293B", flex: 1 },
-  modalListEmpty: { fontSize: 12, fontFamily: "Sora_500Medium", color: isDarkMode ? "#64748B" : "#94A3B8", textAlign: "center", marginTop: 20 },
+  modalListName: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B", flex: 1 },
+  modalListEmpty: { fontSize: 12, fontFamily: "Chirp-Medium", color: isDarkMode ? "#64748B" : "#94A3B8", textAlign: "center", marginTop: 20 },
   
-  modalAreaCard: { flexDirection: "row", alignItems: "center", padding: 16, borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", marginBottom: 12, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF" },
+  modalAreaCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 20, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", marginBottom: 12, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF" },
   modalAreaIconBox: { width: 40, height: 40, borderRadius: 12, backgroundColor: isDarkMode ? "#2D3B34" : "#F1F5F9", justifyContent: "center", alignItems: "center" },
-  modalAreaName: { fontSize: 14, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  modalAreaSub: { fontSize: 10, fontFamily: "Sora_500Medium", color: isDarkMode ? "#94A3B8" : "#64748B", marginTop: 2 },
-  modalAreaStatus: { fontSize: 11, fontFamily: "Sora_700Bold" },
-
-  modernTabBar: { flexDirection: "row", alignItems: "center" },
-  modernTabBtn: { flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 24, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", marginRight: 10, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  modernTabBtnActive: { backgroundColor: "#00C48A", borderColor: "#00C48A", shadowColor: "#00C48A", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
-  modernTabBtnText: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#94A3B8" : "#64748B", marginLeft: 6 },
-  modernTabBtnTextActive: { color: "#FFFFFF" },
+  modalAreaName: { fontSize: 14, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  modalAreaSub: { fontSize: 10, fontFamily: "Chirp-Medium", color: isDarkMode ? "#94A3B8" : "#64748B", marginTop: 2 },
+  modalAreaStatus: { fontSize: 11, fontFamily: "Chirp-Bold" },
 
   searchBar: { flexDirection: "row", alignItems: "center", borderRadius: 16, paddingHorizontal: 16, height: 54, borderWidth: 1, backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  searchInput: { flex: 1, marginLeft: 12, fontSize: 14, fontFamily: "Sora_500Medium", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  searchInput: { flex: 1, marginLeft: 12, fontSize: 14, fontFamily: "Chirp-Medium", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
   pinIconBtn: { padding: 8, borderRadius: 12, backgroundColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
 
   activeFilterRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
   activeFilterPill: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: isDarkMode ? "#00C48A" : "#A7F3D0" },
-  activeFilterPillText: { fontSize: 12, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#A7F3D0" : "#064E3B", marginRight: 8 },
-
-  mapContainerCard: { borderRadius: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.04, shadowRadius: 15, elevation: 3, borderWidth: 1, marginBottom: 20, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  mapGraphicWrapper: { height: 350, borderRadius: 24, overflow: "hidden", position: "relative" },
-  mapLegend: { position: "absolute", top: 16, left: 16, backgroundColor: isDarkMode ? "rgba(26,34,30,0.9)" : "rgba(255,255,255,0.9)", borderRadius: 12, padding: 12 },
-  legendItem: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  legendText: { fontSize: 11, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#CBD5E1" : "#475569" },
-
-  mapDropdownResults: { position: "absolute", top: 60, left: 0, right: 0, borderRadius: 16, padding: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 15, maxHeight: 250, zIndex: 50, borderWidth: 1, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  mapResultItem: { flexDirection: "row", padding: 12, alignItems: "center", borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
-  resultItemIconBox: { width: 36, height: 36, borderRadius: 18, backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", justifyContent: "center", alignItems: "center", marginRight: 14 },
-  resultItemTitle: { fontSize: 14, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  resultItemSub: { fontSize: 11, fontFamily: "Sora_500Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
-
-  mapPinnedBottomCard: { position: "absolute", bottom: 16, left: 16, right: 16, borderRadius: 20, padding: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, borderWidth: 1, backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "transparent" },
-  pinnedTopRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
-  pinnedIconBox: { width: 44, height: 44, borderRadius: 16, justifyContent: "center", alignItems: "center" },
-  pinnedAreaName: { fontSize: 16, fontFamily: "Sora_800ExtraBold", marginBottom: 4, color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  pinnedStatusText: { fontSize: 11, fontFamily: "Sora_500Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
-  travelCardBtnLargeMap: { backgroundColor: "#064E3B", height: 48, borderRadius: 16, justifyContent: "center", alignItems: "center" },
-  travelCardBtnTextLarge: { color: "#FFF", fontSize: 13, fontFamily: "Sora_700Bold" },
+  activeFilterPillText: { fontSize: 12, fontFamily: "Chirp-Bold", color: isDarkMode ? "#A7F3D0" : "#064E3B", marginRight: 8 },
 
   filterPillsRow: { flexDirection: "row", alignItems: "center", marginBottom: 20, paddingHorizontal: 20, gap: 10 },
   filterPill: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, marginRight: 8 },
@@ -1102,41 +1158,62 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
   filterPillTextActiveAll: { color: "#FFFFFF" },
   filterPillActive: { backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderWidth: 1, borderColor: "#00C48A", elevation: 2, shadowColor: "#00C48A", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   filterPillInactive: { backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  filterPillText: { fontSize: 11, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  filterPillText: { fontSize: 11, fontFamily: "Chirp-Bold", color: isDarkMode ? "#94A3B8" : "#64748B" },
+
+  mapContainerCard: { borderRadius: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.04, shadowRadius: 15, elevation: 3, borderWidth: 1, marginBottom: 20, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
+  mapGraphicWrapper: { height: 350, borderRadius: 24, overflow: "hidden", position: "relative" },
+  mapLegend: { position: "absolute", top: 16, left: 16, backgroundColor: isDarkMode ? "rgba(26,34,30,0.9)" : "rgba(255,255,255,0.9)", borderRadius: 12, padding: 12 },
+  legendItem: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  legendText: { fontSize: 11, fontFamily: "Chirp-Bold", color: isDarkMode ? "#CBD5E1" : "#475569" },
+
+  mapDropdownResults: { position: "absolute", top: 60, left: 0, right: 0, borderRadius: 16, padding: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 15, maxHeight: 250, zIndex: 50, borderWidth: 1, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
+  mapResultItem: { flexDirection: "row", padding: 12, alignItems: "center", borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
+  resultItemIconBox: { width: 36, height: 36, borderRadius: 18, backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", justifyContent: "center", alignItems: "center", marginRight: 14 },
+  resultItemTitle: { fontSize: 14, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  resultItemSub: { fontSize: 11, fontFamily: "Chirp-Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
+
+  mapPinnedBottomCard: { position: "absolute", bottom: 16, left: 16, right: 16, borderRadius: 20, padding: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, borderWidth: 1, backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "transparent" },
+  pinnedTopRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
+  pinnedIconBox: { width: 44, height: 44, borderRadius: 16, justifyContent: "center", alignItems: "center" },
+  pinnedAreaName: { fontSize: 16, fontFamily: "Chirp-Heavy", marginBottom: 4, color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  pinnedStatusText: { fontSize: 11, fontFamily: "Chirp-Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  travelCardBtnLargeMap: { backgroundColor: "#064E3B", height: 48, borderRadius: 16, justifyContent: "center", alignItems: "center" },
+  travelCardBtnTextLarge: { color: "#FFF", fontSize: 13, fontFamily: "Chirp-Bold" },
 
   areaCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 20, borderRadius: 20, padding: 16, marginBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderWidth: isDarkMode ? 1 : 0, borderColor: isDarkMode ? "#2D3B34" : "transparent" },
   areaTopRow: { flexDirection: "row", alignItems: "center", width: "100%" },
   areaIconBox: { width: 48, height: 48, borderRadius: 16, justifyContent: "center", alignItems: "center" },
-  areaName: { fontSize: 16, fontFamily: "Sora_700Bold", marginBottom: 4, color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  areaName: { fontSize: 16, fontFamily: "Chirp-Bold", marginBottom: 4, color: isDarkMode ? "#F8FAFC" : "#1E293B" },
   areaStatusRow: { flexDirection: "row", alignItems: "center" },
   areaStatusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  areaStatusText: { fontSize: 12, fontFamily: "Sora_600SemiBold" },
+  areaStatusText: { fontSize: 12, fontFamily: "Chirp-Bold" },
   areaDetailsBtnEnd: { backgroundColor: "#00C48A", paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24, justifyContent: "center", alignItems: "center" },
-  areaDetailsBtnTextEnd: { color: "#FFFFFF", fontSize: 12, fontFamily: "Sora_700Bold" },
+  areaDetailsBtnTextEnd: { color: "#FFFFFF", fontSize: 12, fontFamily: "Chirp-Bold" },
 
-  sectionHeader: { fontSize: 13, fontFamily: "Sora_800ExtraBold", marginLeft: 24, marginBottom: 16, marginTop: 10, color: isDarkMode ? "#E2E8F0" : "#475569" },
+  sectionHeader: { fontSize: 13, fontFamily: "Chirp-Heavy", marginLeft: 24, marginBottom: 16, marginTop: 10, color: isDarkMode ? "#E2E8F0" : "#475569" },
   curvedChartContainer: { marginHorizontal: 20, borderRadius: 24, padding: 20, marginBottom: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.04, shadowRadius: 15, elevation: 3, borderWidth: 1, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
   chartTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   chartIconBox: { width: 36, height: 36, borderRadius: 12, justifyContent: "center", alignItems: "center", backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5" },
-  chartTitleText: { fontSize: 14, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  chartSubtitleText: { fontSize: 10, fontFamily: "Sora_500Medium", marginTop: 2, color: isDarkMode ? "#94A3B8" : "#64748B" },
+  chartTitleText: { fontSize: 14, fontFamily: "Chirp-Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  chartSubtitleText: { fontSize: 10, fontFamily: "Chirp-Medium", marginTop: 2, color: isDarkMode ? "#94A3B8" : "#64748B" },
   timeframeBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: isDarkMode ? "#2D3B34" : "#F8FAFC" },
-  timeframeText: { fontSize: 11, fontFamily: "Sora_600SemiBold", marginRight: 6, color: isDarkMode ? "#E2E8F0" : "#475569" },
+  timeframeText: { fontSize: 11, fontFamily: "Chirp-Bold", marginRight: 6, color: isDarkMode ? "#E2E8F0" : "#475569" },
   svgContainer: { height: 160, width: "100%" },
   chartXAxis: { flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingHorizontal: 10 },
-  chartXText: { fontSize: 10, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#64748B" : "#94A3B8" },
+  chartXText: { fontSize: 10, fontFamily: "Chirp-Bold", color: isDarkMode ? "#64748B" : "#94A3B8" },
 
   insightsScroll: { paddingLeft: 20, marginBottom: 24 },
   insightCard: { width: 140, borderRadius: 20, padding: 16, marginRight: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "transparent" },
   insightIconBox: { width: 32, height: 32, borderRadius: 10, justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  insightCardTitle: { fontSize: 12, fontFamily: "Sora_700Bold", marginBottom: 6 },
-  insightCardDesc: { fontSize: 10, fontFamily: "Sora_500Medium", lineHeight: 15, color: isDarkMode ? "#94A3B8" : "#64748B" },
+  insightCardTitle: { fontSize: 12, fontFamily: "Chirp-Bold", marginBottom: 6 },
+  insightCardDesc: { fontSize: 10, fontFamily: "Chirp-Medium", lineHeight: 15, color: isDarkMode ? "#94A3B8" : "#64748B" },
 
   outlookCard: { marginHorizontal: 20, borderRadius: 24, padding: 20, marginBottom: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.04, shadowRadius: 15, elevation: 3, borderWidth: 1, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
   outlookRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12 },
   outlookLeft: { width: 90 },
-  outlookName: { fontSize: 12, fontFamily: "Sora_700Bold", marginBottom: 4, color: isDarkMode ? "#F8FAFC" : "#1E293B" },
-  outlookStatus: { fontSize: 9, fontFamily: "Sora_500Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
+  outlookName: { fontSize: 12, fontFamily: "Chirp-Bold", marginBottom: 4, color: isDarkMode ? "#F8FAFC" : "#1E293B" },
+  outlookStatus: { fontSize: 9, fontFamily: "Chirp-Medium", color: isDarkMode ? "#94A3B8" : "#64748B" },
   outlookBarContainer: { flex: 1, height: 4, borderRadius: 2, marginLeft: 16, overflow: "hidden", backgroundColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
   outlookBarFill: { height: "100%", borderRadius: 2 },
 
@@ -1144,10 +1221,10 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
   requestCardGradient: { flexDirection: "row", borderRadius: 24, padding: 20, shadowColor: "#00C48A", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 5 },
   requestIconBoxDark: { width: 56, height: 56, borderRadius: 16, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center", marginRight: 16 },
   requestTextArea: { flex: 1 },
-  requestTitleLight: { fontSize: 16, fontFamily: "Sora_800ExtraBold", color: "#FFFFFF", marginBottom: 6 },
-  requestDescLight: { fontSize: 11, fontFamily: "Sora_400Regular", color: "rgba(255,255,255,0.85)", lineHeight: 16, marginBottom: 16 },
+  requestTitleLight: { fontSize: 16, fontFamily: "Chirp-Heavy", color: "#FFFFFF", marginBottom: 6 },
+  requestDescLight: { fontSize: 11, fontFamily: "Chirp-Regular", color: "rgba(255,255,255,0.85)", lineHeight: 16, marginBottom: 16 },
   requestBtnLight: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", backgroundColor: "#FFFFFF", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  requestBtnTextLight: { fontSize: 12, fontFamily: "Sora_700Bold", color: "#00C48A" },
+  requestBtnTextLight: { fontSize: 12, fontFamily: "Chirp-Bold", color: "#00C48A" },
 });
 
 export default ElectricityScreen;

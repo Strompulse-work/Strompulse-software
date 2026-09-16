@@ -1,7 +1,7 @@
 /**
  * Login Screen
  * Clean Light Theme: Solid white background, light gray inputs, heavy dark headers.
- * Supports Email, Phone (Auto E.164 Formatting), and Google OAuth
+ * Supports Email and Google OAuth with automatic phone-linking interception.
  */
 
 import React, { useState } from "react";
@@ -27,7 +27,6 @@ import AuthService from "../services/authService";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Login">;
 
-// Updated Theme Colors for Light UI (Matching Welcome & Signup)
 const THEME = {
   success: "#10C55B",
   textPrimary: "#1A1A1A",
@@ -38,42 +37,28 @@ const THEME = {
   error: "#FF3B30",
 };
 
-// Helper to auto-format Nigerian numbers for Twilio
-const formatToE164 = (phone: string) => {
-  let cleaned = phone.replace(/[^\d+]/g, "");
-  if (cleaned.startsWith("+")) return cleaned;
-  if (cleaned.startsWith("0") && cleaned.length === 11)
-    return "+234" + cleaned.substring(1);
-  if (cleaned.startsWith("234") && cleaned.length === 13) return "+" + cleaned;
-  return "+" + cleaned;
-};
-
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
-  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  const isPhone = /^\d+$/.test(identifier.replace(/[\s\-\+]/g, ""));
-
   const handleLogin = async () => {
-    if (!identifier.trim())
+    if (!email.trim())
       return Alert.alert(
         "Validation",
-        "Please enter your email or phone number",
+        "Please enter your email address",
       );
     if (!password)
       return Alert.alert("Validation", "Please enter your password");
 
     setLoading(true);
     try {
-      const submitIdentifier = isPhone
-        ? formatToE164(identifier.trim())
-        : identifier.trim();
+      const submitEmail = email.trim();
 
       const result = await AuthService.loginWithEmail(
-        submitIdentifier,
+        submitEmail,
         password,
       );
 
@@ -81,17 +66,16 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         const errorMessage = result.error || "Login failed. Please try again.";
 
         if (errorMessage.toLowerCase().includes("not confirmed")) {
-          // Push them to the verify screen if they never verified!
           Alert.alert(
             "Account Not Verified",
-            "Please verify your phone/email to continue.",
+            "Please verify your email to continue.",
             [
               { text: "Cancel", style: "cancel" },
               {
                 text: "Verify Now",
                 onPress: () =>
                   navigation.navigate("Verify", {
-                    identifier: submitIdentifier,
+                    identifier: submitEmail,
                   }),
               },
             ],
@@ -103,6 +87,14 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           );
         } else {
           Alert.alert("Login Failed", errorMessage);
+        }
+      } else {
+        // --- PHONE INTERCEPTION CHECK ---
+        const session = await AuthService.getCurrentSession();
+        const currentUser = session?.user;
+
+        if (!currentUser?.phone) {
+          (navigation.replace as any)("LinkPhone");
         }
       }
     } catch (error) {
@@ -121,6 +113,14 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           "Google Auth Error",
           result.error || "Could not connect to Google.",
         );
+      } else if (result.success) {
+        // --- PHONE INTERCEPTION CHECK FOR GOOGLE ---
+        const session = await AuthService.getCurrentSession();
+        const currentUser = session?.user;
+
+        if (!currentUser?.phone) {
+          (navigation.replace as any)("LinkPhone");
+        }
       }
     } catch (error) {
       Alert.alert("Google Auth Error", "An unexpected error occurred.");
@@ -129,7 +129,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const isFormValid = identifier.trim() && password;
+  const isFormValid = email.trim() && password;
 
   return (
     <View style={styles.container}>
@@ -149,7 +149,6 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             showsVerticalScrollIndicator={false}
             bounces={false}
           >
-            {/* UPDATED HEADER: Now houses the back button and the logo */}
             <View style={styles.header}>
               <TouchableOpacity
                 onPress={() => navigation.navigate("Welcome")}
@@ -180,19 +179,19 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.formContainer}>
                 <View style={styles.inputWrapper}>
                   <MaterialIcons
-                    name={isPhone ? "phone" : "mail-outline"}
+                    name="mail-outline"
                     size={22}
                     color={THEME.textSecondary}
                     style={styles.inputIcon}
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="Email or Phone Number"
+                    placeholder="Email Address"
                     placeholderTextColor={THEME.textSecondary}
-                    value={identifier}
-                    onChangeText={(text) => setIdentifier(text.toLowerCase())}
+                    value={email}
+                    onChangeText={(text) => setEmail(text.toLowerCase())}
                     editable={!loading}
-                    keyboardType="default"
+                    keyboardType="email-address"
                     autoCapitalize="none"
                   />
                 </View>

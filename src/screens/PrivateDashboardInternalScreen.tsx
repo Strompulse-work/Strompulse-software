@@ -191,10 +191,10 @@ const PrivateDashboardInternalScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 20 : 10, paddingBottom: 20 },
-  headerSubtitle: { fontSize: 11, fontFamily: "Sora_600SemiBold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
-  headerTitle: { fontSize: 24, fontFamily: "Sora_800ExtraBold" },
+  headerSubtitle: { fontSize: 11, fontFamily: "Chirp-Bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
+  headerTitle: { fontSize: 24, fontFamily: "Chirp-Heavy" },
   lockBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16 },
-  lockBtnText: { color: "#EF4444", fontSize: 12, fontFamily: "Sora_700Bold", marginLeft: 6 },
+  lockBtnText: { color: "#EF4444", fontSize: 12, fontFamily: "Chirp-Bold", marginLeft: 6 },
   
   scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
   
@@ -203,34 +203,34 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   statusLeft: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,196,138,0.15)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#00C48A", marginRight: 8 },
-  statusText: { fontSize: 12, fontFamily: "Sora_700Bold", color: "#00C48A" },
-  timestamp: { fontSize: 11, fontFamily: "Sora_500Medium" },
-  voltageText: { fontSize: 48, fontFamily: "Sora_800ExtraBold" },
-  voltageUnit: { fontSize: 24, fontFamily: "Sora_600SemiBold" },
-  voltageLabel: { fontSize: 12, fontFamily: "Sora_500Medium", marginTop: 4 },
+  statusText: { fontSize: 12, fontFamily: "Chirp-Bold", color: "#00C48A" },
+  timestamp: { fontSize: 11, fontFamily: "Chirp-Medium" },
+  voltageText: { fontSize: 48, fontFamily: "Chirp-Heavy" },
+  voltageUnit: { fontSize: 24, fontFamily: "Chirp-Bold" },
+  voltageLabel: { fontSize: 12, fontFamily: "Chirp-Medium", marginTop: 4 },
 
   // Curve Chart
   curveCard: { borderRadius: 24, borderWidth: 1, padding: 20, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   curveHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 },
   curveIconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  curveTitle: { fontSize: 15, fontFamily: "Sora_700Bold", marginBottom: 2 },
-  curveSub: { fontSize: 11, fontFamily: "Sora_500Medium", color: "#64748B" },
+  curveTitle: { fontSize: 15, fontFamily: "Chirp-Bold", marginBottom: 2 },
+  curveSub: { fontSize: 11, fontFamily: "Chirp-Medium", color: "#64748B" },
   curveBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: "#F1F5F9" },
-  curveBtnText: { fontSize: 11, fontFamily: "Sora_600SemiBold", color: "#475569" },
+  curveBtnText: { fontSize: 11, fontFamily: "Chirp-Bold", color: "#475569" },
   svgWrapper: { height: 160, width: "100%" },
   chartXAxis: { flexDirection: "row", justifyContent: "space-between", marginTop: 12, paddingHorizontal: 4 },
-  chartXText: { fontSize: 10, fontFamily: "Sora_600SemiBold", color: "#94A3B8" },
+  chartXText: { fontSize: 10, fontFamily: "Chirp-Bold", color: "#94A3B8" },
 
   // Donuts
   donutsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 20 },
   donutContainer: { flex: 1, borderRadius: 24, borderWidth: 1, padding: 20, alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2, marginHorizontal: 4 },
   donutCard: { alignItems: "center" },
-  donutHeader: { fontSize: 10, fontFamily: "Sora_700Bold", color: "#94A3B8", letterSpacing: 1, marginBottom: 16 },
+  donutHeader: { fontSize: 10, fontFamily: "Chirp-Bold", color: "#94A3B8", letterSpacing: 1, marginBottom: 16 },
   donutWrapper: { width: 100, height: 100, position: "relative", marginBottom: 16 },
   donutCenter: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center" },
-  donutPercentage: { fontSize: 20, fontFamily: "Sora_800ExtraBold" },
-  donutValue: { fontSize: 16, fontFamily: "Sora_700Bold", marginBottom: 4 },
-  donutSubtext: { fontSize: 10, fontFamily: "Sora_500Medium", color: "#64748B" },
+  donutPercentage: { fontSize: 20, fontFamily: "Chirp-Heavy" },
+  donutValue: { fontSize: 16, fontFamily: "Chirp-Bold", marginBottom: 4 },
+  donutSubtext: { fontSize: 10, fontFamily: "Chirp-Medium", color: "#64748B" },
 
   // Bar Chart
   barChartCard: { borderRadius: 24, borderWidth: 1, padding: 20, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   barColumn: { alignItems: "center", width: 30 },
   barTrack: { width: 12, height: 90, borderRadius: 6, justifyContent: "flex-end", overflow: "hidden", marginBottom: 8 },
   barFill: { width: "100%", backgroundColor: "#00C48A", borderRadius: 6 },
-  barLabel: { fontSize: 11, fontFamily: "Sora_600SemiBold", color: "#94A3B8" }
+  barLabel: { fontSize: 11, fontFamily: "Chirp-Bold", color: "#94A3B8" }
 });
 
 export default PrivateDashboardInternalScreen;

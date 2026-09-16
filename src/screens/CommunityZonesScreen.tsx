@@ -13,8 +13,9 @@ import {
   ActivityIndicator
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop, Circle as SvgCircle, Rect } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
-import { useAllGridDevices } from "../hooks/useDeviceData";
+import { useAllGridDevices, computeHistoryAnalytics, formatDurationShort } from "../hooks/useDeviceData";
 import { Loading } from "../components/UIComponents";
 
 const { height, width } = Dimensions.get("window");
@@ -35,20 +36,7 @@ const DEVICE_LOCATIONS: Record<string, { name: string; type: string; lat: number
   "STROM012": { name: "OKETEDO", type: "area", lat: 7.3780, lng: 3.9100, roads: ["Oyo Road", "Agbowo Road"] },
 };
 
-const MOCK_ZONES = [
-  { id: 'A', name: 'Zone A', dir: 'NW', icon: 'arrow-top-left-bold-box', status: 'Live', color: '#00C48A' },
-  { id: 'B', name: 'Zone B', dir: 'NE', icon: 'arrow-top-right-bold-box', status: 'Live', color: '#00C48A' },
-  { id: 'C', name: 'Zone C', dir: 'SW', icon: 'arrow-bottom-left-bold-box', status: 'Partial', color: '#F59E0B' },
-  { id: 'D', name: 'Zone D', dir: 'SE', icon: 'arrow-bottom-right-bold-box', status: 'Offline', color: '#EF4444' },
-];
-
-// NOTE: local timestamp parsing / staleness logic has been REMOVED from
-// this screen — see ElectricityScreen.tsx for the same note. Online,
-// offline, AND checking state all come straight from useAllGridDevices()
-// (liveDevice.connectionState), which now uses a tracker SHARED across
-// every screen in the app (fixed in hooks/useDeviceData.ts) — so a
-// device confirmed online on the Communities list stays confirmed here
-// too, instead of re-running its warm-up on every screen it's viewed on.
+const CHECKING_COLOR = "#F59E0B";
 
 const CommunityZonesScreen = ({ route, navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
@@ -56,8 +44,12 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
   
   const [activeTab, setActiveTab] = useState<"overview" | "analytics">("overview");
 
-  const { areaId } = route.params || {};
+  // Pull both areaId and the specific areaName (street/search result) from navigation
+  const { areaId, areaName } = route.params || {};
   const areaData = DEVICE_LOCATIONS[areaId] || { name: "Unknown Area", type: "area" };
+  
+  // Use the exact street name if provided, otherwise fallback to the parent area node name
+  const displayTitle = areaName || areaData.name;
 
   const { devices, loading } = useAllGridDevices();
   
@@ -74,8 +66,6 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
     );
   }
 
-  // FIX: connectionState ('online' | 'offline' | 'checking') comes
-  // straight from the hook — one shared source of truth across the app.
   const connectionState: 'online' | 'offline' | 'checking' = liveDevice
     ? (liveDevice.connectionState || (liveDevice.isOnline ? 'online' : 'offline'))
     : 'offline';
@@ -100,6 +90,13 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
     ? "Presently Stable"
     : "Power Outage";
   if (isPartial) finalStatusText = "Partial Stability";
+
+  // FIX: real per-device analytics for THIS area's own graph — same
+  // computeHistoryAnalytics used generally, applied to just this device's
+  // history. hasAnyData tells us whether to show the real graph or a
+  // "no data — device down" placeholder (currently true only for
+  // STROM008 / UI Campus, since it's the only device with live power).
+  const historyAnalytics = computeHistoryAnalytics(liveDevice?.history, 'Today', isOnline);
 
   return (
     <View style={styles.container}>
@@ -148,7 +145,7 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
 
           {/* Title & Uptime Row */}
           <View style={styles.titleRow}>
-            <Text style={styles.areaTitle} numberOfLines={1}>{areaData.name}</Text>
+            <Text style={styles.areaTitle} numberOfLines={1}>{displayTitle}</Text>
             <View style={{ alignItems: "flex-end" }}>
               <Text style={styles.uptimeHighlight}>{realUptime}%</Text>
               <Text style={styles.uptimeSub}>uptime</Text>
@@ -177,37 +174,134 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
           {activeTab === "overview" ? (
             <View>
               <Text style={styles.descriptionText}>
-                {areaData.name} is a key residential node in the Ibadan electricity grid. 
+                {displayTitle} is a key residential node in the Ibadan electricity grid. 
                 Currently showing signs of {finalStatusText.toLowerCase()}, this area has logged {hoursOn} hours of power today. Keep notifications enabled to receive real-time alerts on grid shifts.
               </Text>
 
-              <View style={styles.zoneMapContainer}>
-                <Text style={styles.zoneMapLabel}>ZONE MAP</Text>
-                <View style={styles.zoneGrid}>
-                  {MOCK_ZONES.map((zone) => {
-                    const bgOpacity = isDarkMode ? "0.08" : "0.1";
-                    const borderOpacity = isDarkMode ? "0.2" : "0.3";
-                    const rgbaBase = zone.color === '#00C48A' ? '0, 196, 138' : zone.color === '#F59E0B' ? '245, 158, 11' : '239, 68, 68';
-                    
-                    return (
-                      <View key={zone.id} style={[styles.zoneCard, { backgroundColor: `rgba(${rgbaBase}, ${bgOpacity})`, borderColor: `rgba(${rgbaBase}, ${borderOpacity})` }]}>
-                        <View style={[styles.statusDot, { backgroundColor: zone.color }]} />
-                        <View style={styles.zoneCardContent}>
-                          <View style={styles.dirRow}>
-                            <MaterialCommunityIcons name={zone.icon as any} size={14} color={zone.color} />
-                            <Text style={[styles.dirText, { color: zone.color }]}>{zone.dir}</Text>
-                          </View>
-                          <Text style={styles.zoneName}>{zone.name}</Text>
-                          <Text style={styles.zoneStatus}>{zone.status}</Text>
-                        </View>
-                      </View>
-                    );
-                  })}
+              {/* FIX: "Today's insights" moved here, under Overview, per
+                  explicit instruction — was previously only reachable from
+                  the Analytics tab on the general screen. */}
+              <Text style={styles.sectionHeaderInline}>Today's insights</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.insightsScroll}>
+                {historyAnalytics.currentStreakMs !== null ? (
+                  <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#ECFDF5" }]}>
+                    <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5" }]}><MaterialCommunityIcons name="lightning-bolt" size={18} color="#00C48A" /></View>
+                    <Text style={[styles.insightCardTitle, { color: "#00C48A" }]}>Current streak</Text>
+                    <Text style={styles.insightCardDesc}>Stable for {formatDurationShort(historyAnalytics.currentStreakMs)} since last restoration.</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#FEE2E2" }]}>
+                    <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(239,68,68,0.15)" : "#FECACA" }]}><MaterialCommunityIcons name="power-plug-off" size={18} color="#EF4444" /></View>
+                    <Text style={[styles.insightCardTitle, { color: "#EF4444" }]}>Currently down</Text>
+                    <Text style={styles.insightCardDesc}>
+                      {historyAnalytics.latestRestorationAt
+                        ? `Last restored ${historyAnalytics.latestRestorationAt.toLocaleString()}.`
+                        : "No restoration events recorded yet."}
+                    </Text>
+                  </View>
+                )}
+                <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#F5F3FF" }]}>
+                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(139,92,246,0.15)" : "#EDE9FE" }]}><MaterialCommunityIcons name="restart" size={18} color={isDarkMode ? "#A78BFA" : "#8B5CF6"} /></View>
+                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#A78BFA" : "#8B5CF6" }]}>Restorations today</Text>
+                  <Text style={styles.insightCardDesc}>{historyAnalytics.totalRestorationsInRange} power-restoration event{historyAnalytics.totalRestorationsInRange === 1 ? '' : 's'} recorded — each implies a prior outage.</Text>
                 </View>
-              </View>
+                <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#F0F9FF", marginRight: 20 }]}>
+                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(2,132,199,0.15)" : "#E0F2FE" }]}><MaterialCommunityIcons name="chart-bar" size={18} color={isDarkMode ? "#38BDF8" : "#0284C7"} /></View>
+                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#38BDF8" : "#0284C7" }]}>Least stable window</Text>
+                  <Text style={styles.insightCardDesc}>
+                    {historyAnalytics.buckets.some(b => b.restorationCount > 0)
+                      ? `${historyAnalytics.buckets.reduce((worst, b) => b.restorationCount > worst.restorationCount ? b : worst).label} had the most restorations.`
+                      : "No instability detected in this period."}
+                  </Text>
+                </View>
+              </ScrollView>
             </View>
           ) : (
             <View>
+              {/* FIX: this device's own Power Flow graph, placed ABOVE the
+                  Performance card. Now a single unified line-graph path
+                  for every device — a device with no history correctly
+                  scores 0 in every bucket at the data level, so its line
+                  is naturally pinned to the bottom, all red, with no
+                  special-casing needed in the UI. */}
+              <View style={styles.curvedChartContainer}>
+                <View style={styles.chartTopRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <View style={styles.chartIconBox}>
+                      <MaterialCommunityIcons name="chart-line" size={18} color="#00C48A" />
+                    </View>
+                    <View style={{ marginLeft: 12 }}>
+                      <Text style={styles.chartTitleText}>{displayTitle} Power Flow</Text>
+                      <Text style={styles.chartSubtitleText}>Today's on/off pattern</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.svgContainer}>
+                  {(() => {
+                    // FIX: genuine step function — flat while stable,
+                    // instant vertical jump the moment power changes, flat
+                    // again at the new level. Uses bucket.isStable
+                    // (binary), not an interpolated score. Future buckets
+                    // (time slots that haven't happened yet) render as a
+                    // neutral dashed line, never colored red or green.
+                    const buckets = historyAnalytics.buckets;
+                    const chartTop = 30;
+                    const chartBottom = 120;
+                    const midY = (chartTop + chartBottom) / 2;
+                    const slotWidth = 320 / buckets.length;
+                    const futureColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
+                    const levelFor = (stable: boolean) => (stable ? chartTop : chartBottom);
+                    const colorFor = (stable: boolean) => (stable ? "#00C48A" : "#EF4444");
+
+                    type Seg = { x1: number; y1: number; x2: number; y2: number; color: string; dashed?: boolean };
+                    const segments: Seg[] = [];
+                    buckets.forEach((bucket, i) => {
+                      const x1 = slotWidth * i;
+                      const x2 = slotWidth * (i + 1);
+
+                      if (bucket.isFuture) {
+                        segments.push({ x1, y1: midY, x2, y2: midY, color: futureColor, dashed: true });
+                        return;
+                      }
+
+                      const y = levelFor(bucket.isStable);
+                      segments.push({ x1, y1: y, x2, y2: y, color: colorFor(bucket.isStable) });
+
+                      if (i > 0 && !buckets[i - 1].isFuture) {
+                        const prevY = levelFor(buckets[i - 1].isStable);
+                        if (prevY !== y) {
+                          segments.push({ x1, y1: prevY, x2: x1, y2: y, color: colorFor(bucket.isStable) });
+                        }
+                      }
+                    });
+
+                    return (
+                      <Svg width="100%" height="150" viewBox="0 0 320 150">
+                        <Rect x={0} y={chartTop} width={320} height={1} fill={isDarkMode ? "#22302A" : "#F1F5F9"} />
+                        <Rect x={0} y={chartBottom} width={320} height={1.5} fill={isDarkMode ? "#2D3B34" : "#E2E8F0"} />
+                        {segments.map((seg, i) => (
+                          <Path
+                            key={i}
+                            d={`M ${seg.x1} ${seg.y1} L ${seg.x2} ${seg.y2}`}
+                            stroke={seg.color}
+                            strokeWidth={seg.dashed ? "2" : "4"}
+                            strokeLinecap="round"
+                            strokeDasharray={seg.dashed ? "4,4" : undefined}
+                          />
+                        ))}
+                      </Svg>
+                    );
+                  })()}
+                  <View style={styles.chartXAxis}>
+                    {historyAnalytics.bucketLabels.map((label, index) => <Text key={index} style={styles.chartXText}>{label}</Text>)}
+                  </View>
+                  {!historyAnalytics.hasAnyData && (
+                    <Text style={styles.noDataText}>No restoration data ever recorded — device currently down.</Text>
+                  )}
+                </View>
+              </View>
+
               <View style={styles.analyticsDetailCard}>
                 <View style={styles.analyticsDetailHeader}>
                   <Text style={styles.analyticsDetailTitle}>Performance</Text>
@@ -395,66 +489,42 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     fontFamily: "Sora_400Regular",
     color: theme.textSecondary,
     lineHeight: 22,
-    marginBottom: 32,
-  },
-  zoneMapContainer: {
     marginBottom: 24,
   },
-  zoneMapLabel: {
-    fontSize: 11,
-    fontFamily: "Sora_700Bold",
-    color: theme.textSecondary,
-    letterSpacing: 1.5,
+  sectionHeaderInline: {
+    fontSize: 13,
+    fontFamily: "Sora_800ExtraBold",
     marginBottom: 16,
+    color: isDarkMode ? "#E2E8F0" : "#475569",
   },
-  zoneGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  zoneCard: {
-    width: "48%",
-    aspectRatio: 1.3,
-    borderRadius: 16,
+  insightsScroll: { marginBottom: 8, marginHorizontal: -24 },
+  insightCard: { width: 160, borderRadius: 20, padding: 16, marginRight: 12, marginLeft: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC" },
+  insightIconBox: { width: 32, height: 32, borderRadius: 10, justifyContent: "center", alignItems: "center", marginBottom: 12 },
+  insightCardTitle: { fontSize: 12, fontFamily: "Sora_700Bold", marginBottom: 6 },
+  insightCardDesc: { fontSize: 10, fontFamily: "Sora_500Medium", lineHeight: 15, color: isDarkMode ? "#94A3B8" : "#64748B" },
+
+  curvedChartContainer: {
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 15,
+    elevation: 3,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 12,
-    position: "relative",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC",
+    borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
   },
-  statusDot: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  zoneCardContent: {
-    alignItems: "center",
-  },
-  dirRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  dirText: {
-    fontSize: 10,
-    fontFamily: "Sora_700Bold",
-    marginLeft: 4,
-  },
-  zoneName: {
-    fontSize: 14,
-    fontFamily: "Sora_700Bold",
-    color: theme.textPrimary,
-    marginBottom: 4,
-  },
-  zoneStatus: {
-    fontSize: 10,
-    fontFamily: "Sora_500Medium",
-    color: theme.textSecondary,
-  },
+  chartTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+  chartIconBox: { width: 36, height: 36, borderRadius: 12, justifyContent: "center", alignItems: "center", backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5" },
+  chartTitleText: { fontSize: 14, fontFamily: "Sora_700Bold", color: theme.textPrimary },
+  chartSubtitleText: { fontSize: 10, fontFamily: "Sora_500Medium", marginTop: 2, color: theme.textSecondary },
+  svgContainer: { height: 160, width: "100%" },
+  chartXAxis: { flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingHorizontal: 4 },
+  chartXText: { fontSize: 9, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#64748B" : "#94A3B8" },
+  noDataText: { fontSize: 12, fontFamily: "Sora_500Medium", color: isDarkMode ? "#64748B" : "#94A3B8", textAlign: "center", paddingHorizontal: 20, marginTop: 8 },
+
   analyticsDetailCard: { 
     backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", 
     borderRadius: 20, 
