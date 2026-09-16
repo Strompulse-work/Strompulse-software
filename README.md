@@ -1,330 +1,135 @@
-# Ibadan Power - Real-Time Electricity Monitoring Platform
+⚡ Strompulse - Real-Time Grid Intelligence & Security
+A production-grade React Native + Expo application providing zero-latency electricity monitoring and personal safety features. Built specifically to track live grid telemetry and provide emergency SOS capabilities across Nigeria.
 
-A production-grade React Native + Expo application for real-time electricity monitoring across Ibadan City, Nigeria.
+🚀 The Upgrade 
+Strompulse has evolved from a basic monitoring app into a hybrid-backend powerhouse:
 
-## 📱 Features
+Hybrid Data Layer: Static user data/relationships via Supabase + Zero-Latency IoT hardware streams via Firebase Realtime Database.
 
-### Core Features
+Advanced Typography & UI: Custom Glassmorphism UI, integrated Dark/Light themes, and seamless multi-font integration utilizing Chirp and Google's Sora fonts.
 
-- **Real-Time Power Status Monitoring**: Live electricity status (ON/OFF/OFFLINE) for connected IoT devices
-- **Live Duration Counter**: Tracks how long power has been off in real-time
-- **Interactive Maps**: Visualize device locations with status indicators
-- **Community Analytics**: Aggregated electricity performance metrics
-- **Outage History**: Detailed records of outages with duration and timestamps
-- **User Profiles**: Account management with notification preferences
-- **Multi-Device Support**: Handle multiple devices per user
+Persistent Event Tracking: A custom local storage engine that permanently pairs power outages with their respective restorations.
 
-### Architecture
+📱 Core Features
+🔌 Real-Time Grid Monitoring
+Zero-Latency Telemetry: Live heartbeat tracking via Firebase. Devices missing a ping for 60 seconds are automatically flagged as experiencing a "Power Outage".
 
-- **Bottom Tab Navigation**: 5 main screens (Feed, Map, Communities, Insights, Profile)
-- **Real-Time Subscriptions**: Supabase real-time updates for instant status changes
-- **Secure Authentication**: Email/password and phone OTP login via Supabase Auth
-- **Scalable Services**: Clean separation of concerns with service layers
-- **Custom Hooks**: Reusable data fetching and real-time subscription logic
-- **Type-Safe**: Full TypeScript with comprehensive type definitions
+Interactive Maps: Visualize device locations with live status indicators (Stable, Outage, Checking) and custom area pinning.
 
-## 🏗️ Project Structure
+Smart Notifications: Intelligent alert system that pairs historical outages with restorations, generating chronological alert cards with numeric unread badges.
 
-```
+🛡️ Safety & Security
+Emergency SOS Protocol: A "Hold-to-Send" concentric ripple button that triggers immediate alerts.
+
+Multi-Channel Delivery: Broadcasts live location and emergency status via in-app push, direct SMS, and WhatsApp DM to primary contacts.
+
+Journey Share: Real-time GPS tracking status overlay for active trips.
+
+Background Triggers: Execute safety alerts without needing to open the app (Android).
+
+🔒 Private Hardware Vault (Stromer)
+PIN-Protected Dashboard: Secure access to personal hardware analytics using a lock-screen interface.
+
+Deep Analytics: Donut charts, curved SVG line charts, and weekly uptime bar charts tracking personal power flow.
+
+🏗️ Architecture & Tech Stack
+Frontend: React Native, Expo, TypeScript
+
+Navigation: @react-navigation/bottom-tabs & @react-navigation/stack (Custom floating glassmorphism tabs)
+
+Auth & Relational Data: Supabase (PostgreSQL)
+
+Live IoT Telemetry: Firebase Realtime Database
+
+Local Storage: @react-native-async-storage/async-storage (For offline persistence of alerts and settings)
+
+Maps & SVG: react-native-maps, react-native-svg
+
+Typography: expo-font, @expo-google-fonts/sora
+
+📂 Project Structure
+Plaintext
 src/
-├── config/              # Configuration files
-│   └── supabase.ts      # Supabase client setup
-├── services/            # Business logic services
-│   ├── authService.ts   # Authentication & session management
-│   ├── deviceService.ts # Device & analytics data
-│   └── realtimeService.ts# Real-time subscriptions
-├── screens/             # Main application screens
-│   ├── FeedScreen.tsx   # Home dashboard
-│   ├── MapScreen.tsx    # Device location map
-│   ├── CommunitiesScreen.tsx # Community stats
-│   ├── InsightsScreen.tsx # Analytics & charts
-│   ├── ProfileScreen.tsx# User profile
-│   └── AuthScreen.tsx   # Authentication
-├── components/          # Reusable UI components
-│   └── UIComponents.tsx # Status indicators, cards, etc.
-├── hooks/               # Custom React hooks
-│   └── useDeviceData.ts # Data fetching & subscriptions
-├── navigation/          # Navigation setup
-│   └── RootNavigator.tsx# Screen routing
-├── types/               # TypeScript type definitions
-│   └── index.ts         # All interfaces
-├── utils/               # Helper functions
-│   └── helpers.ts       # Date, status, calculations
-└── styles/              # Global styles & theme
-    └── theme.ts         # Colors, spacing, typography
-```
+├── assets/
+│   ├── fonts/               # Local custom fonts (Chirp-Regular, Chirp-Heavy, etc.)
+│   └── images/              # App branding and background graphics
+├── config/                  
+│   ├── supabase.ts          # Supabase client initialization
+│   └── firebase.ts          # Firebase Realtime DB initialization
+├── services/                
+│   ├── authService.ts       # Supabase authentication logic
+│   └── deviceService.ts     # Device API wrappers
+├── hooks/                   
+│   └── useDeviceData.ts     # Core hybrid hook (Supabase + Firebase Sync)
+├── navigation/              
+│   ├── RootNavigator.tsx    # Stack and Tab navigation routing
+│   └── AuthNavigator.tsx    # Pre-auth onboarding routing
+├── screens/                 
+│   ├── ElectricityScreen.tsx # Live grid map & community list
+│   ├── SafetyScreen.tsx      # SOS triggers and journey sharing
+│   ├── PrivateDashboard...   # PIN lock & personal hardware analytics
+│   ├── NotificationsScreen   # Chronological paired power/security alerts
+│   └── ProfileScreen.tsx     # Settings, themes, and user management
+├── components/              
+│   ├── CustomMapView.tsx    # Map rendering logic
+│   └── UIComponents.tsx     # Reusable buttons, loaders, etc.
+├── theme/                   
+│   └── ThemeContext.tsx     # Dark/Light mode provider
+└── types/                   
+    └── index.ts             # Global TypeScript interfaces
+🛠️ Getting Started
+Prerequisites
+Node.js 18+
 
-## 🚀 Getting Started
+Expo CLI (npm install -g expo-cli)
 
-### Prerequisites
+Supabase Project (PostgreSQL)
 
-- Node.js 16+ and npm/yarn
-- Expo CLI: `npm install -g expo-cli`
-- Supabase account with PostgreSQL database
-- Google Maps API key (for map features)
+Firebase Project (Realtime Database)
 
-### Installation
+Installation
+Clone the repository
 
-1. **Clone and Install Dependencies**
+Bash
+git clone https://github.com/Strompulse-work/Strompulse-software.git
+cd Strompulse-software
+Install Dependencies
 
-```bash
-cd ibadan-power-app
-cp .env.example .env
+Bash
 npm install
-npx expo install
-```
+npx expo install @expo-google-fonts/sora
+Configure Environment Variables
+Create a .env file in the root directory:
 
-2. **Configure Environment Variables**
-   Create `.env` in the project root:
-
-```env
+Code snippet
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your-maps-key
-```
+EXPO_PUBLIC_FIREBASE_API_KEY=your-firebase-key
+EXPO_PUBLIC_FIREBASE_DATABASE_URL=https://your-database.firebaseio.com
+Start Development Server
 
-3. **Setup Supabase Database**
-   Create the following tables in Supabase:
+Bash
+npx expo start -c
+📡 The Hybrid Data Hook
+Strompulse utilizes a dual-backend approach to ensure maximum speed without sacrificing relational data integrity.
 
-```sql
--- Devices table
-CREATE TABLE devices (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  device_id TEXT UNIQUE NOT NULL,
-  owner_user_id UUID REFERENCES auth.users(id),
-  community_id UUID REFERENCES communities(id),
-  address TEXT,
-  latitude DECIMAL(10, 6),
-  longitude DECIMAL(10, 6),
-  status TEXT CHECK (status IN ('ON', 'OFF', 'OFFLINE')),
-  last_seen TIMESTAMP,
-  created_at TIMESTAMP DEFAULT now(),
-  updated_at TIMESTAMP DEFAULT now()
-);
+useAllGridDevices fetches static metadata (Names, Coordinates) from Supabase, and binds it to a zero-latency onValue listener from Firebase root /. The hook strictly calculates a 60-second heartbeat offset to independently verify if grid hardware is online, offline, or experiencing network latency.
 
--- Events table (power status changes)
-CREATE TABLE events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  device_id UUID REFERENCES devices(id),
-  status TEXT CHECK (status IN ('ON', 'OFF')),
-  timestamp TIMESTAMP DEFAULT now(),
-  created_at TIMESTAMP DEFAULT now()
-);
+🤝 Contributing
+Use TypeScript for all new components to maintain strict type safety.
 
--- Outages table
-CREATE TABLE outages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  device_id UUID REFERENCES devices(id),
-  started_at TIMESTAMP,
-  ended_at TIMESTAMP,
-  duration_minutes INTEGER,
-  is_active BOOLEAN DEFAULT true,
-  reason TEXT,
-  created_at TIMESTAMP DEFAULT now(),
-  updated_at TIMESTAMP DEFAULT now()
-);
+Follow the established theme context for all styling (support isDarkMode).
 
--- Communities table
-CREATE TABLE communities (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  state TEXT,
-  city TEXT,
-  type TEXT CHECK (type IN ('residential', 'commercial', 'industrial', 'mixed')),
-  description TEXT,
-  latitude DECIMAL(10, 6),
-  longitude DECIMAL(10, 6),
-  device_count INTEGER DEFAULT 0,
-  admin_id UUID,
-  created_at TIMESTAMP DEFAULT now(),
-  updated_at TIMESTAMP DEFAULT now()
-);
-```
+Limit external dependencies to maintain bundle speed.
 
-Enable Real-Time on these tables:
+Keep SVGs clean and optimized.
 
-- Go to Supabase Dashboard → Replication
-- Enable for `events`, `devices`, `outages`, `communities` tables
+📝 License
+This project is proprietary software belonging to the Strompulse Platform.
 
-4. **Start Development Server**
+📞 Support
+For internal development inquiries or hardware syncing issues:
 
-```bash
-npm start
-```
+Contact: support@strompulse.app
 
-For specific platforms:
-
-```bash
-npm run android  # Run on Android
-npm run ios      # Run on iOS
-npm run web      # Run on web
-```
-
-## 📡 Real-Time Features
-
-### How Real-Time Works
-
-1. Supabase Realtime subscriptions monitor database changes
-2. When a device status changes, subscriptions trigger instantly
-3. React state updates cause UI re-renders without manual refresh
-4. Multiple subscriptions per device ensure comprehensive coverage
-
-### Example: Feed Screen Real-Time Update
-
-```typescript
-// Subscribes to device events
-const subId = RealtimeService.subscribeToDeviceEvents(deviceId, (payload) => {
-  // Called instantly when new events are added to Supabase
-  onUpdate(payload);
-  setEvents((prev) => [payload.new, ...prev]);
-});
-```
-
-## 🔐 Authentication Flow
-
-### Email/Password Login
-
-1. User enters credentials on AuthScreen
-2. AuthService sends to Supabase Auth
-3. Session stored securely in device secure storage
-4. User redirected to main app
-
-### Session Management
-
-- Tokens persist across app restarts
-- Automatic token refresh before expiration
-- Logout clears all stored credentials
-
-## 📊 Data Models
-
-### Device
-
-```typescript
-{
-  id: string;
-  device_id: string; // IoT device identifier
-  owner_user_id: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-  status: "ON" | "OFF" | "OFFLINE";
-  last_seen: string; // ISO timestamp
-}
-```
-
-### PowerEvent
-
-```typescript
-{
-  id: string;
-  device_id: string;
-  status: "ON" | "OFF";
-  timestamp: string; // ISO timestamp
-}
-```
-
-### Outage
-
-```typescript
-{
-  id: string;
-  device_id: string;
-  started_at: string;
-  ended_at?: string;
-  duration_minutes: number;
-  is_active: boolean;
-}
-```
-
-## 🎨 UI Components
-
-### PowerStatusIndicator
-
-Big circular status display with icon and label
-
-```typescript
-<PowerStatusIndicator status="ON" size="large" />
-```
-
-### DeviceCard
-
-Card showing device with status badge
-
-```typescript
-<DeviceCard deviceId="IOT-0001" status="ON" />
-```
-
-### StatCard
-
-Dashboard statistic card
-
-```typescript
-<StatCard label="Total Outages" value={5} unit="hrs" />
-```
-
-### CommunityItem
-
-Collapsible community info with stats
-
-```typescript
-<CommunityItem name="Gbagada" deviceCount={150} uptime={94} />
-```
-
-## 📈 Charts & Analytics
-
-Using Victory Native for cross-platform charts:
-
-- **7-Day Line Chart**: Power uptime trends
-- **30-Day Bar Chart**: Outage frequency
-- **Timeline**: Recent outage events
-
-CustomizableCharts are responsive and adapt to screen size.
-
-## 🔧 Production Deployment
-
-### Before Release
-
-- [ ] Add real Google Maps API key
-- [ ] Configure correct Supabase project
-- [ ] Set up push notifications
-- [ ] Enable email notifications
-- [ ] Test on real devices
-- [ ] Performance optimization (lazy loading)
-
-### Android Build
-
-```bash
-eas build --platform android
-```
-
-### iOS Build
-
-```bash
-eas build --platform ios
-```
-
-## 🤝 Contributing
-
-Coding standards:
-
-- Use TypeScript for type safety
-- Follow React hooks patterns
-- Keep components under 300 lines
-- Implement error handling
-- Add loading states
-- Document Public APIs
-
-## 📝 License
-
-This project is proprietary software for Ibadan Power Monitoring Platform.
-
-## 📞 Support
-
-For issues and questions:
-
-- Create an issue in the repository
-- Contact: support@ibadanpower.com
-
----
-
-**Built with ❤️ for Ibadan City**
+Built with ❤️ for a Brighter Grid.
