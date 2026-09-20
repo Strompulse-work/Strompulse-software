@@ -5,11 +5,15 @@
  */
 
 import React, { useEffect, useState } from "react";
-import { Text, TextInput } from "react-native";
+import { Text, TextInput, useColorScheme } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
+
+// Tamagui Imports
+import { TamaguiProvider } from "tamagui";
+import tamaguiConfig from "./tamagui.config";
 
 // 1. Import the local font loader from Expo
 import { useFonts } from "expo-font";
@@ -45,6 +49,9 @@ TextInput.defaultProps.style = { ...(TextInput.defaultProps.style || {}), ...cus
 export default function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Get the native system color scheme for Tamagui
+  const colorScheme = useColorScheme();
 
   // 3. Load the local custom fonts into memory (Aliasing Sora to Chirp)
   const [fontsLoaded, fontError] = useFonts({
@@ -105,34 +112,36 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <NavigationContainer
-          linking={{
-            prefixes: ["ibadanpower://", "https://ibadanpower.app"],
-            config: {
-              screens: {
-                index: "",
-                auth: "auth",
-                "Power Status": {
-                  path: "power-status",
-                  screens: {
-                    CitySelector: "selector",
-                    CityDetail: "details",
+    <TamaguiProvider config={tamaguiConfig} defaultTheme={colorScheme === 'dark' ? 'dark' : 'light'}>
+      <ThemeProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <NavigationContainer
+            linking={{
+              prefixes: ["ibadanpower://", "https://ibadanpower.app"],
+              config: {
+                screens: {
+                  index: "",
+                  auth: "auth",
+                  "Power Status": {
+                    path: "power-status",
+                    screens: {
+                      CitySelector: "selector",
+                      CityDetail: "details",
+                    },
                   },
+                  Safety: "safety",
+                  Feed: "feed",
+                  Notifications: "notifications",
+                  Profile: "profile",
                 },
-                Safety: "safety",
-                Feed: "feed",
-                Notifications: "notifications",
-                Profile: "profile",
-              },
-            } as any,
-          }}
-        >
-          <RootNavigator isSignedIn={isSignedIn} />
-        </NavigationContainer>
-        <StatusBar style="light" backgroundColor={Colors.primary} />
-      </GestureHandlerRootView>
-    </ThemeProvider>
+              } as any,
+            }}
+          >
+            <RootNavigator isSignedIn={isSignedIn} />
+          </NavigationContainer>
+          <StatusBar style="light" backgroundColor={Colors.primary} />
+        </GestureHandlerRootView>
+      </ThemeProvider>
+    </TamaguiProvider>
   );
 }

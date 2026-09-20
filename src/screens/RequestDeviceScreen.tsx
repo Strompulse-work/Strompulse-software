@@ -9,42 +9,52 @@ import {
   StatusBar,
   SafeAreaView,
   Image,
-  Dimensions
+  Dimensions,
+  Linking,
+  Alert
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "../theme/ThemeContext";
 
 const { height, width } = Dimensions.get("window");
-const HEADER_HEIGHT = height * 0.45; // Sets the background image to cover 45% of the screen
+const HEADER_HEIGHT = height * 0.45;
 
 const RequestDeviceScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme, isDarkMode);
 
-  const myDevices = [
-    { id: 1, name: "Home", status: "ON", voltage: "224V", emoji: "🏠", color: "#00C48A" },
-    { id: 2, name: "Shop", status: "Power Outage", voltage: null, emoji: "🏪", color: "#EF4444" },
-    { id: 3, name: "Parents", status: "ON", voltage: "218V", emoji: "🏡", color: "#00C48A" },
+  // Solid action color matching your other screens
+  const solidActionBg = isDarkMode ? "#FFFFFF" : "#000000";
+  const solidActionIcon = isDarkMode ? "#000000" : "#FFFFFF";
+
+  const myNodes = [
+    { id: 1, name: "Home Node", status: "Presently Stable", voltage: "224V", isOnline: true },
+    { id: 2, name: "Shop Node", status: "Power Outage", voltage: null, isOnline: false },
+    { id: 3, name: "Parents Node", status: "Presently Stable", voltage: "218V", isOnline: true },
   ];
 
   const features = [
-    { icon: "lightning-bolt", iconColor: "#F59E0B", bg: isDarkMode ? "#451A03" : "#FEF3C7", title: "Instant Outage Alerts", desc: "Know the exact second your power goes off — with notifications wherever you are." },
-    { icon: "lightbulb-on", iconColor: "#D97706", bg: isDarkMode ? "#422006" : "#FFEDD5", title: "Power Restored Notification", desc: "Get alerted the moment electricity comes back. No more guessing." },
-    { icon: "chart-bar", iconColor: "#3B82F6", bg: isDarkMode ? "#172554" : "#DBEAFE", title: "Daily Usage History", desc: "Track how many hours of power you receive per day, week or month." },
-    { icon: "currency-ngn", iconColor: "#10B981", bg: isDarkMode ? "#064E3B" : "#D1FAE5", title: "Cost Estimator", desc: "Estimate monthly spending based on real uptime data and your appliances." },
-    { icon: "earth", iconColor: "#6366F1", bg: isDarkMode ? "#312E81" : "#E0E7FF", title: "Monitor From Anywhere", desc: "Check your home, shop or parents' house from anywhere — no phone calls needed." },
-    { icon: "power-plug", iconColor: "#475569", bg: isDarkMode ? "#1E293B" : "#F1F5F9", title: "Zero Installation", desc: "Plug into any socket. The device appears in the app within about 60 seconds." },
+    { icon: "zap", title: "Instant Outage Alerts", desc: "Know the exact second your power goes off." },
+    { icon: "zap-off", title: "Restoration Notifications", desc: "Get alerted the moment electricity comes back." },
+    { icon: "bar-chart-2", title: "Daily Usage History", desc: "Track hours of power received per day or week." },
+    { icon: "dollar-sign", title: "Cost Estimator", desc: "Estimate spending based on real uptime data." },
+    { icon: "globe", title: "Monitor From Anywhere", desc: "Check all your nodes remotely without phone calls." },
+    { icon: "cpu", title: "Zero Installation", desc: "Plug into any socket and connect in 60 seconds." },
   ];
 
   const badges = [
-    "🚚 We deliver",
-    "🔌 Plug & play",
-    "📱 App-connected",
-    "🔋 Outage-proof",
-    "✅ No monthly fee",
-    "🌍 Remote access"
+    "🚚 Free Nationwide Delivery",
+    "🔌 Plug & Play Setup",
+    "📱 Live App-Connected",
+    "🔋 Outage-Proof Tracking",
+    "✅ Zero Monthly Fees",
+    "🌍 Remote Access Anywhere"
   ];
+
+  const handleRequestNode = () => {
+    Linking.openURL(`whatsapp://send?text=${encodeURIComponent("Hello Strompulse, I want to request a personal hardware node (₦50,000). Please guide me through delivery.")}`).catch(() => Alert.alert("WhatsApp not found", "Please install WhatsApp to complete your node request."));
+  };
 
   return (
     <View style={styles.container}>
@@ -57,10 +67,10 @@ const RequestDeviceScreen = ({ navigation }: any) => {
         resizeMode="cover"
       />
 
-      {/* 2. Floating Top Header (Stays in place) */}
+      {/* 2. Floating Top Header */}
       <SafeAreaView style={styles.floatingHeader}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color="#1E293B" />
+          <MaterialCommunityIcons name="arrow-left" size={22} color={theme.textPrimary} />
         </TouchableOpacity>
       </SafeAreaView>
 
@@ -70,13 +80,11 @@ const RequestDeviceScreen = ({ navigation }: any) => {
         contentContainerStyle={{ flexGrow: 1 }}
         bounces={false}
       >
-        {/* Transparent Placeholder to reveal the image underneath */}
         <View style={{ height: HEADER_HEIGHT }} />
 
-        {/* The sliding white/dark card */}
         <View style={styles.sheetContent}>
           
-          {/* Premium Pricing & Availability Hero Card (Overlaps the image slightly) */}
+          {/* Premium Pricing & Availability Hero Card */}
           <LinearGradient 
             colors={isDarkMode ? ["#064E3B", "#022C22"] : ["#00C48A", "#047857"]} 
             style={styles.premiumHeroCard}
@@ -99,53 +107,62 @@ const RequestDeviceScreen = ({ navigation }: any) => {
             <Text style={styles.heroTitle}>Power your peace of mind.</Text>
           </View>
 
-          {/* Your Devices Section (Modern Horizontal Scroll) */}
+          {/* Your Nodes Section (Grouped List Style) */}
           <View style={styles.devicesHeaderRow}>
-            <Text style={styles.sectionTravelHeader}>Your Nodes</Text>
+            <Text style={styles.sectionTravelHeader}>Your Installed Nodes</Text>
             <View style={styles.onlinePill}>
               <View style={styles.onlineDot} />
               <Text style={styles.onlinePillText}>2 online</Text>
             </View>
           </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.deviceScroll} contentContainerStyle={styles.deviceScrollContent}>
-            {myDevices.map((device) => (
-              <View key={device.id} style={styles.modernDeviceCard}>
-                <View style={styles.deviceCardTop}>
-                  <View style={styles.deviceIconWrapper}>
-                    <Text style={styles.deviceEmoji}>{device.emoji}</Text>
-                  </View>
-                  <View style={[styles.statusDot, { backgroundColor: device.color }]} />
+          <View style={styles.listContainer}>
+            {myNodes.map((node, index) => (
+              <View 
+                key={node.id} 
+                style={[
+                  styles.listRow, 
+                  index === myNodes.length - 1 && { borderBottomWidth: 0 }
+                ]}
+              >
+                <View style={[styles.listIconBox, { backgroundColor: node.isOnline ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2") }]}>
+                  <MaterialCommunityIcons name={node.isOnline ? "lightning-bolt" : "power-plug-off"} size={18} color={node.isOnline ? "#00C48A" : "#EF4444"} />
                 </View>
-                <View style={styles.deviceCardBottom}>
-                  <Text style={styles.deviceName}>{device.name}</Text>
-                  <View style={[styles.deviceStatusPill, { backgroundColor: `${device.color}15` }]}>
-                    <Text style={[styles.deviceStatusText, { color: device.color }]}>
-                      {device.voltage ? `${device.voltage} • ` : ""}{device.status}
-                    </Text>
-                  </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.listRowTitle}>{node.name}</Text>
+                  <Text style={styles.listRowSubtitle}>
+                    {node.voltage ? `${node.voltage} • ` : ""}{node.status}
+                  </Text>
                 </View>
+                <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textSecondary} />
               </View>
             ))}
-          </ScrollView>
+          </View>
 
-          {/* What You Get Section */}
-          <Text style={styles.sectionTravelHeader}>Why get a node?</Text>
-          <View style={styles.featuresContainer}>
+          {/* Why Get a Node (Grouped Features List Style) */}
+          <Text style={styles.sectionTravelHeader}>Hardware Capabilities</Text>
+          <View style={styles.listContainer}>
             {features.map((item, index) => (
-              <View key={index} style={styles.modernFeatureRow}>
-                <View style={[styles.featureIconBox, { backgroundColor: item.bg }]}>
-                  <MaterialCommunityIcons name={item.icon as any} size={24} color={item.iconColor} />
+              <View 
+                key={index} 
+                style={[
+                  styles.listRow, 
+                  index === features.length - 1 && { borderBottomWidth: 0 }
+                ]}
+              >
+                <View style={[styles.listIconBox, { backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC" }]}>
+                  <MaterialCommunityIcons name={item.icon as any} size={18} color="#00C48A" />
                 </View>
-                <View style={styles.featureTextContainer}>
-                  <Text style={styles.featureTitle}>{item.title}</Text>
-                  <Text style={styles.featureDesc}>{item.desc}</Text>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.listRowTitle}>{item.title}</Text>
+                  <Text style={styles.listRowSubtitle}>{item.desc}</Text>
                 </View>
               </View>
             ))}
           </View>
 
-          {/* Summary Badges Grid */}
+          {/* Summary Badges Chips */}
+          <Text style={styles.sectionTravelHeader}>Package Highlights</Text>
           <View style={styles.badgesContainer}>
             {badges.map((badgeText, index) => (
               <View key={index} style={styles.badgeChip}>
@@ -157,11 +174,11 @@ const RequestDeviceScreen = ({ navigation }: any) => {
         </View>
       </ScrollView>
 
-      {/* Sticky Bottom CTA (Travel Style) */}
+      {/* Sticky Bottom CTA */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.footerBtn}>
-          <Text style={styles.footerBtnText}>Request Node • ₦50,000</Text>
-          <MaterialCommunityIcons name="arrow-right" size={18} color="#FFF" style={{ marginLeft: 8 }} />
+        <TouchableOpacity activeOpacity={0.8} onPress={handleRequestNode} style={[styles.footerBtn, { backgroundColor: solidActionBg }]}>
+          <Text style={[styles.footerBtnText, { color: solidActionIcon }]}>Request Node • ₦50,000</Text>
+          <MaterialCommunityIcons name="arrow-right" size={18} color={solidActionIcon} style={{ marginLeft: 8 }} />
         </TouchableOpacity>
       </View>
     </View>
@@ -171,17 +188,15 @@ const RequestDeviceScreen = ({ navigation }: any) => {
 const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: isDarkMode ? "#0B0F0D" : "#1E293B", // Dark backdrop behind image
+    backgroundColor: isDarkMode ? "#0B0F0D" : "#1E293B",
   },
   
-  // Parallax Background Image
   bgImage: {
     ...StyleSheet.absoluteFillObject,
     width: "100%",
-    height: HEADER_HEIGHT + 60, // Extends below the curved cut
+    height: HEADER_HEIGHT + 60,
   },
   
-  // Floating Header
   floatingHeader: {
     position: "absolute",
     top: Platform.OS === 'android' ? StatusBar.currentHeight : 20,
@@ -192,12 +207,12 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     justifyContent: "space-between",
   },
   backButton: { 
-    width: 44, 
-    height: 44, 
-    borderRadius: 22, 
-    backgroundColor: "#FFFFFF", 
+    width: 42, 
+    height: 42, 
+    borderRadius: 21, 
+    backgroundColor: isDarkMode ? "rgba(18,26,22,0.85)" : "#FFFFFF", 
     borderWidth: 1, 
-    borderColor: "#E2E8F0", 
+    borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", 
     justifyContent: "center", 
     alignItems: "center",
     shadowColor: "#000",
@@ -207,79 +222,90 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     elevation: 5,
   },
   
-  // Sliding Bottom Sheet
   sheetContent: {
     backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF",
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
     paddingTop: 0, 
     paddingBottom: 40,
     minHeight: height - HEADER_HEIGHT + 40,
   },
 
-  // Premium Pricing Hero Card (Overlaps top of sheet)
   premiumHeroCard: {
     marginHorizontal: 20,
-    borderRadius: 32,
+    borderRadius: 28,
     padding: 24,
     marginBottom: 24,
-    marginTop: -50, // Pulls the card up to overlap the background image
+    marginTop: -50,
     overflow: "hidden",
     shadowColor: "#00C48A",
-    shadowOffset: { width: 0, height: 10 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
-    shadowRadius: 20,
+    shadowRadius: 16,
     elevation: 8,
   },
   premiumCardContent: { flexDirection: "row", alignItems: "center", position: "relative" },
   flagBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.2)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignSelf: "flex-start", marginBottom: 16 },
   flagEmoji: { fontSize: 12, marginRight: 6 },
   flagText: { color: "#FFF", fontSize: 11, fontFamily: "Sora_700Bold", letterSpacing: 0.5 },
-  pricingAmount: { fontSize: 36, fontFamily: "Sora_800ExtraBold", color: "#FFF", marginBottom: 8 },
+  pricingAmount: { fontSize: 34, fontFamily: "Sora_800ExtraBold", color: "#FFF", marginBottom: 8 },
   pricingDesc: { fontSize: 12, fontFamily: "Sora_500Medium", color: "rgba(255,255,255,0.85)", lineHeight: 18 },
   bgHeroIcon: { position: "absolute", right: -30, bottom: -40, transform: [{ rotate: "-20deg" }] },
 
-  heroSection: { paddingHorizontal: 24, marginBottom: 24 },
-  heroTitle: { fontSize: 32, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary, letterSpacing: -1, lineHeight: 40 },
+  heroSection: { paddingHorizontal: 24, marginBottom: 20 },
+  heroTitle: { fontSize: 26, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary, letterSpacing: -0.5, lineHeight: 34 },
 
-  // Your Devices Section
   devicesHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 24, marginBottom: 12 },
-  sectionTravelHeader: { fontSize: 20, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary, marginLeft: 24, marginBottom: 16 },
-  onlinePill: { flexDirection: "row", alignItems: "center", backgroundColor: "#ECFDF5", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: "#A7F3D0" },
-  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#00C48A", marginRight: 4 },
-  onlinePillText: { fontSize: 11, fontFamily: "Sora_700Bold", color: "#064E3B" },
+  sectionTravelHeader: { fontSize: 12, fontFamily: "Sora_700Bold", color: theme.textSecondary, marginLeft: 24, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1.5 },
+  onlinePill: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "#064E3B" : "#ECFDF5", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: isDarkMode ? "#047857" : "#A7F3D0" },
+  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#00C48A", marginRight: 6 },
+  onlinePillText: { fontSize: 11, fontFamily: "Sora_700Bold", color: isDarkMode ? "#A7F3D0" : "#064E3B" },
   
-  deviceScroll: { marginBottom: 32 },
-  deviceScrollContent: { paddingLeft: 24, paddingRight: 8 },
-  
-  // Modern Device Cards (Travel Style)
-  modernDeviceCard: { width: 140, backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", borderRadius: 24, padding: 16, marginRight: 16, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 10, elevation: 1, justifyContent: "space-between", minHeight: 150 },
-  deviceCardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  deviceIconWrapper: { width: 44, height: 44, borderRadius: 16, backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", justifyContent: "center", alignItems: "center" },
-  deviceEmoji: { fontSize: 22 },
-  statusDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: isDarkMode ? "#1A221E" : "#F8FAFC" },
-  deviceCardBottom: { marginTop: 16 },
-  deviceName: { fontSize: 16, fontFamily: "Sora_700Bold", color: theme.textPrimary, marginBottom: 8 },
-  deviceStatusPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, alignSelf: "flex-start" },
-  deviceStatusText: { fontSize: 10, fontFamily: "Sora_700Bold" },
+  // Profile List Group Containers
+  listContainer: {
+    marginHorizontal: 24,
+    backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: isDarkMode ? "#2D3B34" : "#F1F5F9",
+    overflow: "hidden",
+    marginBottom: 24,
+  },
+  listRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: isDarkMode ? "#2D3B34" : "#F1F5F9",
+  },
+  listIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  listRowTitle: {
+    fontSize: 14,
+    fontFamily: "Sora_700Bold",
+    color: theme.textPrimary,
+    marginBottom: 2,
+  },
+  listRowSubtitle: {
+    fontSize: 11,
+    fontFamily: "Sora_500Medium",
+    color: theme.textSecondary,
+    lineHeight: 16,
+  },
 
-  // What You Get (Features)
-  featuresContainer: { paddingHorizontal: 24, marginBottom: 16 },
-  modernFeatureRow: { flexDirection: "row", backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 24, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 8, elevation: 1 },
-  featureIconBox: { width: 48, height: 48, borderRadius: 16, justifyContent: "center", alignItems: "center", marginRight: 16 },
-  featureTextContainer: { flex: 1, justifyContent: "center" },
-  featureTitle: { fontSize: 14, fontFamily: "Sora_700Bold", color: theme.textPrimary, marginBottom: 4 },
-  featureDesc: { fontSize: 11, fontFamily: "Sora_500Medium", color: theme.textSecondary, lineHeight: 18 },
+  badgesContainer: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 24, gap: 8, marginBottom: 30 },
+  badgeChip: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#F1F5F9" },
+  badgeText: { fontSize: 11, fontFamily: "Sora_600SemiBold", color: theme.textPrimary },
 
-  // Summary Badges
-  badgesContainer: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 24, gap: 10, marginTop: 10 },
-  badgeChip: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  badgeText: { fontSize: 12, fontFamily: "Sora_600SemiBold", color: theme.textPrimary },
-
-  // Sticky Footer CTA
   footer: { paddingHorizontal: 20, paddingVertical: Platform.OS === "ios" ? 24 : 16, backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderTopWidth: 1, borderTopColor: isDarkMode ? "#1F2E27" : "#E2E8F0" },
-  footerBtn: { flexDirection: "row", backgroundColor: "#064E3B", borderRadius: 20, paddingVertical: 20, alignItems: "center", justifyContent: "center", shadowColor: "#064E3B", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15, elevation: 6 },
-  footerBtnText: { color: "#FFFFFF", fontSize: 15, fontFamily: "Sora_700Bold" },
+  footerBtn: { flexDirection: "row", borderRadius: 20, paddingVertical: 18, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 5 },
+  footerBtnText: { fontSize: 15, fontFamily: "Sora_700Bold" },
 });
 
 export default RequestDeviceScreen;

@@ -1,8 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { 
-  View, 
-  Text, 
-  StyleSheet, 
   StatusBar, 
   TouchableOpacity, 
   Platform, 
@@ -12,7 +9,8 @@ import {
   SafeAreaView,
   ActivityIndicator
 } from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { XStack, YStack, Text as TText } from "tamagui";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Linking from "expo-linking";
 import * as SMS from "expo-sms";
@@ -30,7 +28,6 @@ const SETTINGS_KEY = "strompulse_security_settings";
 
 const JourneyShareScreen = ({ navigation, route }: any) => {
   const { theme, isDarkMode } = useTheme();
-  const styles = getStyles(theme, isDarkMode);
 
   const [destination, setDestination] = useState("");
   const [eta, setEta] = useState("30m");
@@ -59,7 +56,7 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
         if (saved) {
           const parsed = JSON.parse(saved);
           setAllContacts(parsed);
-          setSelectedContacts(new Set(parsed.map((c: any) => c.id)));
+          // If active, keep previous selection, otherwise clear or default
         }
 
         const journeyStatus = await AsyncStorage.getItem(JOURNEY_KEY);
@@ -164,7 +161,7 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     return () => clearInterval(interval);
   }, [isActive, journeyEndTime]);
 
-  const etaOptions = ["15m", "30m", "1h", "2h"];
+  const etaOptions = ["15m", "30m", "1h", "2h", "2h+"];
 
   const getEtaMilliseconds = (etaStr: string) => {
     switch (etaStr) {
@@ -172,6 +169,7 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
       case "30m": return 30 * 60 * 1000;
       case "1h": return 60 * 60 * 1000;
       case "2h": return 120 * 60 * 1000;
+      case "2h+": return 120 * 60 * 1000; // or any value you prefer for "2h+"
       default: return 30 * 60 * 1000;
     }
   };
@@ -226,7 +224,6 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
       });
     }
 
-    // --- PUSH JOURNEY TO LIVE NOTIFICATIONS ---
     try {
       const session = await AuthService.getCurrentSession();
       const currentUser = session?.user;
@@ -248,7 +245,6 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     navigation.navigate("Safety", { isJourneyActive: true, timestamp: Date.now() });
   };
 
-  // Option 1: Delay Message
   const notifyEtaExpired = async () => {
     const recipients = allContacts.filter(c => selectedContacts.has(c.id));
     const phoneNumbers = recipients.map(c => c.phone).join(Platform.OS === "ios" ? "," : ";");
@@ -275,7 +271,6 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     }
   };
 
-  // Option 2: Safety / Arrived Safely Message after expiration
   const notifySafetyAfterExpiration = async () => {
     const recipients = allContacts.filter(c => selectedContacts.has(c.id));
     const phoneNumbers = recipients.map(c => c.phone).join(Platform.OS === "ios" ? "," : ";");
@@ -297,7 +292,6 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
       Linking.openURL(waUrl).catch(() => {});
     }
 
-    // Clear active status and head back
     await AsyncStorage.removeItem(JOURNEY_KEY);
     await AsyncStorage.removeItem(JOURNEY_END_TIME_KEY);
     navigation.navigate("Safety", { isJourneyActive: false, timestamp: Date.now() });
@@ -341,26 +335,25 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
   const activeRecipients = allContacts.filter(c => selectedContacts.has(c.id));
 
   return (
-    <View style={styles.container}>
+    <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
 
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} activeOpacity={0.7} onPress={() => navigation.goBack()}>
-            <MaterialCommunityIcons name="chevron-left" size={28} color={theme.textPrimary} />
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* --- MINIMALIST HEADER --- */}
+        <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={16} position="relative">
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: "absolute", left: 24, padding: 8, zIndex: 10 }}>
+            <Feather name="arrow-left" size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>Journey Share</Text>
-            <Text style={styles.headerSubtitle}>LIVE LOCATION WITH YOUR CONTACTS</Text>
-          </View>
-        </View>
+          <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>Journey Share</TText>
+        </XStack>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}>
           
-          <View style={styles.mapGraphicCard}>
+          {/* --- MAP CARD --- */}
+          <YStack height={220} backgroundColor={isDarkMode ? "#121A16" : "#E2E8F0"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={24} overflow="hidden" position="relative">
             {currentCoords && mapRegion ? (
               <MapView 
-                style={StyleSheet.absoluteFillObject}
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
                 region={mapRegion}
                 showsUserLocation={true} 
                 showsMyLocationButton={false}
@@ -368,201 +361,186 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                 pitchEnabled={false}
               >
                 <Marker coordinate={{ latitude: currentCoords.lat, longitude: currentCoords.lng }}>
-                  <View style={styles.mapMarkerContainer}>
-                    <Text style={styles.mapMarkerText}>{currentLocation.split(',')[0]}</Text>
-                    <View style={styles.mapMarkerPulse}>
-                      <View style={styles.mapMarkerCore} />
-                    </View>
-                  </View>
+                  <YStack alignItems="center" justifyContent="center" zIndex={10}>
+                    <TText fontSize={10} fontFamily="Chirp-Bold" color={isDarkMode ? "#F8FAFC" : "#1E293B"} marginBottom={6} backgroundColor={isDarkMode ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.9)"} paddingHorizontal={10} paddingVertical={4} borderRadius={10} overflow="hidden">
+                      {currentLocation.split(',')[0]}
+                    </TText>
+                    <YStack width={30} height={30} borderRadius={15} backgroundColor="rgba(0,196,138,0.3)" justifyContent="center" alignItems="center">
+                      <YStack width={14} height={14} borderRadius={7} backgroundColor="#00C48A" borderWidth={2} borderColor="#FFFFFF" />
+                    </YStack>
+                  </YStack>
                 </Marker>
               </MapView>
             ) : (
-              <View style={styles.mapGridPattern}>
+              <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center">
                 <ActivityIndicator size="small" color="#00C48A" />
-                <Text style={{ marginTop: 8, fontSize: 10, color: theme.textSecondary }}>Fetching Exact GPS...</Text>
-              </View>
+                <TText marginTop={8} fontSize={10} fontFamily="Chirp-Medium" color={theme.textSecondary}>Fetching Exact GPS...</TText>
+              </YStack>
             )}
-          </View>
+          </YStack>
 
           {!isActive ? (
             <>
-              <Text style={styles.sectionTitle}>WHERE ARE YOU GOING?</Text>
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Osogbo, Bodija..."
-                  placeholderTextColor={isDarkMode ? "#64748B" : "#94A3B8"}
-                  value={destination}
-                  onChangeText={setDestination}
-                />
-                <MaterialCommunityIcons name="menu-down" size={24} color={isDarkMode ? "#94A3B8" : "#64748B"} />
-              </View>
+              {/* --- CLASSIC LIST GROUP: JOURNEY DETAILS --- */}
+              <TText fontFamily="Chirp-Bold" fontSize={12} color={theme.textSecondary} marginLeft={4} marginBottom={12}>JOURNEY DETAILS</TText>
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={32}>
+                
+                {/* Destination */}
+                <XStack padding={18} alignItems="center" borderBottomWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                  <Feather name="map-pin" size={20} color={theme.textSecondary} />
+                  <TextInput
+                    style={{ flex: 1, marginLeft: 16, fontSize: 15, fontFamily: "Chirp-Medium", color: theme.textPrimary }}
+                    placeholder="Where to? (e.g. Osogbo, Bodija)"
+                    placeholderTextColor={isDarkMode ? "#64748B" : "#94A3B8"}
+                    value={destination}
+                    onChangeText={setDestination}
+                  />
+                </XStack>
 
-              <Text style={styles.sectionTitle}>EXPECTED ARRIVAL TIME</Text>
-              <View style={styles.etaRow}>
-                {etaOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={[styles.etaPill, eta === option && styles.etaPillActive]}
-                    onPress={() => setEta(option)}
-                  >
-                    <Text style={[styles.etaText, eta === option && styles.etaTextActive]}>{option}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                {/* ETA Options */}
+                <YStack padding={18}>
+                  <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} marginBottom={12}>Expected Arrival Time</TText>
+                  <XStack justifyContent="space-between">
+                    {etaOptions.map((option) => {
+                      const isSelected = eta === option;
+                      return (
+                        <TouchableOpacity key={option} onPress={() => setEta(option)} style={{ flex: 1, marginHorizontal: 4 }}>
+                          <YStack 
+                            backgroundColor={isSelected ? (isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5") : (isDarkMode ? "#1A221E" : "#F8FAFC")}
+                            borderWidth={1}
+                            borderColor={isSelected ? "#00C48A" : "transparent"}
+                            borderRadius={12}
+                            paddingVertical={12}
+                            alignItems="center"
+                          >
+                            <TText fontSize={13} fontFamily={isSelected ? "Chirp-Bold" : "Chirp-Medium"} color={isSelected ? "#00C48A" : theme.textPrimary}>
+                              {option}
+                            </TText>
+                          </YStack>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </XStack>
+                </YStack>
+              </YStack>
 
-              <Text style={styles.sectionTitle}>SHARING WITH</Text>
-              <View style={styles.sharingWithContainer}>
-                {activeRecipients.length > 0 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {allContacts.map((contact) => (
-                      <TouchableOpacity 
-                        key={contact.id}
-                        onPress={() => toggleContactSelection(contact.id)}
-                        style={[styles.sharingAvatarItem, !selectedContacts.has(contact.id) && { opacity: 0.4 }]}
-                      >
-                        <View style={[styles.avatarCircle, { backgroundColor: isDarkMode ? contact.bgDark : contact.bg }]}>
-                          <Text style={[styles.avatarText, { color: contact.color }]}>{contact.initial}</Text>
-                        </View>
-                        <Text style={styles.avatarNameText} numberOfLines={1}>{contact.name.split(' ')[0]}</Text>
+              {/* --- CLASSIC LIST GROUP: CONTACTS SELECTOR --- */}
+              <TText fontFamily="Chirp-Bold" fontSize={12} color={theme.textSecondary} marginLeft={4} marginBottom={12}>SHARING WITH</TText>
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={32}>
+                {allContacts.length > 0 ? (
+                  allContacts.map((contact, index) => {
+                    const isSelected = selectedContacts.has(contact.id);
+                    return (
+                      <TouchableOpacity key={contact.id} activeOpacity={0.7} onPress={() => toggleContactSelection(contact.id)}>
+                        <XStack padding={16} alignItems="center" borderBottomWidth={index === allContacts.length - 1 ? 0 : 1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                          <YStack width={40} height={40} borderRadius={20} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginRight={16}>
+                            <TText fontSize={16} fontFamily="Chirp-Heavy" color={contact.color}>{contact.initial}</TText>
+                          </YStack>
+                          <YStack flex={1}>
+                            <TText fontSize={15} fontFamily="Chirp-Medium" color={theme.textPrimary}>{contact.name}</TText>
+                            <TText fontSize={12} fontFamily="Chirp-Regular" color={theme.textSecondary} marginTop={2}>{contact.phone}</TText>
+                          </YStack>
+                          {isSelected ? (
+                            <Feather name="check-circle" size={22} color="#00C48A" />
+                          ) : (
+                            <Feather name="circle" size={22} color={isDarkMode ? "#2D3B34" : "#E2E8F0"} />
+                          )}
+                        </XStack>
                       </TouchableOpacity>
-                    ))}
-                  </ScrollView>
+                    );
+                  })
                 ) : (
-                  <Text style={styles.emptyText}>Tap contacts to select who to share with.</Text>
+                  <YStack padding={24} alignItems="center">
+                    <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} textAlign="center">
+                      No contacts added. Go to Emergency Contacts in Safety to add your network.
+                    </TText>
+                  </YStack>
                 )}
-              </View>
+              </YStack>
             </>
           ) : (
-            <View style={{ marginTop: 10 }}>
+            <YStack marginTop={10}>
               
               {/* --- COUNTDOWN TIMER UI --- */}
               {!isEtaExpired && (
-                <View style={styles.countdownCard}>
-                  <Text style={styles.countdownLabel}>ESTIMATED TIME OF ARRIVAL</Text>
-                  <Text style={styles.countdownTime}>{timeLeftString}</Text>
-                </View>
+                <YStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "rgba(0,196,138,0.2)" : "#D1FAE5"} paddingVertical={24} alignItems="center" marginBottom={24}>
+                  <TText fontSize={10} fontFamily="Chirp-Bold" color="#00C48A" letterSpacing={1.5} marginBottom={8}>ESTIMATED TIME OF ARRIVAL</TText>
+                  <TText fontSize={42} fontFamily="Chirp-Heavy" color={theme.textPrimary} fontVariant={["tabular-nums"]}>{timeLeftString}</TText>
+                </YStack>
               )}
 
               {/* --- DUAL OPTIONS WHEN ETA EXPIRED --- */}
               {isEtaExpired && (
-                <View style={styles.etaExpiredCard}>
-                  <View style={styles.etaExpiredHeader}>
-                    <MaterialCommunityIcons name="alert" size={20} color="#EF4444" />
-                    <Text style={styles.etaExpiredTitle}>ETA Elapsed</Text>
-                  </View>
-                  <Text style={styles.etaExpiredDesc}>Your expected arrival time has passed. Choose an update to send to your contacts:</Text>
+                <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.05)" : "#FEF2F2"} borderRadius={24} padding={20} marginBottom={24} borderWidth={1} borderColor={isDarkMode ? "#7F1D1D" : "#FECACA"}>
+                  <XStack alignItems="center" marginBottom={8}>
+                    <Feather name="alert-circle" size={20} color="#EF4444" />
+                    <TText fontSize={14} fontFamily="Chirp-Bold" color="#EF4444" marginLeft={6}>ETA Elapsed</TText>
+                  </XStack>
+                  <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textPrimary} marginBottom={20} lineHeight={20}>
+                    Your expected arrival time has passed. Choose an update to send to your contacts:
+                  </TText>
                   
-                  {/* Option 1: Delay / Check on me */}
-                  <TouchableOpacity style={styles.etaNotifyBtn} onPress={notifyEtaExpired}>
-                    <Text style={styles.etaNotifyBtnText}>Notify Contacts of Delay</Text>
+                  <TouchableOpacity onPress={notifyEtaExpired}>
+                    <YStack backgroundColor="#EF4444" borderRadius={16} paddingVertical={16} alignItems="center" marginBottom={12}>
+                      <TText color="#FFF" fontSize={13} fontFamily="Chirp-Bold">Notify Contacts of Delay</TText>
+                    </YStack>
                   </TouchableOpacity>
 
-                  {/* Option 2: I am safe / Arrived safely */}
-                  <TouchableOpacity style={styles.etaSafeBtn} onPress={notifySafetyAfterExpiration}>
-                    <Text style={styles.etaSafeBtnText}>I'm Safe / Arrived Safely</Text>
+                  <TouchableOpacity onPress={notifySafetyAfterExpiration}>
+                    <YStack backgroundColor="#00C48A" borderRadius={16} paddingVertical={16} alignItems="center">
+                      <TText color="#FFF" fontSize={13} fontFamily="Chirp-Bold">I'm Safe / Arrived Safely</TText>
+                    </YStack>
                   </TouchableOpacity>
-                </View>
+                </YStack>
               )}
 
-              <Text style={styles.sectionTitle}>ACTIVELY TRACKING YOU</Text>
-              {activeRecipients.map((contact) => (
-                <View key={contact.id} style={styles.sentCard}>
-                  <View style={styles.sentLeft}>
-                    <View style={[styles.avatarCircle, { width: 36, height: 36, borderRadius: 18, backgroundColor: isDarkMode ? contact.bgDark : contact.bg }]}>
-                      <Text style={[styles.avatarText, { fontSize: 14, color: contact.color }]}>{contact.initial}</Text>
-                    </View>
-                    <Text style={styles.sentName}>{contact.name}</Text>
-                  </View>
-                  <View style={styles.sentPill}>
-                    <View style={styles.smallGreenDot} />
-                    <Text style={styles.sentPillText}>Live Tracker Sent</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+              <TText fontFamily="Chirp-Bold" fontSize={12} color={theme.textSecondary} marginLeft={4} marginBottom={12}>ACTIVELY TRACKING YOU</TText>
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={32}>
+                {activeRecipients.map((contact, index) => (
+                  <XStack 
+                    key={contact.id} 
+                    padding={16} 
+                    alignItems="center" 
+                    justifyContent="space-between" 
+                    borderBottomWidth={index === activeRecipients.length - 1 ? 0 : 1} 
+                    borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
+                  >
+                    <XStack alignItems="center">
+                      <YStack width={40} height={40} borderRadius={20} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginRight={16}>
+                        <TText fontFamily="Chirp-Bold" fontSize={16} color={contact.color}>{contact.initial}</TText>
+                      </YStack>
+                      <YStack>
+                        <TText fontFamily="Chirp-Medium" fontSize={15} color={theme.textPrimary}>{contact.name}</TText>
+                        <TText fontFamily="Chirp-Regular" fontSize={13} color={theme.textSecondary} marginTop={2}>{contact.phone}</TText>
+                      </YStack>
+                    </XStack>
+                    <Feather name="navigation" size={20} color="#00C48A" />
+                  </XStack>
+                ))}
+              </YStack>
+
+            </YStack>
           )}
         </ScrollView>
 
-        <View style={styles.footer}>
+        <YStack paddingHorizontal={24} paddingBottom={Platform.OS === "ios" ? 34 : 24} paddingTop={16}>
           {isActive ? (
-            <TouchableOpacity style={styles.stopButton} activeOpacity={0.8} onPress={stopSharing}>
-              <Text style={styles.stopButtonText}>Stop Journey Share</Text>
+            <TouchableOpacity activeOpacity={0.8} onPress={stopSharing}>
+              <YStack backgroundColor="#EF4444" borderRadius={20} paddingVertical={18} alignItems="center" justifyContent="center">
+                <TText fontSize={16} fontFamily="Chirp-Bold" color="#FFFFFF">Stop Journey Share</TText>
+              </YStack>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.startButton} activeOpacity={0.8} onPress={startSharing}>
-              <Text style={styles.startButtonText}>Start Journey Share</Text>
+            <TouchableOpacity activeOpacity={0.8} onPress={startSharing}>
+              <YStack backgroundColor="#00C48A" borderRadius={20} paddingVertical={18} alignItems="center" justifyContent="center">
+                <TText fontSize={16} fontFamily="Chirp-Bold" color="#FFFFFF">Start Journey Share</TText>
+              </YStack>
             </TouchableOpacity>
           )}
-        </View>
+        </YStack>
       </SafeAreaView>
-    </View>
+    </YStack>
   );
 };
-
-const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F4F6F8" },
-  safeArea: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, paddingTop: Platform.OS === "ios" ? 20 : 10, marginBottom: 24 },
-  backButton: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", justifyContent: "center", alignItems: "center", backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", marginRight: 16 },
-  headerTextContainer: { flex: 1, justifyContent: "center" },
-  headerTitle: { fontSize: 20, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary },
-  headerSubtitle: { fontSize: 10, fontFamily: "Sora_700Bold", color: theme.textSecondary, letterSpacing: 1.5, marginTop: 2, textTransform: "uppercase" },
-  
-  scrollContent: { paddingHorizontal: 24, paddingBottom: 40 },
-  
-  mapGraphicCard: { height: 220, backgroundColor: isDarkMode ? "#121A16" : "#E2E8F0", borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#CBD5E1", marginBottom: 24, overflow: "hidden" },
-  mapGridPattern: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F8FAFC", justifyContent: "center", alignItems: "center" },
-  mapMarkerContainer: { alignItems: "center", justifyContent: "center", zIndex: 10 },
-  mapMarkerText: { fontSize: 10, fontFamily: "Sora_700Bold", color: isDarkMode ? "#F8FAFC" : "#1E293B", marginBottom: 6, backgroundColor: isDarkMode ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.9)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: "hidden" },
-  mapMarkerPulse: { width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(0,196,138,0.3)", justifyContent: "center", alignItems: "center" },
-  mapMarkerCore: { width: 14, height: 14, borderRadius: 7, backgroundColor: "#00C48A", borderWidth: 2, borderColor: "#FFFFFF" },
-
-  sectionTitle: { fontSize: 11, fontFamily: "Sora_700Bold", color: theme.textSecondary, letterSpacing: 1.5, marginBottom: 12, marginLeft: 4 },
-  
-  inputContainer: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", paddingHorizontal: 16, height: 56, marginBottom: 24 },
-  input: { flex: 1, fontSize: 14, fontFamily: "Sora_500Medium", color: theme.textPrimary },
-  
-  etaRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 24 },
-  etaPill: { flex: 1, backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", borderRadius: 16, paddingVertical: 14, alignItems: "center", marginHorizontal: 4 },
-  etaPillActive: { backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", borderColor: "#00C48A" },
-  etaText: { fontSize: 13, fontFamily: "Sora_600SemiBold", color: theme.textSecondary },
-  etaTextActive: { color: "#00C48A", fontFamily: "Sora_700Bold" },
-  
-  sharingWithContainer: { flexDirection: "row", marginBottom: 20, paddingLeft: 4 },
-  sharingAvatarItem: { alignItems: "center", marginRight: 16 },
-  avatarCircle: { width: 48, height: 48, borderRadius: 24, justifyContent: "center", alignItems: "center", marginBottom: 6 },
-  avatarText: { fontSize: 20, fontFamily: "Sora_700Bold" },
-  avatarNameText: { fontSize: 11, fontFamily: "Sora_500Medium", color: theme.textSecondary, width: 50, textAlign: "center" },
-  emptyText: { fontSize: 12, fontFamily: "Sora_500Medium", color: theme.textSecondary, paddingLeft: 4, paddingBottom: 10 },
-
-  countdownCard: { backgroundColor: isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5", borderRadius: 16, borderWidth: 1, borderColor: isDarkMode ? "rgba(0,196,138,0.2)" : "#D1FAE5", paddingVertical: 24, alignItems: "center", marginBottom: 24 },
-  countdownLabel: { fontSize: 10, fontFamily: "Sora_700Bold", color: "#00C48A", letterSpacing: 1.5, marginBottom: 8 },
-  countdownTime: { fontSize: 36, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary, fontVariant: ["tabular-nums"] },
-
-  sentCard: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" },
-  sentLeft: { flexDirection: "row", alignItems: "center" },
-  sentName: { fontSize: 14, fontFamily: "Sora_700Bold", color: theme.textPrimary, marginLeft: 12 },
-  sentPill: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  smallGreenDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#00C48A", marginRight: 6 },
-  sentPillText: { color: "#00C48A", fontSize: 10, fontFamily: "Sora_700Bold" },
-
-  etaExpiredCard: { backgroundColor: isDarkMode ? "rgba(239,68,68,0.1)" : "#FEF2F2", borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDarkMode ? "#7F1D1D" : "#FECACA" },
-  etaExpiredHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
-  etaExpiredTitle: { fontSize: 14, fontFamily: "Sora_700Bold", color: "#EF4444", marginLeft: 6 },
-  etaExpiredDesc: { fontSize: 12, fontFamily: "Sora_500Medium", color: theme.textPrimary, marginBottom: 16, lineHeight: 18 },
-  
-  etaNotifyBtn: { backgroundColor: "#EF4444", borderRadius: 12, paddingVertical: 12, alignItems: "center", marginBottom: 10 },
-  etaNotifyBtnText: { color: "#FFF", fontSize: 13, fontFamily: "Sora_700Bold" },
-
-  etaSafeBtn: { backgroundColor: "#00C48A", borderRadius: 12, paddingVertical: 12, alignItems: "center" },
-  etaSafeBtnText: { color: "#FFF", fontSize: 13, fontFamily: "Sora_700Bold" },
-
-  footer: { paddingHorizontal: 24, paddingBottom: Platform.OS === "ios" ? 34 : 24, paddingTop: 16 },
-  startButton: { backgroundColor: "#00C48A", borderRadius: 16, paddingVertical: 18, alignItems: "center", justifyContent: "center" },
-  startButtonText: { fontSize: 16, fontFamily: "Sora_700Bold", color: "#FFFFFF" },
-  stopButton: { backgroundColor: "#EF4444", borderRadius: 16, paddingVertical: 18, alignItems: "center", justifyContent: "center" },
-  stopButtonText: { fontSize: 16, fontFamily: "Sora_700Bold", color: "#FFFFFF" },
-});
 
 export default JourneyShareScreen;

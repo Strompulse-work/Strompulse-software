@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, Platform, StyleSheet } from "react-native";
+import { Platform } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { XStack, YStack, Text as TText } from "tamagui";
+import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
@@ -11,8 +12,8 @@ import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
 import AuthNavigator from "./AuthNavigator";
 
 // --- TAB SCREENS ---
-import ElectricityScreen from "../screens/ElectricityScreen"; 
 import SafetyScreen from "../screens/SafetyScreen";
+import ElectricityScreen from "../screens/ElectricityScreen"; 
 import PrivateDashboardScreen from "../screens/PrivateDashboardScreen"; 
 import NotificationsScreen from "../screens/NotificationsScreen"; 
 import ProfileScreen from "../screens/ProfileScreen";
@@ -33,69 +34,78 @@ const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
 /**
- * Custom Icon Renderer with badge support
+ * Standard Tab Icon Renderer with Solid Fill for Active State
  */
 const TabIcon = ({ 
   focused, 
-  activeIcon, 
-  inactiveIcon, 
+  iconOutline,
+  iconFilled, 
   isDarkMode,
   label,
   badgeCount
 }: { 
   focused: boolean, 
-  activeIcon: any, 
-  inactiveIcon: any,
+  iconOutline: any,
+  iconFilled: any, 
   isDarkMode: boolean,
   label: string,
   badgeCount?: number
 }) => {
+  // Active state uses Strompulse Green
   const color = focused 
     ? "#00C48A" 
-    : (isDarkMode ? "#8E92A4" : "#94A3B8");
+    : (isDarkMode ? "#64748B" : "#94A3B8");
 
   const formattedBadge = badgeCount && badgeCount > 99 ? "99+" : `${badgeCount}`;
 
   return (
-    <View
-      style={[
-        styles.iconContainer,
-        focused && {
-          backgroundColor: isDarkMode ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 196, 138, 0.1)",
-          paddingHorizontal: 6, 
-        }
-      ]}
-    >
-      <View style={styles.iconWrapper}>
-        <MaterialCommunityIcons
-          name={focused ? activeIcon : inactiveIcon}
+    <YStack alignItems="center" justifyContent="center" width="100%" paddingVertical={4}>
+      <YStack position="relative" alignItems="center" justifyContent="center">
+        <Ionicons
+          name={focused ? iconFilled : iconOutline}
           size={22} 
           color={color}
         />
         {badgeCount !== undefined && badgeCount > 0 && (
-          <View style={styles.tabBadge}>
-            <Text style={styles.tabBadgeText}>{formattedBadge}</Text>
-          </View>
+          <YStack
+            position="absolute"
+            top={-4}
+            right={-8}
+            minWidth={16}
+            height={16}
+            borderRadius={8}
+            backgroundColor="#EF4444"
+            justifyContent="center"
+            alignItems="center"
+            paddingHorizontal={3}
+            borderWidth={1.5}
+            borderColor={isDarkMode ? "#1A221E" : "#FFFFFF"}
+          >
+            <TText color="#FFFFFF" fontSize={8} fontFamily="Chirp-Heavy">
+              {formattedBadge}
+            </TText>
+          </YStack>
         )}
-      </View>
-      <Text 
-        style={[styles.tabLabel, { color }]} 
-        numberOfLines={1} 
-        adjustsFontSizeToFit
+      </YStack>
+      <TText 
+        fontFamily={focused ? "Chirp-Heavy" : "Chirp-Bold"} 
+        fontSize={9} 
+        color={color} 
+        marginTop={4}
+        letterSpacing={-0.3}
       >
         {label}
-      </Text>
-    </View>
+      </TText>
+    </YStack>
   );
 };
 
-// Floating Bottom Tab Navigator
+// Floating Pill Bottom Tab Navigator
 const MainTabs = () => {
   const { isDarkMode } = useTheme();
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const { devices } = useAllGridDevices();
 
-  // Compute unread count in real-time across database alerts & power state
   useEffect(() => {
     let isMounted = true;
 
@@ -106,7 +116,6 @@ const MainTabs = () => {
         const readSet = new Set(readData ? JSON.parse(readData) : []);
         const dismissedSet = new Set(dismissedData ? JSON.parse(dismissedData) : []);
 
-        // Fetch Supabase Security/SOS alerts
         const { data: alerts } = await supabase
           .from("alerts")
           .select("id")
@@ -120,7 +129,6 @@ const MainTabs = () => {
           }
         });
 
-        // Compute power alerts count
         const now = Date.now();
         (devices || []).forEach((device) => {
           if (device.history) {
@@ -160,27 +168,26 @@ const MainTabs = () => {
 
   return (
     <Tab.Navigator
-      initialRouteName="Electricity" 
+      initialRouteName="Safety" 
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false, 
         tabBarStyle: {
           position: "absolute",
-          bottom: Platform.OS === "ios" ? 34 : 24,
+          bottom: Platform.OS === "ios" ? 36 : 24,
           left: 20,
           right: 20,
-          backgroundColor: isDarkMode ? "rgba(26, 26, 26, 0.95)" : "rgba(255, 255, 255, 0.95)", 
-          borderRadius: 40,
-          height: 70, 
+          backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", 
+          borderRadius: 36,
+          height: 72, 
           borderWidth: 1,
-          borderColor: isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-          borderTopWidth: 1, 
-          elevation: 10,
+          borderColor: isDarkMode ? "#2D3B34" : "#F1F5F9",
+          elevation: 15,
           shadowColor: "#000",
-          shadowOffset: { width: 0, height: 10 },
-          shadowOpacity: isDarkMode ? 0.3 : 0.1,
-          shadowRadius: 20,
-          paddingHorizontal: 4, 
+          shadowOffset: { width: 0, height: 12 },
+          shadowOpacity: isDarkMode ? 0.4 : 0.08,
+          shadowRadius: 24,
+          paddingHorizontal: 6, 
           paddingBottom: 0, 
           paddingTop: 0,
         },
@@ -192,20 +199,20 @@ const MainTabs = () => {
       }}
     >
       <Tab.Screen
-        name="Electricity"
-        component={ElectricityScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} activeIcon="lightning-bolt" inactiveIcon="lightning-bolt-outline" isDarkMode={isDarkMode} label="Electricity" />
-          ),
-        }}
-      />
-      <Tab.Screen
         name="Safety"
         component={SafetyScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} activeIcon="shield" inactiveIcon="shield-outline" isDarkMode={isDarkMode} label="Safety" />
+            <TabIcon focused={focused} iconOutline="shield-checkmark-outline" iconFilled="shield-checkmark" isDarkMode={isDarkMode} label="Security" />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Electricity"
+        component={ElectricityScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon focused={focused} iconOutline="flash-outline" iconFilled="flash" isDarkMode={isDarkMode} label="Electricity" />
           ),
         }}
       />
@@ -214,7 +221,7 @@ const MainTabs = () => {
         component={PrivateDashboardScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} activeIcon="lock" inactiveIcon="lock-outline" isDarkMode={isDarkMode} label="Stromer" />
+            <TabIcon focused={focused} iconOutline="hardware-chip-outline" iconFilled="hardware-chip" isDarkMode={isDarkMode} label="Stromer" />
           ),
         }}
       />
@@ -223,7 +230,7 @@ const MainTabs = () => {
         component={NotificationsScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} activeIcon="bell" inactiveIcon="bell-outline" isDarkMode={isDarkMode} label="Notifications" badgeCount={unreadCount} />
+            <TabIcon focused={focused} iconOutline="notifications-outline" iconFilled="notifications" isDarkMode={isDarkMode} label="Notifications" badgeCount={unreadCount} />
           ),
         }}
       />
@@ -232,7 +239,7 @@ const MainTabs = () => {
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} activeIcon="account" inactiveIcon="account-outline" isDarkMode={isDarkMode} label="Profile" />
+            <TabIcon focused={focused} iconOutline="person-outline" iconFilled="person" isDarkMode={isDarkMode} label="Profile" />
           ),
         }}
       />
@@ -261,48 +268,5 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
     </Stack.Navigator>
   );
 };
-
-const styles = StyleSheet.create({
-  iconContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 2, 
-    borderRadius: 20,
-    width: "100%", 
-  },
-  iconWrapper: {
-    position: "relative",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabLabel: {
-    fontSize: 8, 
-    fontFamily: "Chirp-Bold", 
-    fontWeight: "600",
-    marginTop: 4,
-    letterSpacing: -0.3, 
-  },
-  tabBadge: {
-    position: "absolute",
-    top: -4,
-    right: -8,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#EF4444",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 3,
-    borderWidth: 1.5,
-    borderColor: "#FFFFFF",
-  },
-  tabBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 8,
-    fontFamily: "Chirp-Heavy",
-    fontWeight: "800",
-  },
-});
 
 export default RootNavigator;

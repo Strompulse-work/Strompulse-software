@@ -1,16 +1,14 @@
 import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   StatusBar,
   Platform,
   SafeAreaView,
-  ActivityIndicator
+  ActivityIndicator,
+  ScrollView,
+  TouchableOpacity
 } from "react-native";
-import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
+import { XStack, YStack, Text as TText } from "tamagui";
+import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 import { supabase } from "../config/supabase";
 import { useAllGridDevices, parseStromTimestamp, DEVICE_LOCATIONS } from "../hooks/useDeviceData";
@@ -40,7 +38,7 @@ const getDateGroup = (date: Date) => {
   return "Earlier";
 };
 
-const parseDbAlert = (dbAlert: any) => {
+const parseDbAlert = (dbAlert: any, isDarkMode: boolean) => {
   const type = dbAlert.type?.toLowerCase() || '';
   const title = dbAlert.title || 'System Notification';
   const message = dbAlert.message || '';
@@ -48,18 +46,22 @@ const parseDbAlert = (dbAlert: any) => {
 
   let category = 'security';
   let uiType = 'general';
-  let bg = '#FEE2E2'; 
-  let color = '#EF4444'; 
-  let icon = 'shield-alert-outline';
+  let bg = isDarkMode ? 'rgba(59,130,246,0.1)' : '#EFF6FF'; 
+  let color = '#2563EB'; 
+  let icon = 'bell';
 
   if (type.includes('emergency') || title.toLowerCase().includes('sos')) {
     category = 'security';
     uiType = 'sos';
-    bg = '#FEE2E2'; color = '#EF4444'; icon = 'alert-outline';
+    bg = isDarkMode ? 'rgba(239,68,68,0.1)' : '#FEE2E2'; 
+    color = '#EF4444'; 
+    icon = 'alert-circle';
   } else if (type.includes('journey') || message.toLowerCase().includes('journey')) {
     category = 'security';
     uiType = 'journey';
-    bg = '#D1FAE5'; color = '#10B981'; icon = 'map-marker-outline';
+    bg = isDarkMode ? 'rgba(0,196,138,0.1)' : '#ECFDF5'; 
+    color = '#00C48A'; 
+    icon = 'navigation';
   }
 
   return {
@@ -80,7 +82,6 @@ const parseDbAlert = (dbAlert: any) => {
 
 const NotificationsScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
-  const styles = getStyles(theme, isDarkMode);
 
   const [activeTab, setActiveTab] = useState<"All" | "Security" | "Power">("All");
   const [supabaseAlerts, setSupabaseAlerts] = useState<any[]>([]);
@@ -93,6 +94,10 @@ const NotificationsScreen = ({ navigation }: any) => {
 
   // 1. DYNAMIC GRID FEED
   const { devices, loading: devicesLoading } = useAllGridDevices();
+
+  // Dynamic Action Color for Active Segmented Tabs
+  const solidActionBg = isDarkMode ? "#FFFFFF" : "#000000";
+  const solidActionIcon = isDarkMode ? "#000000" : "#FFFFFF";
 
   // Load persistent user actions & captured outages
   useEffect(() => {
@@ -123,7 +128,7 @@ const NotificationsScreen = ({ navigation }: any) => {
           .limit(30);
 
         if (!error && data && isMounted) {
-          setSupabaseAlerts(data.map(parseDbAlert));
+          setSupabaseAlerts(data.map(alert => parseDbAlert(alert, isDarkMode)));
         }
         setLoading(false);
 
@@ -131,7 +136,7 @@ const NotificationsScreen = ({ navigation }: any) => {
           .channel('public:alerts')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, payload => {
             if (isMounted) {
-              setSupabaseAlerts(prev => [parseDbAlert(payload.new), ...prev]);
+              setSupabaseAlerts(prev => [parseDbAlert(payload.new, isDarkMode), ...prev]);
             }
           })
           .subscribe();
@@ -143,7 +148,7 @@ const NotificationsScreen = ({ navigation }: any) => {
         isMounted = false;
         if (alertSubscription) supabase.removeChannel(alertSubscription);
       };
-    }, [])
+    }, [isDarkMode])
   );
 
   // 3. CAPTURE & RECORD EXACT OUTAGES INTO PERSISTENT STORAGE
@@ -155,16 +160,13 @@ const NotificationsScreen = ({ navigation }: any) => {
       let hasChanges = false;
 
       devices.forEach(device => {
-        // Record exact historical drop-off times between sessions
         if (device.history) {
-          const rawKeys = Object.keys(device.history).sort(); // Oldest to newest
+          const rawKeys = Object.keys(device.history).sort();
 
           for (let i = 0; i < rawKeys.length - 1; i++) {
             const currentSessionStart = rawKeys[i];
-            const nextSessionRestored = rawKeys[i + 1];
             const historyNode = device.history[currentSessionStart];
 
-            // Resolve exact timestamp when the current session ended
             let exactOutageTime: Date | null = null;
             if (historyNode?.last_seen) {
               exactOutageTime = parseStromTimestamp(historyNode.last_seen);
@@ -190,7 +192,6 @@ const NotificationsScreen = ({ navigation }: any) => {
           }
         }
 
-        // Record live outage when heartbeat terminates (>60s)
         if (!device.isOnline && device.connectionState === 'offline') {
           const lastSeen = parseStromTimestamp(device.updated_at) || new Date();
           const liveOutageExactDate = new Date(lastSeen.getTime() + 60000);
@@ -208,7 +209,6 @@ const NotificationsScreen = ({ navigation }: any) => {
         }
       });
 
-      // Clear phantom live alerts if device has since resumed online status
       const validStored = stored.filter(item => {
         if (item.id.startsWith('outage-live-')) {
           const liveDev = devices.find(d => d.id === item.deviceId);
@@ -235,7 +235,6 @@ const NotificationsScreen = ({ navigation }: any) => {
     const alerts: any[] = [];
     const now = Date.now();
 
-    // A. Parse Restorations directly from Firebase history
     devices.forEach(device => {
       const meta = DEVICE_LOCATIONS[device.id] || { name: device.id, type: "area" };
 
@@ -256,15 +255,14 @@ const NotificationsScreen = ({ navigation }: any) => {
             dateGroup: getDateGroup(restoredDate),
             isUnread: isRecent,
             userColor: "#00C48A",
-            userBg: isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5",
-            icon: "lightbulb-on-outline",
+            userBg: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5",
+            icon: "zap",
             rawDate: restoredDate
           });
         });
       }
     });
 
-    // B. Inject Verified Outages with Danger Red Icons
     persistedOutages.forEach(outage => {
       const meta = DEVICE_LOCATIONS[outage.deviceId] || { name: outage.deviceId, type: "area" };
       const outageDate = new Date(outage.rawDate);
@@ -281,7 +279,7 @@ const NotificationsScreen = ({ navigation }: any) => {
         isUnread: isRecent,
         userColor: "#EF4444",
         userBg: isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2",
-        icon: "power-plug-off",
+        icon: "zap-off",
         rawDate: outageDate
       });
     });
@@ -323,7 +321,7 @@ const NotificationsScreen = ({ navigation }: any) => {
   const formatCount = (count: number) => (count > 99 ? "99+" : `${count}`);
 
   const renderSegmentedControl = () => (
-    <View style={styles.segmentedControlContainer}>
+    <XStack marginHorizontal={24} marginBottom={24} justifyContent="space-between" gap={8}>
       {(["All", "Security", "Power"] as const).map((tab) => {
         const isActive = activeTab === tab;
         const unreadCount = unreadCounts[tab];
@@ -332,144 +330,133 @@ const NotificationsScreen = ({ navigation }: any) => {
             key={tab}
             activeOpacity={0.8}
             onPress={() => setActiveTab(tab)}
-            style={[styles.segmentButton, isActive && styles.segmentButtonActive]}
+            style={{ flex: 1 }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Text style={[styles.segmentText, isActive && styles.segmentTextActive]}>
+            <XStack
+              paddingVertical={10}
+              alignItems="center"
+              justifyContent="center"
+              borderRadius={24}
+              borderWidth={1}
+              borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}
+              backgroundColor={isActive ? solidActionBg : "transparent"}
+            >
+              <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? solidActionIcon : (isDarkMode ? "#64748B" : "#94A3B8")}>
                 {tab}
-              </Text>
+              </TText>
               {unreadCount > 0 && (
-                <View style={styles.badgeCountContainer}>
-                  <Text style={styles.badgeCountText}>{formatCount(unreadCount)}</Text>
-                </View>
+                <YStack
+                  minWidth={16}
+                  height={16}
+                  borderRadius={8}
+                  backgroundColor="#EF4444"
+                  justifyContent="center"
+                  alignItems="center"
+                  paddingHorizontal={4}
+                  marginLeft={6}
+                >
+                  <TText color="#FFFFFF" fontSize={9} fontFamily="Chirp-Heavy">
+                    {formatCount(unreadCount)}
+                  </TText>
+                </YStack>
               )}
-            </View>
+            </XStack>
           </TouchableOpacity>
         );
       })}
-    </View>
+    </XStack>
   );
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={theme.background} />
+    <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} />
 
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={{top: 20, bottom: 20, left: 20, right: 20}}>
-            <Feather name="chevron-left" size={26} color={theme.textPrimary} />
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* --- MINIMALIST HEADER --- */}
+        <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={20} position="relative">
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()} 
+            style={{ position: "absolute", left: 24, padding: 8, zIndex: 10 }}
+          >
+            <Feather name="arrow-left" size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Notifications</Text>
-        </View>
+          <TText fontSize={18} fontFamily="Chirp-Heavy" color={theme.textPrimary}>Notifications</TText>
+        </XStack>
 
         {renderSegmentedControl()}
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}>
           {loading || devicesLoading ? (
-            <View style={{ alignItems: "center", marginTop: 60 }}>
-               <ActivityIndicator size="large" color="#00C48A" />
-               <Text style={{ marginTop: 12, fontFamily: "Chirp-Medium", color: theme.textSecondary }}>Loading notifications...</Text>
-            </View>
+            <YStack alignItems="center" marginTop={60}>
+               <ActivityIndicator size="small" color="#00C48A" />
+               <TText marginTop={12} fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary}>Loading notifications...</TText>
+            </YStack>
           ) : Object.keys(groupedNotifs).length === 0 ? (
-            <View style={{ alignItems: "center", marginTop: 60 }}>
-              <MaterialCommunityIcons name="bell-off-outline" size={48} color={theme.textSecondary} style={{ opacity: 0.5, marginBottom: 12 }} />
-              <Text style={{ fontFamily: "Chirp-Medium", color: theme.textSecondary }}>No notifications yet.</Text>
-            </View>
+            <YStack alignItems="center" marginTop={60}>
+              <Feather name="bell-off" size={32} color={theme.textSecondary} style={{ opacity: 0.5, marginBottom: 12 }} />
+              <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textSecondary}>No notifications yet.</TText>
+            </YStack>
           ) : (
             ["Today", "Yesterday", "Earlier"].filter(key => groupedNotifs[key]).map((groupKey) => (
-              <View key={groupKey} style={styles.groupContainer}>
-                <Text style={styles.dateGroupHeader}>{groupKey}</Text>
+              <YStack key={groupKey} marginBottom={24}>
+                <TText fontSize={11} fontFamily="Chirp-Bold" letterSpacing={1.5} color={theme.textSecondary} marginBottom={12} marginLeft={4}>{groupKey.toUpperCase()}</TText>
 
-               {groupedNotifs[groupKey].map((item: any) => (
-                  <TouchableOpacity 
-                    key={item.id} 
-                    activeOpacity={0.8}
-                    style={styles.notificationCard}
-                    onPress={() => {
-                      const newRead = new Set(readIds).add(item.id);
-                      setReadIds(newRead);
-                      AsyncStorage.setItem('strompulse_read_alerts', JSON.stringify([...newRead]));
-                    }}
-                  >
-                    <View style={[styles.iconBox, { backgroundColor: item.userBg }]}>
-                      <MaterialCommunityIcons name={item.icon as any} size={22} color={item.userColor} />
-                    </View>
-
-                    <View style={styles.cardContent}>
-                      <View style={styles.cardTopRow}>
-                        <Text style={[styles.cardTitle, item.isUnread && styles.cardTitleUnread]} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        <Text style={styles.cardTime}>{item.time}</Text>
-                      </View>
-                      
-                      {/* DYNAMIC HEIGHT FIX: Power gets 2 lines, Security (SOS/Journey) shows full message */}
-                      <Text 
-                        style={styles.cardBody} 
-                        numberOfLines={item.category === 'security' ? undefined : 2}
+                {/* --- CLASSIC LIST GROUP FOR EACH DAY --- */}
+                <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                  {groupedNotifs[groupKey].map((item: any, index: number) => (
+                    <TouchableOpacity 
+                      key={item.id} 
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        const newRead = new Set(readIds).add(item.id);
+                        setReadIds(newRead);
+                        AsyncStorage.setItem('strompulse_read_alerts', JSON.stringify([...newRead]));
+                      }}
+                    >
+                      <XStack 
+                        padding={16} 
+                        alignItems="flex-start" 
+                        borderBottomWidth={index === groupedNotifs[groupKey].length - 1 ? 0 : 1} 
+                        borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
                       >
-                        {item.body}
-                      </Text>
+                        <YStack width={40} height={40} borderRadius={20} backgroundColor={item.userBg} justifyContent="center" alignItems="center" marginRight={16}>
+                          <Feather name={item.icon as any} size={18} color={item.userColor} />
+                        </YStack>
 
-                    </View>
-                    
-                    {item.isUnread && <View style={styles.unreadRightDot} />}
-                  </TouchableOpacity>
-                ))}
-              </View>
+                        <YStack flex={1} justifyContent="center" marginTop={2}>
+                          <XStack justifyContent="space-between" alignItems="center" marginBottom={4}>
+                            <TText fontSize={15} fontFamily="Chirp-Heavy" color={theme.textPrimary} flex={1} marginRight={8} numberOfLines={1}>
+                              {item.title}
+                            </TText>
+                            <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{item.time}</TText>
+                          </XStack>
+                          
+                          <TText 
+                            fontSize={13} 
+                            fontFamily="Chirp-Regular" 
+                            color={theme.textSecondary} 
+                            lineHeight={18} 
+                            paddingRight={8}
+                            numberOfLines={item.category === 'security' ? undefined : 2}
+                          >
+                            {item.body}
+                          </TText>
+                        </YStack>
+                        
+                        {item.isUnread && (
+                          <YStack width={8} height={8} borderRadius={4} backgroundColor="#00C48A" alignSelf="center" marginLeft={8} />
+                        )}
+                      </XStack>
+                    </TouchableOpacity>
+                  ))}
+                </YStack>
+              </YStack>
             ))
           )}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </YStack>
   );
 };
-
-const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#FFFFFF" },
-  safeArea: { flex: 1 },
-  
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: Platform.OS === 'android' ? 60 : 30, paddingBottom: 24, position: "relative" },
-  backButton: { position: "absolute", left: 24, zIndex: 10, bottom: 24 },
-  headerTitle: { fontSize: 18, fontFamily: "Chirp-Bold", color: theme.textPrimary },
-
-  segmentedControlContainer: { flexDirection: "row", backgroundColor: isDarkMode ? "#1A221E" : "#F1F5F9", borderRadius: 12, marginHorizontal: 24, padding: 4, marginBottom: 20 },
-  segmentButton: { flex: 1, paddingVertical: 12, alignItems: "center", justifyContent: "center", borderRadius: 10 },
-  segmentButtonActive: { backgroundColor: isDarkMode ? "#2D3B34" : "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  segmentText: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#94A3B8" : "#64748B" },
-  segmentTextActive: { color: theme.textPrimary, fontFamily: "Chirp-Heavy" },
-
-  badgeCountContainer: { 
-    minWidth: 18, 
-    height: 18, 
-    borderRadius: 9, 
-    backgroundColor: "#EF4444", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    paddingHorizontal: 4, 
-    marginLeft: 6 
-  },
-  badgeCountText: { 
-    color: "#FFFFFF", 
-    fontSize: 9, 
-    fontFamily: "Chirp-Heavy" 
-  },
-
-  listContent: { paddingHorizontal: 24, paddingBottom: 40 },
-  groupContainer: { marginBottom: 8 },
-  
-  dateGroupHeader: { fontSize: 13, fontFamily: "Chirp-Bold", color: isDarkMode ? "#64748B" : "#94A3B8", marginBottom: 12, marginTop: 10 },
-
-  notificationCard: { flexDirection: "row", backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderRadius: 20, padding: 16, marginBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10, elevation: 2, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#F8FAFC", alignItems: "flex-start" },
-  iconBox: { width: 46, height: 46, borderRadius: 14, justifyContent: "center", alignItems: "center", marginRight: 14 },
-  cardContent: { flex: 1, justifyContent: "center", marginTop: 2 },
-  cardTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  cardTitle: { fontSize: 14, fontFamily: "Chirp-Bold", color: theme.textPrimary, flex: 1, marginRight: 8 },
-  cardTitleUnread: { color: theme.textPrimary },
-  cardTime: { fontSize: 11, fontFamily: "Chirp-Medium", color: isDarkMode ? "#64748B" : "#94A3B8" },
-  cardBody: { fontSize: 12, fontFamily: "Chirp-Regular", color: isDarkMode ? "#94A3B8" : "#64748B", lineHeight: 18, paddingRight: 8 },
-  
-  unreadRightDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#00C48A", alignSelf: "center", marginLeft: 4, marginTop: 4 },
-});
 
 export default NotificationsScreen;

@@ -3,7 +3,15 @@ module.exports = function (api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      'react-native-reanimated/plugin'
+      [
+        '@tamagui/babel-plugin',
+        {
+          components: ['tamagui'],
+          config: './tamagui.config.ts',
+          logTimings: true,
+        },
+      ],
+      'react-native-reanimated/plugin' // This must always be the last plugin in the array
     ],
   };
 };

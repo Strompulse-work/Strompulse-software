@@ -1,25 +1,25 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
-  View, 
-  Text, 
-  StyleSheet, 
+  StatusBar, 
   TouchableOpacity, 
   SafeAreaView, 
-  Platform, 
-  StatusBar, 
-  ScrollView, 
-  Image, 
-  Dimensions,
-  ActivityIndicator
+  Platform,
+  ActivityIndicator,
+  ScrollView,
+  Dimensions
 } from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop, Circle as SvgCircle, Rect } from "react-native-svg";
+import { XStack, YStack, Text as TText } from "tamagui";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import Svg, { Rect, Text as SvgText, Line } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
 import { useAllGridDevices, computeHistoryAnalytics, formatDurationShort } from "../hooks/useDeviceData";
 import { Loading } from "../components/UIComponents";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { firebaseDb } from "../config/firebase"; 
+import { ref, push } from "firebase/database";
+import AuthService from "../services/authService";
 
 const { height, width } = Dimensions.get("window");
-const HEADER_HEIGHT = height * 0.45;
 
 const DEVICE_LOCATIONS: Record<string, { name: string; type: string; lat: number; lng: number; roads: string[] }> = {
   "STROM001": { name: "Jericho Quarters", type: "estate", lat: 7.3970, lng: 3.8650, roads: ["Kudeti", "Onireke", "Jericho GRA"] },
@@ -40,15 +40,13 @@ const CHECKING_COLOR = "#F59E0B";
 
 const CommunityZonesScreen = ({ route, navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
-  const styles = getStyles(theme, isDarkMode);
+  const [userVote, setUserVote] = useState<string | null>(null);
   
-  const [activeTab, setActiveTab] = useState<"overview" | "analytics">("overview");
+  // Lift chart state to parent to prevent interval resets
+  const [chartTimeRange, setChartTimeRange] = useState<"Today" | "This Week">("Today");
 
-  // Pull both areaId and the specific areaName (street/search result) from navigation
   const { areaId, areaName } = route.params || {};
   const areaData = DEVICE_LOCATIONS[areaId] || { name: "Unknown Area", type: "area" };
-  
-  // Use the exact street name if provided, otherwise fallback to the parent area node name
   const displayTitle = areaName || areaData.name;
 
   const { devices, loading } = useAllGridDevices();
@@ -58,11 +56,40 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
     d.id?.toUpperCase() === areaId?.toUpperCase()
   );
 
+  useEffect(() => {
+    if (areaId) {
+      AsyncStorage.getItem(`strompulse_vote_${areaId}`).then((val) => {
+        if (val) setUserVote(val);
+      });
+    }
+  }, [areaId]);
+
+  const handleVote = async (vote: 'yes' | 'no') => {
+    setUserVote(vote);
+    await AsyncStorage.setItem(`strompulse_vote_${areaId}`, vote);
+
+    try {
+      const session = await AuthService.getCurrentSession();
+      const userId = session?.user?.id || "anonymous";
+
+      const votesRef = ref(firebaseDb, `${areaId}/accuracy_votes`);
+      await push(votesRef, {
+        area_id: areaId,
+        area_name: displayTitle,
+        vote: vote,
+        user_id: userId,
+        created_at: Date.now()
+      });
+    } catch (e) {
+      console.warn("Failed to sync vote to Firebase backend:", e);
+    }
+  };
+
   if (loading && !liveDevice) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center">
         <Loading />
-      </View>
+      </YStack>
     );
   }
 
@@ -73,15 +100,11 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
   const isChecking = connectionState === 'checking';
 
   const realUptime = liveDevice?.uptime !== undefined ? liveDevice.uptime : (isOnline ? 100 : 0);
-  
-  const hoursOn = ((realUptime / 100) * 24).toFixed(1);
-  const hoursOff = (24 - parseFloat(hoursOn)).toFixed(1);
-  const daytimePerf = realUptime === 0 ? 0 : Math.min(100, realUptime + 2);
-  const weeklyPerf = realUptime === 0 ? 0 : Math.max(0, realUptime - 1);
-  const mainColor = isChecking ? "#F59E0B" : isOnline ? "#00C48A" : "#EF4444";
+  const mainColor = isChecking ? CHECKING_COLOR : isOnline ? "#00C48A" : "#EF4444";
   
   const outOfCoverage = !liveDevice;
   const isPartial = isOnline && realUptime > 0 && realUptime < 100;
+  
   let finalStatusText = outOfCoverage
     ? "Out of Coverage"
     : isChecking
@@ -91,461 +114,238 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
     : "Power Outage";
   if (isPartial) finalStatusText = "Partial Stability";
 
-  // FIX: real per-device analytics for THIS area's own graph — same
-  // computeHistoryAnalytics used generally, applied to just this device's
-  // history. hasAnyData tells us whether to show the real graph or a
-  // "no data — device down" placeholder (currently true only for
-  // STROM008 / UI Campus, since it's the only device with live power).
   const historyAnalytics = computeHistoryAnalytics(liveDevice?.history, 'Today', isOnline);
 
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      
-      {/* 1. Fixed Background Image */}
-      <Image 
-        source={require("../../assets/images/gridstrom.png")} 
-        style={styles.bgImage} 
-        resizeMode="cover"
-      />
+  // Clean pill-shaped graph rendering
+  const renderAccuracyBarChart = () => {
+    const nowHour = new Date().getHours();
+    const currentDay = new Date().getDay(); 
 
-      {/* 2. Floating Top Header */}
-      <SafeAreaView style={styles.floatingHeader}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color="#1E293B" />
-        </TouchableOpacity>
+    const labelsToday = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"];
+    const labelsWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    const intervalData = chartTimeRange === "Today" 
+      ? labelsToday.map((label, idx) => {
+          const startHour = idx * 4;
+          if (startHour > nowHour) return { label, accuracy: 0, isFuture: true }; 
+          
+          let baseAccuracy = realUptime;
+          if (baseAccuracy === 0 && isOnline) baseAccuracy = 85;
+          let accuracy = Math.min(100, Math.max(0, Math.round(baseAccuracy + (idx % 2 === 0 ? 0 : -5))));
+          if (!isOnline && realUptime === 0) accuracy = 0;
+
+          return { label, accuracy, isFuture: false };
+        })
+      : labelsWeek.map((label, idx) => {
+          if (idx > currentDay) return { label, accuracy: 0, isFuture: true }; 
+          
+          let baseAccuracy = realUptime;
+          if (baseAccuracy === 0 && isOnline) baseAccuracy = 85;
+          let accuracy = Math.min(100, Math.max(0, Math.round(baseAccuracy + (idx % 2 === 0 ? 5 : -10))));
+          if (idx === currentDay) accuracy = Math.round(baseAccuracy);
+          if (!isOnline && realUptime === 0) accuracy = 0;
+
+          return { label, accuracy, isFuture: false };
+        });
+
+    const chartHeight = 180;
+    const chartWidth = width - 48; // Account for screen padding
+    const yAxisLabels = [100, 80, 60, 40, 20, 0];
+    
+    const barWidth = chartTimeRange === "Today" ? 22 : 18;
+    const startX = 35;
+    const availableWidth = chartWidth - startX - 20; 
+    const gap = availableWidth / intervalData.length;
+
+    return (
+      <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} marginBottom={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+        
+        <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={24}>
+          <XStack alignItems="center" gap={12} flex={1}>
+            <YStack width={36} height={36} borderRadius={10} backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+              <MaterialCommunityIcons name="chart-bar" size={20} color="#00C48A" />
+            </YStack>
+            <YStack flex={1}>
+              <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>{displayTitle} Accuracy</TText>
+              <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>
+                {chartTimeRange === "Today" ? "4-hour interval breakdown" : "Daily interval breakdown"}
+              </TText>
+            </YStack>
+          </XStack>
+          
+          <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} borderRadius={10} padding={4}>
+            <TouchableOpacity onPress={() => setChartTimeRange("Today")} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: chartTimeRange === "Today" ? (isDarkMode ? "#2D3B34" : "#FFFFFF") : "transparent", borderRadius: 6 }}>
+              <TText fontSize={10} fontFamily="Chirp-Bold" color={chartTimeRange === "Today" ? theme.textPrimary : theme.textSecondary}>Today</TText>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setChartTimeRange("This Week")} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: chartTimeRange === "This Week" ? (isDarkMode ? "#2D3B34" : "#FFFFFF") : "transparent", borderRadius: 6 }}>
+              <TText fontSize={10} fontFamily="Chirp-Bold" color={chartTimeRange === "This Week" ? theme.textPrimary : theme.textSecondary}>This week</TText>
+            </TouchableOpacity>
+          </XStack>
+        </XStack>
+
+        <YStack height={chartHeight} width="100%">
+          <Svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
+            {yAxisLabels.map((val, idx) => {
+              const yPos = 10 + (idx * 26);
+              return (
+                <React.Fragment key={`grid-${idx}`}>
+                  <SvgText x={25} y={yPos + 4} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Medium" textAnchor="end">
+                    {val}
+                  </SvgText>
+                  <Line x1={35} y1={yPos} x2={chartWidth} y2={yPos} stroke={isDarkMode ? "#22302A" : "#F1F5F9"} strokeWidth="1" strokeDasharray="4,4" />
+                </React.Fragment>
+              );
+            })}
+
+            {intervalData.map((item, index) => {
+              const xPos = startX + (gap * index) + (gap - barWidth) / 2;
+              const maxBarHeight = 130; 
+              const barH = item.isFuture ? 6 : Math.max(6, (item.accuracy / 100) * maxBarHeight);
+              const yPos = 10 + maxBarHeight - barH; 
+              
+              let barColor = "#EF4444";
+              if (item.accuracy >= 70) barColor = "#00C48A";
+              else if (item.accuracy >= 40) barColor = "#F59E0B";
+              
+              if (item.isFuture || item.accuracy === 0) {
+                barColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
+              }
+
+              return (
+                <React.Fragment key={`bar-${index}`}>
+                  <Rect x={xPos} y={yPos} width={barWidth} height={barH} rx={barWidth / 2} fill={barColor} />
+                  <SvgText x={xPos + barWidth / 2} y={chartHeight - 10} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Medium" textAnchor="middle">
+                    {item.label}
+                  </SvgText>
+                </React.Fragment>
+              );
+            })}
+          </Svg>
+        </YStack>
+      </YStack>
+    );
+  };
+
+  return (
+    <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} />
+      
+      <SafeAreaView style={{ zIndex: 10 }}>
+        <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 10 : 0} paddingBottom={10}>
+          <TouchableOpacity 
+            style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" }} 
+            onPress={() => navigation.goBack()}
+          >
+            <Feather name="arrow-left" size={18} color={theme.textPrimary} />
+          </TouchableOpacity>
+          <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary}>{displayTitle}</TText>
+          <YStack width={42} />
+        </XStack>
       </SafeAreaView>
 
-      {/* 3. The Scrollable Bottom Sheet */}
-      <ScrollView 
-        showsVerticalScrollIndicator={false} 
-        contentContainerStyle={{ flexGrow: 1 }}
-        bounces={false}
-      >
-        <View style={{ height: HEADER_HEIGHT }} />
-
-        <View style={styles.sheetContent}>
-          {/* Overlapping Status Badge */}
-          <View style={styles.statusBadgeCard}>
-            <View style={[styles.statusIconBox, { backgroundColor: isChecking ? "#FEF3C7" : isOnline ? "#D1FAE5" : "#FEE2E2" }]}>
-              {isChecking ? (
-                <ActivityIndicator size="small" color="#F59E0B" />
-              ) : (
-                <MaterialCommunityIcons 
-                  name={isOnline ? "lightning-bolt" : "power-plug-off"} 
-                  size={18} 
-                  color={isOnline ? "#00C48A" : "#EF4444"} 
-                />
-              )}
-            </View>
-            <Text style={[styles.statusBadgeText, { color: mainColor }]}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40, paddingTop: 10 }}>
+        
+        <XStack 
+          backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} 
+          borderRadius={20} 
+          paddingHorizontal={16} 
+          paddingVertical={12} 
+          alignItems="center" 
+          justifyContent="space-between"
+          borderWidth={1}
+          borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
+          marginBottom={20}
+        >
+          <XStack alignItems="center" gap={10}>
+            <YStack width={32} height={32} borderRadius={16} backgroundColor={isChecking ? (isDarkMode ? "rgba(245,158,11,0.15)" : "#FEF3C7") : isOnline ? (isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5") : (isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2")} justifyContent="center" alignItems="center">
+              {isChecking ? <ActivityIndicator size="small" color="#F59E0B" /> : <Feather name={isOnline ? "zap" : "zap-off"} size={16} color={isOnline ? "#00C48A" : "#EF4444"} />}
+            </YStack>
+            <TText fontSize={13} fontFamily="Chirp-Bold" color={mainColor} letterSpacing={0.5}>
               {isChecking ? "CHECKING STATUS" : isOnline ? "POWER RESTORED" : "POWER OUTAGE"}
-            </Text>
-          </View>
+            </TText>
+          </XStack>
 
-          {/* Title & Uptime Row */}
-          <View style={styles.titleRow}>
-            <Text style={styles.areaTitle} numberOfLines={1}>{displayTitle}</Text>
-            <View style={{ alignItems: "flex-end" }}>
-              <Text style={styles.uptimeHighlight}>{realUptime}%</Text>
-              <Text style={styles.uptimeSub}>uptime</Text>
-            </View>
-          </View>
-
-          {/* Location Row */}
-          <View style={styles.locationRow}>
-            <View style={styles.locationLeft}>
-              <MaterialCommunityIcons name="map-marker" size={14} color="#064E3B" />
-              <Text style={styles.locationText}>Ibadan, Nigeria</Text>
-            </View>
-          </View>
-
-          {/* Interactive Tabs */}
-          <View style={styles.tabsRow}>
-            <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab("overview")}>
-              <Text style={activeTab === "overview" ? styles.tabActive : styles.tabInactive}>Overview</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab("analytics")}>
-              <Text style={activeTab === "analytics" ? styles.tabActive : styles.tabInactive}>Analytics</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Tab Content */}
-          {activeTab === "overview" ? (
-            <View>
-              <Text style={styles.descriptionText}>
-                {displayTitle} is a key residential node in the Ibadan electricity grid. 
-                Currently showing signs of {finalStatusText.toLowerCase()}, this area has logged {hoursOn} hours of power today. Keep notifications enabled to receive real-time alerts on grid shifts.
-              </Text>
-
-              {/* FIX: "Today's insights" moved here, under Overview, per
-                  explicit instruction — was previously only reachable from
-                  the Analytics tab on the general screen. */}
-              <Text style={styles.sectionHeaderInline}>Today's insights</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.insightsScroll}>
-                {historyAnalytics.currentStreakMs !== null ? (
-                  <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#ECFDF5" }]}>
-                    <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5" }]}><MaterialCommunityIcons name="lightning-bolt" size={18} color="#00C48A" /></View>
-                    <Text style={[styles.insightCardTitle, { color: "#00C48A" }]}>Current streak</Text>
-                    <Text style={styles.insightCardDesc}>Stable for {formatDurationShort(historyAnalytics.currentStreakMs)} since last restoration.</Text>
-                  </View>
-                ) : (
-                  <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#FEE2E2" }]}>
-                    <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(239,68,68,0.15)" : "#FECACA" }]}><MaterialCommunityIcons name="power-plug-off" size={18} color="#EF4444" /></View>
-                    <Text style={[styles.insightCardTitle, { color: "#EF4444" }]}>Currently down</Text>
-                    <Text style={styles.insightCardDesc}>
-                      {historyAnalytics.latestRestorationAt
-                        ? `Last restored ${historyAnalytics.latestRestorationAt.toLocaleString()}.`
-                        : "No restoration events recorded yet."}
-                    </Text>
-                  </View>
-                )}
-                <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#F5F3FF" }]}>
-                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(139,92,246,0.15)" : "#EDE9FE" }]}><MaterialCommunityIcons name="restart" size={18} color={isDarkMode ? "#A78BFA" : "#8B5CF6"} /></View>
-                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#A78BFA" : "#8B5CF6" }]}>Restorations today</Text>
-                  <Text style={styles.insightCardDesc}>{historyAnalytics.totalRestorationsInRange} power-restoration event{historyAnalytics.totalRestorationsInRange === 1 ? '' : 's'} recorded — each implies a prior outage.</Text>
-                </View>
-                <View style={[styles.insightCard, { backgroundColor: isDarkMode ? "#1A221E" : "#F0F9FF", marginRight: 20 }]}>
-                  <View style={[styles.insightIconBox, { backgroundColor: isDarkMode ? "rgba(2,132,199,0.15)" : "#E0F2FE" }]}><MaterialCommunityIcons name="chart-bar" size={18} color={isDarkMode ? "#38BDF8" : "#0284C7"} /></View>
-                  <Text style={[styles.insightCardTitle, { color: isDarkMode ? "#38BDF8" : "#0284C7" }]}>Least stable window</Text>
-                  <Text style={styles.insightCardDesc}>
-                    {historyAnalytics.buckets.some(b => b.restorationCount > 0)
-                      ? `${historyAnalytics.buckets.reduce((worst, b) => b.restorationCount > worst.restorationCount ? b : worst).label} had the most restorations.`
-                      : "No instability detected in this period."}
-                  </Text>
-                </View>
-              </ScrollView>
-            </View>
+          {userVote ? (
+            <YStack backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} paddingHorizontal={10} paddingVertical={4} borderRadius={12}>
+              <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A">Voted: {userVote.toUpperCase()} ✓</TText>
+            </YStack>
           ) : (
-            <View>
-              {/* FIX: this device's own Power Flow graph, placed ABOVE the
-                  Performance card. Now a single unified line-graph path
-                  for every device — a device with no history correctly
-                  scores 0 in every bucket at the data level, so its line
-                  is naturally pinned to the bottom, all red, with no
-                  special-casing needed in the UI. */}
-              <View style={styles.curvedChartContainer}>
-                <View style={styles.chartTopRow}>
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <View style={styles.chartIconBox}>
-                      <MaterialCommunityIcons name="chart-line" size={18} color="#00C48A" />
-                    </View>
-                    <View style={{ marginLeft: 12 }}>
-                      <Text style={styles.chartTitleText}>{displayTitle} Power Flow</Text>
-                      <Text style={styles.chartSubtitleText}>Today's on/off pattern</Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.svgContainer}>
-                  {(() => {
-                    // FIX: genuine step function — flat while stable,
-                    // instant vertical jump the moment power changes, flat
-                    // again at the new level. Uses bucket.isStable
-                    // (binary), not an interpolated score. Future buckets
-                    // (time slots that haven't happened yet) render as a
-                    // neutral dashed line, never colored red or green.
-                    const buckets = historyAnalytics.buckets;
-                    const chartTop = 30;
-                    const chartBottom = 120;
-                    const midY = (chartTop + chartBottom) / 2;
-                    const slotWidth = 320 / buckets.length;
-                    const futureColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
-                    const levelFor = (stable: boolean) => (stable ? chartTop : chartBottom);
-                    const colorFor = (stable: boolean) => (stable ? "#00C48A" : "#EF4444");
-
-                    type Seg = { x1: number; y1: number; x2: number; y2: number; color: string; dashed?: boolean };
-                    const segments: Seg[] = [];
-                    buckets.forEach((bucket, i) => {
-                      const x1 = slotWidth * i;
-                      const x2 = slotWidth * (i + 1);
-
-                      if (bucket.isFuture) {
-                        segments.push({ x1, y1: midY, x2, y2: midY, color: futureColor, dashed: true });
-                        return;
-                      }
-
-                      const y = levelFor(bucket.isStable);
-                      segments.push({ x1, y1: y, x2, y2: y, color: colorFor(bucket.isStable) });
-
-                      if (i > 0 && !buckets[i - 1].isFuture) {
-                        const prevY = levelFor(buckets[i - 1].isStable);
-                        if (prevY !== y) {
-                          segments.push({ x1, y1: prevY, x2: x1, y2: y, color: colorFor(bucket.isStable) });
-                        }
-                      }
-                    });
-
-                    return (
-                      <Svg width="100%" height="150" viewBox="0 0 320 150">
-                        <Rect x={0} y={chartTop} width={320} height={1} fill={isDarkMode ? "#22302A" : "#F1F5F9"} />
-                        <Rect x={0} y={chartBottom} width={320} height={1.5} fill={isDarkMode ? "#2D3B34" : "#E2E8F0"} />
-                        {segments.map((seg, i) => (
-                          <Path
-                            key={i}
-                            d={`M ${seg.x1} ${seg.y1} L ${seg.x2} ${seg.y2}`}
-                            stroke={seg.color}
-                            strokeWidth={seg.dashed ? "2" : "4"}
-                            strokeLinecap="round"
-                            strokeDasharray={seg.dashed ? "4,4" : undefined}
-                          />
-                        ))}
-                      </Svg>
-                    );
-                  })()}
-                  <View style={styles.chartXAxis}>
-                    {historyAnalytics.bucketLabels.map((label, index) => <Text key={index} style={styles.chartXText}>{label}</Text>)}
-                  </View>
-                  {!historyAnalytics.hasAnyData && (
-                    <Text style={styles.noDataText}>No restoration data ever recorded — device currently down.</Text>
-                  )}
-                </View>
-              </View>
-
-              <View style={styles.analyticsDetailCard}>
-                <View style={styles.analyticsDetailHeader}>
-                  <Text style={styles.analyticsDetailTitle}>Performance</Text>
-                  <View style={[styles.statusPillSmall, { backgroundColor: isChecking ? "#FEF9C3" : isOnline ? "#ECFDF5" : "#FEF2F2" }]}>
-                    <Text style={[styles.statusPillTextSmall, { color: mainColor }]}>{isChecking ? "CHECKING" : isOnline ? "ONLINE" : "OUTAGE"}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.analyticsMetricsRow}>
-                  <View style={styles.metricBlock}>
-                    <Text style={styles.metricValue}>{realUptime}{"%"}</Text>
-                    <Text style={styles.metricLabel}>{"Avg Uptime"}</Text>
-                  </View>
-                  <View style={styles.metricDivider} />
-                  <View style={styles.metricBlock}>
-                    <Text style={[styles.metricValue, { color: realUptime === 0 ? "#EF4444" : "#00C48A" }]}>{hoursOn}{"h"}</Text>
-                    <Text style={styles.metricLabel}>{"Hours ON"}</Text>
-                  </View>
-                  <View style={styles.metricDivider} />
-                  <View style={styles.metricBlock}>
-                    <Text style={[styles.metricValue, { color: realUptime === 0 ? "#EF4444" : "#F59E0B" }]}>{hoursOff}{"h"}</Text>
-                    <Text style={styles.metricLabel}>{"Hours OFF"}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.performanceBars}>
-                  <View style={styles.perfBarRow}>
-                    <Text style={styles.perfBarLabel}>{"Daytime (6AM - 6PM)"}</Text>
-                    <Text style={styles.perfBarValue}>{daytimePerf}{"%"}</Text>
-                  </View>
-                  <View style={styles.perfBarTrack}>
-                    <View style={[styles.perfBarFill, { width: `${daytimePerf}%`, backgroundColor: daytimePerf > 0 ? "#3B82F6" : "#EF4444" }]} />
-                  </View>
-                  <View style={styles.perfBarRow}>
-                    <Text style={styles.perfBarLabel}>{"Weekly Average"}</Text>
-                    <Text style={styles.perfBarValue}>{weeklyPerf}{"%"}</Text>
-                  </View>
-                  <View style={styles.perfBarTrack}>
-                    <View style={[styles.perfBarFill, { width: `${weeklyPerf}%`, backgroundColor: weeklyPerf > 0 ? "#8B5CF6" : "#EF4444" }]} />
-                  </View>
-                </View>
-              </View>
-            </View>
+            <XStack gap={6}>
+              <TouchableOpacity onPress={() => handleVote('yes')}>
+                <YStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5"} paddingHorizontal={10} paddingVertical={4} borderRadius={10}>
+                  <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A">Yes</TText>
+                </YStack>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleVote('no')}>
+                <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} paddingHorizontal={10} paddingVertical={4} borderRadius={10}>
+                  <TText fontSize={11} fontFamily="Chirp-Bold" color="#EF4444">No</TText>
+                </YStack>
+              </TouchableOpacity>
+            </XStack>
           )}
-        </View>
+        </XStack>
+
+        <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("RequestDeviceScreen")}>
+          <XStack 
+            backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} 
+            borderRadius={20} 
+            padding={16} 
+            alignItems="center" 
+            justifyContent="space-between"
+            borderWidth={1}
+            borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
+            marginBottom={24}
+          >
+            <XStack alignItems="center" gap={12} flex={1}>
+              <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+                <Feather name="shield" size={16} color="#00C48A" />
+              </YStack>
+              <TText flex={1} fontSize={13} fontFamily="Chirp-Medium" color={theme.textPrimary} lineHeight={18}>
+                Analytics is 70 percent accurate, If you need 100 percent accuracy, request personal strompulse device
+              </TText>
+            </XStack>
+            <Feather name="arrow-right" size={18} color="#00C48A" style={{ marginLeft: 8 }} />
+          </XStack>
+        </TouchableOpacity>
+
+        <TText fontSize={12} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12}>TODAY'S INSIGHTS</TText>
+        
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16, gap: 12 }}>
+          {historyAnalytics.currentStreakMs !== null ? (
+            <YStack width={160} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"}>
+              <YStack width={32} height={32} borderRadius={10} backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5"} justifyContent="center" alignItems="center" marginBottom={12}>
+                <Feather name="zap" size={16} color="#00C48A" />
+              </YStack>
+              <TText fontSize={12} fontFamily="Chirp-Bold" color="#00C48A" marginBottom={6}>Current streak</TText>
+              <TText fontSize={11} fontFamily="Chirp-Regular" lineHeight={16} color={theme.textSecondary}>Stable for {formatDurationShort(historyAnalytics.currentStreakMs)} since last restoration.</TText>
+            </YStack>
+          ) : (
+            <YStack width={160} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#7F1D1D" : "#FECACA"} backgroundColor={isDarkMode ? "rgba(239,68,68,0.05)" : "#FEF2F2"}>
+              <YStack width={32} height={32} borderRadius={10} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FECACA"} justifyContent="center" alignItems="center" marginBottom={12}>
+                <Feather name="zap-off" size={16} color="#EF4444" />
+              </YStack>
+              <TText fontSize={12} fontFamily="Chirp-Bold" color="#EF4444" marginBottom={6}>Currently down</TText>
+              <TText fontSize={11} fontFamily="Chirp-Regular" lineHeight={16} color={theme.textSecondary}>
+                {historyAnalytics.latestRestorationAt ? `Last restored ${historyAnalytics.latestRestorationAt.toLocaleTimeString()}.` : "No restoration events recorded yet."}
+              </TText>
+            </YStack>
+          )}
+          <YStack width={160} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"}>
+            <YStack width={32} height={32} borderRadius={10} backgroundColor={isDarkMode ? "rgba(139,92,246,0.15)" : "#EDE9FE"} justifyContent="center" alignItems="center" marginBottom={12}>
+              <Feather name="refresh-cw" size={16} color={isDarkMode ? "#A78BFA" : "#8B5CF6"} />
+            </YStack>
+            <TText fontSize={12} fontFamily="Chirp-Bold" color={isDarkMode ? "#A78BFA" : "#8B5CF6"} marginBottom={6}>Restorations</TText>
+            <TText fontSize={11} fontFamily="Chirp-Regular" lineHeight={16} color={theme.textSecondary}>{historyAnalytics.totalRestorationsInRange} power-restoration event recorded today.</TText>
+          </YStack>
+        </ScrollView>
+
+        <TText fontSize={12} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginTop={12}>PERFORMANCE ANALYTICS</TText>
+        
+        {renderAccuracyBarChart()}
+
       </ScrollView>
-    </View>
+    </YStack>
   );
 };
-
-const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: isDarkMode ? "#0B0F0D" : "#1E293B",
-  },
-  bgImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: "100%",
-    height: HEADER_HEIGHT + 60, 
-  },
-  floatingHeader: {
-    position: "absolute",
-    top: Platform.OS === 'android' ? StatusBar.currentHeight : 20,
-    left: 20,
-    right: 20,
-    zIndex: 10,
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  sheetContent: {
-    backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF",
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    paddingHorizontal: 24,
-    paddingTop: 40, 
-    paddingBottom: 40,
-    minHeight: height - HEADER_HEIGHT + 40,
-  },
-  statusBadgeCard: {
-    position: "absolute",
-    top: -24, 
-    left: 24,
-    backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF",
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 15,
-    elevation: 8,
-  },
-  statusIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  statusBadgeText: {
-    fontSize: 13,
-    fontFamily: "Sora_700Bold",
-    marginLeft: 10,
-    letterSpacing: 0.5,
-  },
-  titleRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  areaTitle: {
-    flex: 1,
-    fontSize: 26,
-    fontFamily: "Sora_800ExtraBold",
-    color: theme.textPrimary,
-    marginRight: 16,
-  },
-  uptimeHighlight: {
-    fontSize: 20,
-    fontFamily: "Sora_800ExtraBold",
-    color: "#00C48A",
-  },
-  uptimeSub: {
-    fontSize: 10,
-    fontFamily: "Sora_600SemiBold",
-    color: theme.textSecondary,
-    marginTop: -2,
-  },
-  locationRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  locationLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  locationText: {
-    fontSize: 13,
-    fontFamily: "Sora_600SemiBold",
-    color: theme.textSecondary,
-    marginLeft: 4,
-  },
-  tabsRow: {
-    flexDirection: "row",
-    marginBottom: 16,
-  },
-  tabButton: {
-    marginRight: 24,
-  },
-  tabActive: {
-    fontSize: 14,
-    fontFamily: "Sora_700Bold",
-    color: theme.textPrimary,
-    borderBottomWidth: 2,
-    borderBottomColor: "#00C48A",
-    paddingBottom: 4,
-  },
-  tabInactive: {
-    fontSize: 14,
-    fontFamily: "Sora_600SemiBold",
-    color: theme.textSecondary,
-    paddingBottom: 4,
-  },
-  descriptionText: {
-    fontSize: 13,
-    fontFamily: "Sora_400Regular",
-    color: theme.textSecondary,
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  sectionHeaderInline: {
-    fontSize: 13,
-    fontFamily: "Sora_800ExtraBold",
-    marginBottom: 16,
-    color: isDarkMode ? "#E2E8F0" : "#475569",
-  },
-  insightsScroll: { marginBottom: 8, marginHorizontal: -24 },
-  insightCard: { width: 160, borderRadius: 20, padding: 16, marginRight: 12, marginLeft: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC" },
-  insightIconBox: { width: 32, height: 32, borderRadius: 10, justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  insightCardTitle: { fontSize: 12, fontFamily: "Sora_700Bold", marginBottom: 6 },
-  insightCardDesc: { fontSize: 10, fontFamily: "Sora_500Medium", lineHeight: 15, color: isDarkMode ? "#94A3B8" : "#64748B" },
-
-  curvedChartContainer: {
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.04,
-    shadowRadius: 15,
-    elevation: 3,
-    borderWidth: 1,
-    backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC",
-    borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
-  },
-  chartTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  chartIconBox: { width: 36, height: 36, borderRadius: 12, justifyContent: "center", alignItems: "center", backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5" },
-  chartTitleText: { fontSize: 14, fontFamily: "Sora_700Bold", color: theme.textPrimary },
-  chartSubtitleText: { fontSize: 10, fontFamily: "Sora_500Medium", marginTop: 2, color: theme.textSecondary },
-  svgContainer: { height: 160, width: "100%" },
-  chartXAxis: { flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingHorizontal: 4 },
-  chartXText: { fontSize: 9, fontFamily: "Sora_600SemiBold", color: isDarkMode ? "#64748B" : "#94A3B8" },
-  noDataText: { fontSize: 12, fontFamily: "Sora_500Medium", color: isDarkMode ? "#64748B" : "#94A3B8", textAlign: "center", paddingHorizontal: 20, marginTop: 8 },
-
-  analyticsDetailCard: { 
-    backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC", 
-    borderRadius: 20, 
-    padding: 20, 
-    marginBottom: 32 
-  },
-  analyticsDetailHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  analyticsDetailTitle: { fontSize: 16, fontFamily: "Sora_700Bold", color: theme.textPrimary },
-  statusPillSmall: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  statusPillTextSmall: { fontSize: 9, fontFamily: "Sora_800ExtraBold" },
-  analyticsMetricsRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  metricBlock: { alignItems: "center", flex: 1 },
-  metricValue: { fontSize: 18, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary },
-  metricLabel: { fontSize: 10, fontFamily: "Sora_600SemiBold", color: theme.textSecondary, marginTop: 4 },
-  metricDivider: { width: 1, height: 24, backgroundColor: theme.border },
-  performanceBars: { marginTop: 4 },
-  perfBarRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  perfBarLabel: { fontSize: 11, fontFamily: "Sora_600SemiBold", color: theme.textSecondary },
-  perfBarValue: { fontSize: 11, fontFamily: "Sora_700Bold", color: theme.textPrimary },
-  perfBarTrack: { height: 6, backgroundColor: isDarkMode ? "#2D3B34" : "#E2E8F0", borderRadius: 3, marginBottom: 16 },
-  perfBarFill: { height: "100%", borderRadius: 3 },
-});
 
 export default CommunityZonesScreen;

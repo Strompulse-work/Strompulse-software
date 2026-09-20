@@ -1,8 +1,5 @@
 import React, { useState, useCallback } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
   StatusBar,
   ScrollView,
   TouchableOpacity,
@@ -10,7 +7,8 @@ import {
   Alert,
   SafeAreaView
 } from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { XStack, YStack, Text as TText } from "tamagui";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 import * as Contacts from "expo-contacts";
 import * as Linking from "expo-linking";
@@ -22,7 +20,6 @@ const STORAGE_KEY = "strompulse_emergency_contacts";
 
 const ContactsScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
-  const styles = getStyles(theme, isDarkMode);
 
   const [allContacts, setAllContacts] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
@@ -85,7 +82,7 @@ const ContactsScreen = ({ navigation }: any) => {
             phone,
             color,
             bg,
-            isEmergency: false // Default to General Contact
+            isEmergency: false 
           };
 
           addContactToStrompulse(newContact);
@@ -130,137 +127,185 @@ const ContactsScreen = ({ navigation }: any) => {
   const generalContacts = allContacts.filter(c => !c.isEmergency);
 
   return (
-    <View style={styles.container}>
+    <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={theme.background} />
 
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} activeOpacity={0.7} onPress={() => navigation.goBack()}>
-            <MaterialCommunityIcons name="chevron-left" size={28} color={theme.textPrimary} />
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* --- MINIMALIST HEADER --- */}
+        <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={16} position="relative">
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: "absolute", left: 24, padding: 8, zIndex: 10 }}>
+            <Feather name="arrow-left" size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Contacts</Text>
-        </View>
+          <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>My Contacts</TText>
+        </XStack>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40, paddingTop: 10 }}>
           
-          <TouchableOpacity style={styles.addContactBtn} activeOpacity={0.8} onPress={openContactPicker}>
-            <MaterialCommunityIcons name="plus-circle" size={24} color="#FFFFFF" style={{ marginRight: 8 }} />
-            <Text style={styles.addContactBtnText}>Add Contact from Phone</Text>
+          {/* --- ADD CONTACT BUTTON --- */}
+          <TouchableOpacity activeOpacity={0.8} onPress={openContactPicker}>
+            <XStack 
+              backgroundColor="#00C48A" 
+              borderRadius={20} 
+              paddingVertical={16} 
+              justifyContent="center" 
+              alignItems="center" 
+              marginBottom={32}
+            >
+              <Feather name="user-plus" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <TText fontSize={15} fontFamily="Chirp-Bold" color="#FFFFFF">Add from Phonebook</TText>
+            </XStack>
           </TouchableOpacity>
 
-          {/* EMERGENCY NETWORK */}
-          <Text style={styles.sectionTitle}>MY EMERGENCY NETWORK (SOS)</Text>
-          <Text style={styles.sectionDesc}>These contacts will receive a WhatsApp broadcast when you trigger an SOS.</Text>
-          
-          <View style={styles.contactsList}>
-            {emergencyNetwork.map((contact) => (
-              <View key={contact.id} style={styles.contactCard}>
-                <View style={styles.contactLeft}>
-                  <View style={styles.avatarContainer}>
-                    <View style={[styles.avatar, { backgroundColor: contact.bg }]}>
-                      <Text style={[styles.avatarText, { color: contact.color }]}>{contact.initial}</Text>
-                    </View>
-                    <View style={styles.onlineIndicator} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
-                    <Text style={styles.contactSub}>{contact.phone}</Text>
-                  </View>
-                </View>
-                <View style={styles.actionRow}>
-                  <TouchableOpacity onPress={() => toggleEmergencyStatus(contact.id)} style={[styles.actionPill, { backgroundColor: isDarkMode ? "rgba(245,158,11,0.15)" : "#FEF3C7" }]}>
-                    <MaterialCommunityIcons name="shield-off" size={16} color="#F59E0B" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => deleteContact(contact.id)} style={[styles.actionPill, { backgroundColor: isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2", marginLeft: 8 }]}>
-                    <MaterialCommunityIcons name="trash-can-outline" size={16} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-            {emergencyNetwork.length === 0 && (
-              <Text style={styles.emptyText}>No emergency contacts. Add general contacts to your emergency network below.</Text>
+          {/* --- EMERGENCY NETWORK --- */}
+          <YStack marginBottom={32}>
+            <TText fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={4} marginLeft={4}>
+              MY EMERGENCY NETWORK (SOS)
+            </TText>
+            <TText fontSize={11} fontFamily="Chirp-Regular" color={theme.textSecondary} marginBottom={16} marginLeft={4} lineHeight={16}>
+              These contacts will receive a WhatsApp broadcast when you trigger an SOS.
+            </TText>
+            
+            {emergencyNetwork.length > 0 ? (
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                {emergencyNetwork.map((contact, index) => (
+                  <XStack 
+                    key={contact.id} 
+                    padding={16} 
+                    alignItems="center" 
+                    justifyContent="space-between"
+                    borderBottomWidth={index === emergencyNetwork.length - 1 ? 0 : 1}
+                    borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
+                  >
+                    <XStack alignItems="center" flex={1}>
+                      <YStack position="relative" marginRight={16}>
+                        <YStack width={40} height={40} borderRadius={20} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center">
+                          <TText fontSize={16} fontFamily="Chirp-Heavy" color={contact.color}>{contact.initial}</TText>
+                        </YStack>
+                        <YStack 
+                          position="absolute" 
+                          bottom={-2} 
+                          right={-2} 
+                          width={12} 
+                          height={12} 
+                          borderRadius={6} 
+                          backgroundColor="#00C48A" 
+                          borderWidth={2} 
+                          borderColor={isDarkMode ? "#121A16" : "#FFFFFF"} 
+                        />
+                      </YStack>
+                      <YStack flex={1}>
+                        <TText fontSize={15} fontFamily="Chirp-Medium" color={theme.textPrimary} marginBottom={2} numberOfLines={1}>
+                          {contact.name}
+                        </TText>
+                        <TText fontSize={12} fontFamily="Chirp-Regular" color={theme.textSecondary}>
+                          {contact.phone}
+                        </TText>
+                      </YStack>
+                    </XStack>
+
+                    <XStack alignItems="center" gap={16}>
+                      <TouchableOpacity onPress={() => toggleEmergencyStatus(contact.id)} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                        <Feather name="shield-off" size={20} color="#F59E0B" />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => deleteContact(contact.id)} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                        <Feather name="trash-2" size={20} color="#EF4444" />
+                      </TouchableOpacity>
+                    </XStack>
+                  </XStack>
+                ))}
+              </YStack>
+            ) : (
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} padding={24} borderRadius={24} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} textAlign="center">
+                  No emergency contacts. Add general contacts to your SOS network below.
+                </TText>
+              </YStack>
             )}
-          </View>
+          </YStack>
 
-          {/* GENERAL CONTACTS */}
-          <Text style={styles.sectionTitle}>GENERAL CONTACTS (JOURNEY SHARE)</Text>
-          <Text style={styles.sectionDesc}>Available for Journey Sharing and tracking.</Text>
+          {/* --- GENERAL CONTACTS --- */}
+          <YStack marginBottom={32}>
+            <TText fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={4} marginLeft={4}>
+              GENERAL CONTACTS (JOURNEY SHARE)
+            </TText>
+            <TText fontSize={11} fontFamily="Chirp-Regular" color={theme.textSecondary} marginBottom={16} marginLeft={4} lineHeight={16}>
+              Available for Journey Sharing and tracking.
+            </TText>
 
-          <View style={styles.contactsList}>
-            {generalContacts.map((contact) => (
-              <View key={contact.id} style={styles.contactCard}>
-                <View style={styles.contactLeft}>
-                  <View style={styles.avatarContainer}>
-                    <View style={[styles.avatar, { backgroundColor: contact.bg }]}>
-                      <Text style={[styles.avatarText, { color: contact.color }]}>{contact.initial}</Text>
-                    </View>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
-                    <Text style={styles.contactSub}>{contact.phone}</Text>
-                  </View>
-                </View>
-                <View style={styles.actionRow}>
-                  <TouchableOpacity onPress={() => toggleEmergencyStatus(contact.id)} style={[styles.actionPill, { backgroundColor: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", paddingHorizontal: 12 }]}>
-                    <MaterialCommunityIcons name="shield-check" size={14} color="#00C48A" style={{ marginRight: 4 }} />
-                    <Text style={{ fontSize: 11, fontFamily: "Sora_700Bold", color: "#00C48A" }}>Add to SOS</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => deleteContact(contact.id)} style={[styles.actionPill, { backgroundColor: isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2", marginLeft: 8 }]}>
-                    <MaterialCommunityIcons name="trash-can-outline" size={16} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-            {generalContacts.length === 0 && (
-              <Text style={styles.emptyText}>No general contacts added.</Text>
+            {generalContacts.length > 0 ? (
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                {generalContacts.map((contact, index) => (
+                  <XStack 
+                    key={contact.id} 
+                    padding={16} 
+                    alignItems="center" 
+                    justifyContent="space-between"
+                    borderBottomWidth={index === generalContacts.length - 1 ? 0 : 1}
+                    borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
+                  >
+                    <XStack alignItems="center" flex={1}>
+                      <YStack width={40} height={40} borderRadius={20} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginRight={16}>
+                        <TText fontSize={16} fontFamily="Chirp-Heavy" color={contact.color}>{contact.initial}</TText>
+                      </YStack>
+                      <YStack flex={1}>
+                        <TText fontSize={15} fontFamily="Chirp-Medium" color={theme.textPrimary} marginBottom={2} numberOfLines={1}>
+                          {contact.name}
+                        </TText>
+                        <TText fontSize={12} fontFamily="Chirp-Regular" color={theme.textSecondary}>
+                          {contact.phone}
+                        </TText>
+                      </YStack>
+                    </XStack>
+
+                    <XStack alignItems="center" gap={16}>
+                      <TouchableOpacity onPress={() => toggleEmergencyStatus(contact.id)} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                        <Feather name="shield" size={20} color={theme.textSecondary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => deleteContact(contact.id)} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                        <Feather name="trash-2" size={20} color="#EF4444" />
+                      </TouchableOpacity>
+                    </XStack>
+                  </XStack>
+                ))}
+              </YStack>
+            ) : (
+              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} padding={24} borderRadius={24} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
+                <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} textAlign="center">
+                  No general contacts added.
+                </TText>
+              </YStack>
             )}
-          </View>
+          </YStack>
 
-          <Text style={styles.sectionTitle}>YOUR INVITE LINK</Text>
-          <View style={styles.inviteInputContainer}>
-            <Text style={styles.inviteLinkText} numberOfLines={1}>{dynamicInviteLink}</Text>
-            <TouchableOpacity style={styles.copyButtonContainer} activeOpacity={0.7}>
-              <Text style={styles.copyButtonText}>Copy</Text>
-            </TouchableOpacity>
-          </View>
+          {/* --- INVITE LINK --- */}
+          <YStack>
+            <TText fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>
+              YOUR INVITE LINK
+            </TText>
+            <XStack 
+              backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} 
+              borderRadius={24} 
+              borderWidth={1} 
+              borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} 
+              paddingHorizontal={16} 
+              paddingVertical={16} 
+              marginBottom={20} 
+              alignItems="center" 
+              justifyContent="space-between"
+            >
+              <TText flex={1} fontSize={14} fontFamily="Chirp-Medium" color={theme.textSecondary} marginRight={12} numberOfLines={1}>
+                {dynamicInviteLink}
+              </TText>
+              <TouchableOpacity activeOpacity={0.7} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                <TText fontSize={14} fontFamily="Chirp-Bold" color="#00C48A">Copy</TText>
+              </TouchableOpacity>
+            </XStack>
+          </YStack>
+
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </YStack>
   );
 };
-
-const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F4F6F8" },
-  safeArea: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, paddingTop: Platform.OS === "ios" ? 20 : 10, marginBottom: 24 },
-  backButton: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", justifyContent: "center", alignItems: "center", backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", marginRight: 16 },
-  headerTitle: { fontSize: 20, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary },
-  scrollContent: { paddingHorizontal: 24, paddingBottom: 40 },
-  
-  addContactBtn: { flexDirection: "row", backgroundColor: "#00C48A", borderRadius: 16, paddingVertical: 16, justifyContent: "center", alignItems: "center", marginBottom: 32, shadowColor: "#00C48A", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 4 },
-  addContactBtnText: { fontSize: 14, fontFamily: "Sora_700Bold", color: "#FFFFFF" },
-
-  sectionTitle: { fontSize: 11, fontFamily: "Sora_700Bold", color: theme.textSecondary, letterSpacing: 1.5, marginBottom: 4, marginLeft: 4 },
-  sectionDesc: { fontSize: 11, fontFamily: "Sora_400Regular", color: theme.textSecondary, marginBottom: 16, marginLeft: 4, lineHeight: 16 },
-  contactsList: { marginBottom: 32 },
-  emptyText: { fontSize: 12, fontFamily: "Sora_500Medium", color: theme.textSecondary, paddingLeft: 4, paddingBottom: 10 },
-  
-  contactCard: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#1F2E27" : "#E2E8F0", padding: 16, marginBottom: 12 },
-  contactLeft: { flexDirection: "row", alignItems: "center", flex: 1 },
-  avatarContainer: { position: "relative", marginRight: 16 },
-  avatar: { width: 48, height: 48, borderRadius: 24, justifyContent: "center", alignItems: "center" },
-  avatarText: { fontSize: 20, fontFamily: "Sora_700Bold" },
-  onlineIndicator: { position: "absolute", bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: "#00C48A", borderWidth: 2, borderColor: isDarkMode ? "#121A16" : "#FFFFFF" },
-  contactName: { fontSize: 15, fontFamily: "Sora_700Bold", color: theme.textPrimary, marginBottom: 4 },
-  contactSub: { fontSize: 12, fontFamily: "Sora_500Medium", color: theme.textSecondary },
-  
-  actionRow: { flexDirection: "row", alignItems: "center" },
-  actionPill: { flexDirection: "row", alignItems: "center", justifyContent: "center", height: 36, borderRadius: 12, paddingHorizontal: 12 },
-  
-  inviteInputContainer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: isDarkMode ? "#1F2E27" : "#E2E8F0", paddingLeft: 16, paddingRight: 8, paddingVertical: 8, marginBottom: 20 },
-  inviteLinkText: { flex: 1, fontSize: 13, fontFamily: "Sora_500Medium", color: theme.textSecondary, marginRight: 12 },
-  copyButtonContainer: { backgroundColor: isDarkMode ? "rgba(59,130,246,0.15)" : "#EFF6FF", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
-  copyButtonText: { fontSize: 12, fontFamily: "Sora_700Bold", color: "#2563EB" },
-});
 
 export default ContactsScreen;
