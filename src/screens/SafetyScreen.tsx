@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from "react";
 import { 
   Platform, StatusBar, Animated, SafeAreaView, Dimensions, 
-  ScrollView, Alert, TouchableOpacity, Pressable, View 
+  ScrollView, Alert, TouchableOpacity, Pressable, View, ActivityIndicator, Image 
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -15,11 +15,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
 import AuthService from "../services/authService";
 import { useFocusEffect } from "@react-navigation/native";
+import CustomMapView from "../components/CustomMapView";
 
 const { height, width } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const STORAGE_KEY = "strompulse_emergency_contacts";
 const JOURNEY_KEY = "strompulse_journey_active";
+const JOURNEY_CONTACTS_KEY = "strompulse_journey_contacts";
 const SETTINGS_KEY = "strompulse_security_settings";
 
 const SafetyScreen = ({ navigation, route }: any) => {
@@ -28,8 +30,9 @@ const SafetyScreen = ({ navigation, route }: any) => {
   const [isJourneyActive, setIsJourneyActive] = useState(false);
   const [alertSent, setAlertSent] = useState(false);
   const [currentLocation, setCurrentLocation] = useState("Locating...");
+  const [currentCoords, setCurrentCoords] = useState<{lat: number, lng: number} | null>(null);
   const [emergencyContacts, setEmergencyContacts] = useState<any[]>([]);
-  const [securitySettings, setSecuritySettings] = useState({ locationSharing: true, sendSms: true });
+  const [securitySettings, setSecuritySettings] = useState({ locationSharing: true, sendSms: true, customMessage: "" });
   const [user, setUser] = useState<any>(null);
 
   useFocusEffect(
@@ -53,6 +56,7 @@ const SafetyScreen = ({ navigation, route }: any) => {
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status === "granted") {
           let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setCurrentCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
           let response = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
           if (response.length > 0) {
             setCurrentLocation(`${response[0].district || response[0].city}, ${response[0].region}`);
@@ -70,11 +74,15 @@ const SafetyScreen = ({ navigation, route }: any) => {
   const handleStopJourney = async () => {
     setIsJourneyActive(false);
     await AsyncStorage.removeItem(JOURNEY_KEY);
+    await AsyncStorage.removeItem(JOURNEY_CONTACTS_KEY);
+    await AsyncStorage.removeItem("strompulse_journey_end_time");
     navigation.setParams({ isJourneyActive: false });
   };
 
   const holdProgress = useRef(new Animated.Value(0)).current;
-  const CIRCLE_RADIUS = 75;
+  
+  const BUTTON_SIZE = 140; 
+  const CIRCLE_RADIUS = (BUTTON_SIZE / 2) - 3; 
   const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS;
 
   const strokeDashoffset = holdProgress.interpolate({
@@ -84,14 +92,14 @@ const SafetyScreen = ({ navigation, route }: any) => {
 
   const triggerEmergencyProtocol = async () => {
     if (emergencyContacts.length === 0) {
-      Alert.alert("No Contacts", "Please go to My Contacts and add people to your Emergency Network first.");
+      Alert.alert("No Contacts", "Please go to Contacts and assign people to your Emergency Network first.");
       holdProgress.setValue(0);
       return;
     }
 
     setAlertSent(true);
-    let message = `SOS ALERT: I am in a GENERAL EMERGENCY.`;
-    if (securitySettings.locationSharing) message += ` My last known location is ${currentLocation}.`;
+    let message = securitySettings.customMessage ? securitySettings.customMessage : `🚨 SOS ALERT: I am in a GENERAL EMERGENCY.`;
+    if (securitySettings.locationSharing) message += ` My last known location is ${currentLocation}. Live tracking available on Strompulse.`;
     message += ` Please send help immediately.`;
 
     try {
@@ -157,7 +165,7 @@ const SafetyScreen = ({ navigation, route }: any) => {
               </YStack>
               <TText fontFamily="Chirp-Heavy" fontSize={24} color={theme.textPrimary} marginBottom={12} textAlign="center">Broadcast Active</TText>
               <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textSecondary} textAlign="center" lineHeight={22}>
-                Your emergency broadcast has been successfully forwarded to your safety network.
+                Your emergency broadcast has been successfully forwarded to your security network.
               </TText>
             </YStack>
 
@@ -209,116 +217,170 @@ const SafetyScreen = ({ navigation, route }: any) => {
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
       <SafeAreaView style={{ flex: 1 }}>
         
-        {/* --- MINIMALIST HEADER WITH SETTINGS --- */}
-        <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={16} position="relative">
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: "absolute", left: 24, padding: 8, zIndex: 10 }}>
-            <Feather name="arrow-left" size={24} color={theme.textPrimary} />
-          </TouchableOpacity>
-          <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>Safety</TText>
-          <TouchableOpacity onPress={() => navigation.navigate("SafetySettingsScreen")} style={{ position: "absolute", right: 24, padding: 8, zIndex: 10 }}>
-            <Feather name="settings" size={22} color={theme.textPrimary} />
+        {/* --- REFINED HEADER --- */}
+        <XStack justifyContent="space-between" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={16} position="relative">
+          
+          <Image 
+            source={require("../../assets/images/strompulselogo.png")} 
+            style={{ width: 48, height: 48, resizeMode: "contain" }} 
+          />
+          
+          <YStack position="absolute" left={0} right={0} alignItems="center" pointerEvents="none">
+            <TText fontFamily="Chirp-Heavy" fontSize={17} color={theme.textPrimary}>Strompulse Security</TText>
+            <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Stay safe, wherever you go</TText>
+          </YStack>
+          
+          <TouchableOpacity onPress={() => navigation.navigate("SafetySettingsScreen")} style={{ backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", padding: 10, borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" }}>
+            <Feather name="settings" size={20} color={theme.textPrimary} />
           </TouchableOpacity>
         </XStack>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-          
+
+          {/* --- ACTIVE JOURNEY BANNER --- */}
           {isJourneyActive && (
-            <XStack justifyContent="space-between" alignItems="center" backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} borderRadius={20} padding={16} marginHorizontal={24} borderWidth={1} borderColor="#00C48A" marginBottom={24}>
-              <XStack alignItems="center">
-                <YStack width={10} height={10} borderRadius={5} backgroundColor="#00C48A" marginRight={14} />
+            <XStack marginHorizontal={24} marginTop={10} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} borderRadius={20} padding={16} borderWidth={1} borderColor="#00C48A" alignItems="center" justifyContent="space-between">
+              <XStack alignItems="center" gap={12}>
+                <YStack width={10} height={10} borderRadius={5} backgroundColor="#00C48A" />
                 <YStack>
                   <TText fontFamily="Chirp-Bold" fontSize={14} color="#00C48A" marginBottom={2}>Journey Share Active</TText>
                   <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>GPS Tracking live</TText>
                 </YStack>
               </XStack>
-              <TouchableOpacity onPress={handleStopJourney}>
+              <TouchableOpacity onPress={handleStopJourney} activeOpacity={0.7}>
                 <YStack backgroundColor="#EF4444" paddingHorizontal={16} paddingVertical={8} borderRadius={12}>
                   <TText fontFamily="Chirp-Bold" fontSize={12} color="#FFF">End</TText>
                 </YStack>
               </TouchableOpacity>
             </XStack>
           )}
+          
+          {/* --- SOS BUTTON --- */}
+          <View style={{ alignItems: "center", justifyContent: "center", height: 280, width: "100%", marginBottom: 10, marginTop: 10 }}>
+            <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, borderWidth: 1, borderColor: isDarkMode ? "rgba(239,68,68,0.1)" : "rgba(239,68,68,0.15)" }} />
+            <View style={{ position: "absolute", width: 180, height: 180, borderRadius: 90, borderWidth: 1, borderColor: isDarkMode ? "rgba(239,68,68,0.2)" : "rgba(239,68,68,0.3)", backgroundColor: isDarkMode ? "rgba(239,68,68,0.05)" : "rgba(239,68,68,0.05)" }} />
 
-          {/* --- ROBUST PRESSABLE SOS BUTTON --- */}
-          <View style={{ alignItems: "center", justifyContent: "center", height: 320, width: "100%", marginBottom: 10 }}>
-            <View style={{ position: "absolute", width: 260, height: 260, borderRadius: 130, borderWidth: 1, borderColor: isDarkMode ? "#1A221E" : "#E2E8F0" }} />
-            <View style={{ position: "absolute", width: 190, height: 190, borderRadius: 95, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#F1F5F9", backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF" }} />
-
-            <Svg width="160" height="160" style={{ position: "absolute", zIndex: 10 }}>
-              <AnimatedCircle cx="80" cy="80" r={CIRCLE_RADIUS} stroke="#EF4444" strokeWidth="6" fill="none" strokeDasharray={CIRCLE_CIRCUMFERENCE} strokeDashoffset={strokeDashoffset} strokeLinecap="round" transform="rotate(-90 80 80)" />
+            <Svg width={BUTTON_SIZE} height={BUTTON_SIZE} style={{ position: "absolute", zIndex: 10 }}>
+              <AnimatedCircle 
+                cx={BUTTON_SIZE/2} 
+                cy={BUTTON_SIZE/2} 
+                r={CIRCLE_RADIUS} 
+                stroke="#EF4444" 
+                strokeWidth="6" 
+                fill="none" 
+                strokeDasharray={CIRCLE_CIRCUMFERENCE} 
+                strokeDashoffset={strokeDashoffset} 
+                strokeLinecap="round" 
+                transform={`rotate(-90 ${BUTTON_SIZE/2} ${BUTTON_SIZE/2})`} 
+              />
             </Svg>
 
             <Pressable 
               onPressIn={handlePressIn} 
               onPressOut={handlePressOut}
-              style={{ width: 140, height: 140, borderRadius: 70, zIndex: 20, overflow: 'hidden' }}
+              style={{ width: BUTTON_SIZE - 12, height: BUTTON_SIZE - 12, borderRadius: (BUTTON_SIZE - 12)/2, zIndex: 20, overflow: 'hidden' }}
             >
-              <LinearGradient colors={["#EF4444", "#991B1B"]} style={{ width: 140, height: 140, borderRadius: 70, justifyContent: "center", alignItems: "center", shadowColor: "#EF4444", shadowOpacity: 0.3, shadowRadius: 20 }}>
-                <TText fontFamily="Chirp-Heavy" fontSize={36} color="#FFFFFF" letterSpacing={1}>SOS</TText>
+              <LinearGradient colors={["#EF4444", "#B91C1C"]} style={{ flex: 1, justifyContent: "center", alignItems: "center", shadowColor: "#EF4444", shadowOpacity: 0.4, shadowRadius: 20 }}>
+                <Feather name="message-square" size={24} color="#FFFFFF" style={{ marginBottom: 4 }} />
+                <TText fontFamily="Chirp-Heavy" fontSize={26} color="#FFFFFF" letterSpacing={1}>SOS</TText>
+                <TText fontFamily="Chirp-Medium" fontSize={10} color="#FFFFFF" opacity={0.9} marginTop={2}>Hold for 3 seconds</TText>
               </LinearGradient>
             </Pressable>
-
-            <TText style={{ position: "absolute", bottom: 10, fontFamily: "Chirp-Medium", fontSize: 11, color: theme.textSecondary }}>
-              Hold 1.5s to alert {emergencyContacts.length || "0"} contacts
-            </TText>
           </View>
 
-          {/* --- CLASSIC LIST GROUP --- */}
-          <YStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={32}>
-            
-            <TouchableOpacity onPress={() => navigation.navigate("JourneyShareScreen", { isJourneyActive })}>
-              <XStack padding={18} alignItems="center" borderBottomWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} justifyContent="center" alignItems="center">
-                  <Feather name="navigation" size={16} color={theme.textPrimary} />
-                </YStack>
-                <TText flex={1} marginLeft={16} fontFamily="Chirp-Medium" fontSize={15} color={theme.textPrimary}>Journey Share</TText>
-                <Feather name="chevron-right" size={20} color={theme.textSecondary} />
-              </XStack>
-            </TouchableOpacity>
+          {/* Subtext info */}
+          <XStack marginHorizontal={24} backgroundColor={isDarkMode ? "rgba(239,68,68,0.05)" : "#FEF2F2"} padding={16} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "rgba(239,68,68,0.2)" : "#FECACA"} marginBottom={24} alignItems="center">
+            <Feather name="shield" size={16} color="#EF4444" style={{ marginRight: 12 }} />
+            <TText flex={1} fontFamily="Chirp-Medium" fontSize={12} color={isDarkMode ? "#FCA5A5" : "#B91C1C"} lineHeight={18}>
+              Alerts will be sent to your emergency contacts with your live location
+            </TText>
+          </XStack>
 
-            <TouchableOpacity onPress={() => navigation.navigate("ContactsScreen")}>
-              <XStack padding={18} alignItems="center">
-                <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} justifyContent="center" alignItems="center">
-                  <Feather name="users" size={16} color={theme.textPrimary} />
-                </YStack>
-                <TText flex={1} marginLeft={16} fontFamily="Chirp-Medium" fontSize={15} color={theme.textPrimary}>Emergency Contacts</TText>
-                <Feather name="chevron-right" size={20} color={theme.textSecondary} />
-              </XStack>
-            </TouchableOpacity>
-
-          </YStack>
-
-          {/* --- ACTIVE EMERGENCY NETWORK --- */}
-          <YStack paddingHorizontal={24}>
-            <TText fontFamily="Chirp-Bold" fontSize={12} color={theme.textSecondary} marginLeft={4} marginBottom={12}>YOUR SAFETY NETWORK</TText>
-            
-            {emergencyContacts.length > 0 ? (
-              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                {emergencyContacts.map((contact, index) => (
-                  <XStack 
-                    key={contact.id} 
-                    padding={16} 
-                    alignItems="center" 
-                    borderBottomWidth={index === emergencyContacts.length - 1 ? 0 : 1} 
-                    borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}
-                  >
-                    <YStack width={40} height={40} borderRadius={20} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginRight={16}>
-                      <TText fontFamily="Chirp-Bold" fontSize={16} color={contact.color}>{contact.initial}</TText>
-                    </YStack>
-                    <YStack flex={1}>
-                      <TText fontFamily="Chirp-Medium" fontSize={15} color={theme.textPrimary}>{contact.name}</TText>
-                      <TText fontFamily="Chirp-Regular" fontSize={13} color={theme.textSecondary} marginTop={2}>{contact.phone}</TText>
-                    </YStack>
-                  </XStack>
-                ))}
+          {/* --- SHARE MY JOURNEY CARD --- */}
+          <TouchableOpacity onPress={() => navigation.navigate("JourneyShareScreen", { isJourneyActive })}>
+            <XStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={16} padding={20} alignItems="center">
+              <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+                <Feather name="map-pin" size={16} color="#00C48A" />
               </YStack>
+              <YStack flex={1} marginLeft={16}>
+                <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Share My Journey</TText>
+                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Let your contacts follow your trip in real time</TText>
+              </YStack>
+              <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+            </XStack>
+          </TouchableOpacity>
+
+          {/* --- BIG LIVE MAP (Movable & Interactive with CustomMapView) --- */}
+          <YStack marginHorizontal={24} height={400} backgroundColor={isDarkMode ? "#121A16" : "#E2E8F0"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} overflow="hidden" position="relative" marginBottom={16}>
+            {currentCoords ? (
+              <CustomMapView 
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                showCoverage={false}
+                showLegend={false}
+                region={{
+                  latitude: currentCoords.lat,
+                  longitude: currentCoords.lng,
+                  latitudeDelta: 0.015,
+                  longitudeDelta: 0.015,
+                }}
+                markers={[{
+                  id: "current_user",
+                  title: currentLocation.split(',')[0],
+                  latitude: currentCoords.lat,
+                  longitude: currentCoords.lng,
+                  connectionState: "online"
+                }]}
+              />
             ) : (
-              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} padding={24} borderRadius={24} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textPrimary} marginBottom={6}>No Contacts Added</TText>
-                <TText fontFamily="Chirp-Regular" fontSize={13} color={theme.textSecondary} textAlign="center">Add trusted people to receive your SOS alerts.</TText>
+              <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center">
+                <ActivityIndicator size="small" color="#00C48A" />
+              </YStack>
+            )}
+            
+            {/* Overlay hint if journey is not active */}
+            {!isJourneyActive && (
+              <YStack position="absolute" bottom={0} left={0} right={0} paddingVertical={16} backgroundColor={isDarkMode ? "rgba(18,26,22,0.85)" : "rgba(255,255,255,0.95)"} alignItems="center">
+                <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Turn on Share My Journey above to track trips</TText>
               </YStack>
             )}
           </YStack>
+
+          {/* --- EMERGENCY CONTACTS CARD WITH AVATARS --- */}
+          <TouchableOpacity onPress={() => navigation.navigate("ContactsScreen")}>
+            <YStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={16}>
+              <XStack justifyContent="space-between" alignItems="center" marginBottom={16}>
+                <XStack alignItems="center">
+                  <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} justifyContent="center" alignItems="center" marginRight={12}>
+                    <Feather name="users" size={16} color={theme.textPrimary} />
+                  </YStack>
+                  <YStack>
+                    <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Emergency Contacts</TText>
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>{emergencyContacts.length} of 3 contacts will be alerted</TText>
+                  </YStack>
+                </XStack>
+                <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+              </XStack>
+
+              <XStack gap={16} paddingLeft={4}>
+                {emergencyContacts.slice(0, 3).map((contact, i) => (
+                  <YStack key={i} alignItems="center">
+                    <YStack width={44} height={44} borderRadius={22} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginBottom={6}>
+                      <TText fontFamily="Chirp-Bold" fontSize={16} color={contact.color}>{contact.initial}</TText>
+                    </YStack>
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{contact.name.split(' ')[0]}</TText>
+                  </YStack>
+                ))}
+                {emergencyContacts.length < 3 && (
+                  <YStack alignItems="center">
+                    <YStack width={44} height={44} borderRadius={22} backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} justifyContent="center" alignItems="center" marginBottom={6} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} borderStyle="dashed">
+                      <Feather name="plus" size={16} color={theme.textSecondary} />
+                    </YStack>
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Add</TText>
+                  </YStack>
+                )}
+              </XStack>
+            </YStack>
+          </TouchableOpacity>
 
         </ScrollView>
       </SafeAreaView>

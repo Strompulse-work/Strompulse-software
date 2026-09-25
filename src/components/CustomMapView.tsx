@@ -36,24 +36,24 @@ const getMarkerStatusColors = (marker: any) => {
   return STATUS_COLORS.offline;
 };
 
-// Added region to props for panning capability
 const CustomMapView = ({ 
   markers = [], 
   style, 
   showCoverage = false, 
+  showLegend = true, 
   onMarkerPress,
   region 
 }: { 
   markers?: any[]; 
   style?: any; 
   showCoverage?: boolean; 
+  showLegend?: boolean;
   onMarkerPress?: (id: string) => void;
   region?: any;
 }) => {
   const { isDarkMode } = useTheme();
   const mapRef = useRef<MapView>(null);
 
-  // Smoothly pan to region whenever a search result updates the region prop
   useEffect(() => {
     if (region && mapRef.current) {
       mapRef.current.animateToRegion(region, 800);
@@ -108,27 +108,29 @@ const CustomMapView = ({
         })}
       </MapView>
 
-      {/* Modern Floating Legend Card */}
-      <View style={[
-        styles.legendContainer, 
-        { 
-          backgroundColor: isDarkMode ? "rgba(18, 26, 22, 0.95)" : "rgba(255, 255, 255, 0.95)",
-          borderColor: isDarkMode ? "#2D3B34" : "#F1F5F9"
-        }
-      ]}>
-        <View style={styles.legendRow}>
-          <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS.online.solid }]} />
-          <Text style={[styles.legendText, { color: isDarkMode ? "#F8FAFC" : "#1E293B" }]}>Power Stable</Text>
+      {/* Conditionally Render Floating Legend Card */}
+      {showLegend && (
+        <View style={[
+          styles.legendContainer, 
+          { 
+            backgroundColor: isDarkMode ? "rgba(18, 26, 22, 0.95)" : "rgba(255, 255, 255, 0.95)",
+            borderColor: isDarkMode ? "#2D3B34" : "#F1F5F9"
+          }
+        ]}>
+          <View style={styles.legendRow}>
+            <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS.online.solid }]} />
+            <Text style={[styles.legendText, { color: isDarkMode ? "#F8FAFC" : "#1E293B" }]}>Power Stable</Text>
+          </View>
+          <View style={styles.legendRow}>
+            <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS.checking.solid }]} />
+            <Text style={[styles.legendText, { color: isDarkMode ? "#F8FAFC" : "#1E293B" }]}>Checking</Text>
+          </View>
+          <View style={[styles.legendRow, { marginBottom: 0 }]}>
+            <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS.offline.solid }]} />
+            <Text style={[styles.legendText, { color: isDarkMode ? "#F8FAFC" : "#1E293B" }]}>Power Outage</Text>
+          </View>
         </View>
-        <View style={styles.legendRow}>
-          <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS.checking.solid }]} />
-          <Text style={[styles.legendText, { color: isDarkMode ? "#F8FAFC" : "#1E293B" }]}>Checking</Text>
-        </View>
-        <View style={[styles.legendRow, { marginBottom: 0 }]}>
-          <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS.offline.solid }]} />
-          <Text style={[styles.legendText, { color: isDarkMode ? "#F8FAFC" : "#1E293B" }]}>Power Outage</Text>
-        </View>
-      </View>
+      )}
     </View>
   );
 };
@@ -162,16 +164,15 @@ const styles = StyleSheet.create({
   markerText: {
     marginTop: 4,
     fontSize: 10,
-    fontFamily: "Chirp-Bold", // Updated to match the premium profile vibe
+    fontFamily: "Chirp-Bold",
     color: "#FFFFFF", 
     textShadowColor: "rgba(0, 0, 0, 0.7)", 
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3, 
   },
-  // New Legend Styles
   legendContainer: {
     position: "absolute",
-    top: 80, // Placed exactly under the 52px search bar
+    top: 80, 
     left: 16,
     paddingVertical: 12,
     paddingHorizontal: 14,

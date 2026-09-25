@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  Platform, StatusBar, RefreshControl, Animated, 
-  TextInput, ActivityIndicator, Image, SafeAreaView, Dimensions, 
+import {
+  Platform, StatusBar, RefreshControl, Animated,
+  TextInput, ActivityIndicator, Image, SafeAreaView, Dimensions,
   Modal, TouchableOpacity, ScrollView, Linking, Alert, Switch
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import Svg, { Rect, Text as SvgText, Line } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
-import { useAllGridDevices, computeAggregatedHistoryAnalytics } from "../hooks/useDeviceData";
+import { useAllGridDevices, computeAggregatedHistoryAnalytics, parseStromTimestamp } from "../hooks/useDeviceData";
 import { Loading } from "../components/UIComponents";
 import CustomMapView from "../components/CustomMapView";
 import AuthService from "../services/authService";
@@ -44,6 +44,97 @@ const CITIES = [
 
 const CHECKING_COLOR = "#F59E0B";
 
+// ---------------------------------------------------------------------------
+// REAL-TIME UPTIME CALCULATION
+// ---------------------------------------------------------------------------
+// Firebase only ever stores a restoration EVENT under `history/<timestamp>`
+// (confirmed shape: { latitude, longitude, status: 1, timestamp, voltage } —
+// a snapshot taken the instant power came back, with no duration/end field
+// of its own). There is no record of when an outage started, only when it
+// ended. Given that, the most honest thing we can compute per device is:
+//
+//   - Each restoration event implies an "up" interval starting at its own
+//     timestamp and running until the NEXT restoration event (if one
+//     exists), because a later restoration only happens after another
+//     outage occurred in between.
+//   - The most recent restoration's "up" interval only extends all the way
+//     to "now" if the device is CURRENTLY online. If it's currently
+//     offline, we stop that interval at its own timestamp — we have no
+//     record of when the current outage began, so we never claim uptime we
+//     can't back up with data.
+//   - A device with no restoration history at all falls back to its
+//     current live state for the whole window (100% if online, 0% if not).
+//
+// This recalculates from whatever `device.history`/`device.isOnline` looks
+// like at render time, so as Firebase pushes new restorations or the
+// connection hook flips a device on/off, the next render produces fresh
+// percentages — no static/mock data involved.
+// ---------------------------------------------------------------------------
+
+const buildUpIntervalsFromHistory = (
+  historyNode: any,
+  isOnline: boolean,
+  nowMs: number
+): Array<{ start: number; end: number }> => {
+  if (!historyNode) return [];
+
+  const events = Object.keys(historyNode)
+    .map((key) => {
+      const entry = historyNode[key];
+      const tsSource = entry && typeof entry === "object" && entry.timestamp ? entry.timestamp : key;
+      const parsed = parseStromTimestamp(String(tsSource));
+      return parsed ? parsed.getTime() : null;
+    })
+    .filter((ts): ts is number => typeof ts === "number" && !Number.isNaN(ts))
+    .sort((a, b) => a - b);
+
+  if (events.length === 0) return [];
+
+  const intervals: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < events.length; i++) {
+    const start = events[i];
+    const isLast = i === events.length - 1;
+    const end = isLast ? (isOnline ? nowMs : start) : events[i + 1];
+    if (end > start) intervals.push({ start, end });
+  }
+  return intervals;
+};
+
+const sumOverlapMs = (
+  intervals: Array<{ start: number; end: number }>,
+  rangeStart: number,
+  rangeEnd: number
+): number => {
+  let total = 0;
+  for (const iv of intervals) {
+    const overlapStart = Math.max(iv.start, rangeStart);
+    const overlapEnd = Math.min(iv.end, rangeEnd);
+    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+  }
+  return total;
+};
+
+// Real, Firebase-driven uptime % (0-100) for a device within [startMs, endMs).
+// Returns null when the interval hasn't happened yet, so callers can render it
+// as a neutral/future bar instead of a fake 0%.
+const calculateIntervalUptime = (device: any, startMs: number, endMs: number, nowMs: number): number | null => {
+  if (startMs >= nowMs) return null;
+
+  const clampedEnd = Math.min(endMs, nowMs);
+  const durationMs = clampedEnd - startMs;
+  if (durationMs <= 0) return null;
+
+  const hasHistory = device?.history && Object.keys(device.history).length > 0;
+  if (!hasHistory) {
+    return device?.isOnline ? 100 : 0;
+  }
+
+  const intervals = buildUpIntervalsFromHistory(device.history, !!device.isOnline, nowMs);
+  const upMs = sumOverlapMs(intervals, startMs, clampedEnd);
+  const pct = Math.round((upMs / durationMs) * 100);
+  return Math.max(0, Math.min(100, pct));
+};
+
 const SyncNotice = ({ visible, isDarkMode }: { visible: boolean; isDarkMode: boolean }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -56,7 +147,7 @@ const SyncNotice = ({ visible, isDarkMode }: { visible: boolean; isDarkMode: boo
   return (
     <Animated.View pointerEvents="none" style={{
       position: "absolute", top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 120 : 140,
-      alignSelf: 'center', zIndex: 200, opacity: fadeAnim, 
+      alignSelf: 'center', zIndex: 200, opacity: fadeAnim,
       backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF",
       borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
       paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20,
@@ -80,7 +171,7 @@ const ElectricityScreen = ({ navigation }: any) => {
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [greeting, setGreeting] = useState("Good morning");
   const [mapRegion, setMapRegion] = useState<any>(null);
-  
+
   const [mapSearchQuery, setMapSearchQuery] = useState("");
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   const [selectedStreetName, setSelectedStreetName] = useState<string | null>(null);
@@ -91,7 +182,7 @@ const ElectricityScreen = ({ navigation }: any) => {
   const [isCityDropdownOpen, setIsCityDropdownOpen] = useState(false);
   const [apiSearchResults, setApiSearchResults] = useState<any[]>([]);
   const [isSearchingApi, setIsSearchingApi] = useState(false);
-  
+
   const [user, setUser] = useState<any>(null);
   const [localAvatar, setLocalAvatar] = useState<string | null>(null);
   const [localName, setLocalName] = useState<string | null>(null);
@@ -101,8 +192,7 @@ const ElectricityScreen = ({ navigation }: any) => {
   const [locSearchResults, setLocSearchResults] = useState<any[]>([]);
   const [isLocSearching, setIsLocSearching] = useState(false);
   const [selectedLocResult, setSelectedLocResult] = useState<any>(null);
-  
-  // Sidebar Drawer State
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const sidebarAnim = useRef(new Animated.Value(width)).current;
 
@@ -111,15 +201,13 @@ const ElectricityScreen = ({ navigation }: any) => {
   const [reportStatus, setReportStatus] = useState<"stable" | "outage" | null>(null);
   const [showSyncNotice, setShowSyncNotice] = useState(true);
 
-  // Global state for chart to prevent re-renders wiping it out
   const [chartTimeRange, setChartTimeRange] = useState<"Today" | "This Week">("Today");
 
-  // Dynamic Action Color
   const solidActionBg = isDarkMode ? "#FFFFFF" : "#000000";
   const solidActionIcon = isDarkMode ? "#000000" : "#FFFFFF";
 
   useEffect(() => { const timer = setTimeout(() => setShowSyncNotice(false), 4000); return () => clearTimeout(timer); }, []);
-  
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
     const hour = new Date().getHours();
@@ -137,7 +225,7 @@ const ElectricityScreen = ({ navigation }: any) => {
           setLocalName(await AsyncStorage.getItem("global_name"));
           const savedLoc = await AsyncStorage.getItem("strompulse_default_location");
           if (savedLoc) setDefaultLocation(JSON.parse(savedLoc));
-          
+
           const savedRecentSearch = await AsyncStorage.getItem("strompulse_recent_map_search");
           if (savedRecentSearch) setRecentMapSearch(JSON.parse(savedRecentSearch));
         } catch (e) {}
@@ -197,7 +285,7 @@ const ElectricityScreen = ({ navigation }: any) => {
     let nearest = nodesList[0];
     let minDistance = Infinity;
     nodesList.forEach(node => {
-      const R = 6371; 
+      const R = 6371;
       const dLat = (node.lat - lat) * (Math.PI / 180);
       const dLon = (node.lng - lng) * (Math.PI / 180);
       const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat * (Math.PI / 180)) * Math.cos(node.lat * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
@@ -215,7 +303,7 @@ const ElectricityScreen = ({ navigation }: any) => {
     const isOnline = connectionState === 'online';
     const isChecking = connectionState === 'checking';
     const realUptime = liveDevice?.uptime !== undefined ? liveDevice.uptime : (isOnline ? 100 : 0);
-    const outOfCoverage = !liveDevice; 
+    const outOfCoverage = !liveDevice;
     const isPartial = isOnline && realUptime > 0 && realUptime < 100;
     let finalStatusText = outOfCoverage ? "Out of Coverage" : isChecking ? "Checking Status" : isOnline ? "Presently Stable" : "Power Outage";
     if (isPartial) finalStatusText = "Partial Stability";
@@ -237,7 +325,7 @@ const ElectricityScreen = ({ navigation }: any) => {
           setLocSearchResults(data.map((d: any) => ({ id: d.place_id.toString(), name: d.name || d.display_name.split(',')[0], lat: parseFloat(d.lat), lng: parseFloat(d.lon), isCustom: true })));
         } catch (error) {} finally { setIsLocSearching(false); }
       } else { setLocSearchResults([]); }
-    }, 600); 
+    }, 600);
     return () => clearTimeout(delayDebounceFn);
   }, [locSearchQuery]);
 
@@ -261,7 +349,7 @@ const ElectricityScreen = ({ navigation }: any) => {
           setApiSearchResults(data.map((d: any) => ({ id: d.place_id.toString(), displayTitle: d.name || d.display_name.split(',')[0], lat: parseFloat(d.lat), lng: parseFloat(d.lon) })));
         } catch (error) {} finally { setIsSearchingApi(false); }
       } else { setApiSearchResults([]); }
-    }, 600); 
+    }, 600);
     return () => clearTimeout(delayDebounceFn);
   }, [mapSearchQuery]);
 
@@ -286,7 +374,7 @@ const ElectricityScreen = ({ navigation }: any) => {
     setSelectedAreaId(item.id);
     setSelectedStreetName(item.isStreet ? item.displayTitle : null);
     setMapSearchQuery(item.displayTitle);
-    
+
     if (item.lat && item.lng) {
       setMapRegion({
         latitude: item.lat,
@@ -299,7 +387,7 @@ const ElectricityScreen = ({ navigation }: any) => {
     const searchToSave = { ...item, displayTitle: item.displayTitle };
     setRecentMapSearch(searchToSave);
     AsyncStorage.setItem("strompulse_recent_map_search", JSON.stringify(searchToSave));
-    
+
     setIsMapSearchFocused(false);
   };
 
@@ -315,8 +403,6 @@ const ElectricityScreen = ({ navigation }: any) => {
     return <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center"><Loading /></YStack>;
   }
 
-  const totalDevices = gridItems.length;
-  const onlineDevices = gridItems.filter(item => item.isOnline).length;
   const historyAnalytics = computeAggregatedHistoryAnalytics(gridItems.map((item) => ({ history: item.history, isOnline: item.isOnline })));
 
   const filteredCommunities = gridItems.filter((item) => {
@@ -330,50 +416,63 @@ const ElectricityScreen = ({ navigation }: any) => {
   const selectedAreaData = selectedAreaId ? gridItems.find(item => item.id === selectedAreaId) : null;
   const showSearchDropdown = (mapSearchQuery.length > 0 || (isMapSearchFocused && mapSearchQuery.length === 0 && recentMapSearch)) && !selectedAreaData;
 
-  // --- UPDATED 4-HOUR INTERVAL BAR CHART RENDERER ---
+  // --- STRICT REAL-TIME FIREBASE CALCULATION FOR ACCURACY BAR CHART ---
   const renderAccuracyBarChart = () => {
-    const nowHour = new Date().getHours();
-    const currentDay = new Date().getDay(); // 0 is Sunday, 1 is Monday...
+    const now = currentTime;
+    const nowDate = new Date(now);
+    const currentDay = nowDate.getDay();
+
+    // Time Boundaries
+    const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+    const startOfWeek = startOfToday - (currentDay * 24 * 60 * 60 * 1000);
 
     const labelsToday = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"];
     const labelsWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-    // Evaluate interval dynamic data
-    const intervalData = chartTimeRange === "Today" 
+    // Average a device-level uptime % across every grid item that has live data.
+    const averageAcrossGrid = (startMs: number, endMs: number) => {
+      let totalPct = 0;
+      let counted = 0;
+      gridItems.forEach((item) => {
+        const liveDev = devices.find((d) => d.id === item.id || d.id?.toUpperCase() === item.id.toUpperCase());
+        if (liveDev) {
+          const pct = calculateIntervalUptime(liveDev, startMs, endMs, now);
+          if (pct !== null) {
+            totalPct += pct;
+            counted++;
+          }
+        }
+      });
+      return counted > 0 ? Math.round(totalPct / counted) : 0;
+    };
+
+    // Calculate Bins by iterating over ALL valid Grid Items and averaging their exact math scores
+    const intervalData = chartTimeRange === "Today"
       ? labelsToday.map((label, idx) => {
-          const startHour = idx * 4;
-          if (startHour > nowHour) return { label, accuracy: 0, isFuture: true }; // future
-          
-          const avgUptime = gridItems.reduce((acc, curr) => acc + curr.uptime, 0) / (gridItems.length || 1);
-          let accuracy = Math.min(100, Math.max(0, Math.round(avgUptime + (idx % 2 === 0 ? 0 : -5))));
-          if (avgUptime === 0) accuracy = 0;
-          return { label, accuracy, isFuture: false };
+          const startMs = startOfToday + (idx * 4 * 3600 * 1000);
+          const endMs = startMs + (4 * 3600 * 1000);
+          if (startMs >= now) return { label, accuracy: 0, isFuture: true };
+          return { label, accuracy: averageAcrossGrid(startMs, endMs), isFuture: false };
         })
       : labelsWeek.map((label, idx) => {
-          if (idx > currentDay) return { label, accuracy: 0, isFuture: true }; // future days
-          
-          const avgUptime = gridItems.reduce((acc, curr) => acc + curr.uptime, 0) / (gridItems.length || 1);
-          // Add some artificial organic variation for past days of the week, lock today to actual
-          let accuracy = Math.min(100, Math.max(0, Math.round(avgUptime + (idx % 2 === 0 ? 5 : -10))));
-          if (idx === currentDay) accuracy = Math.round(avgUptime);
-          if (avgUptime === 0) accuracy = 0;
-          return { label, accuracy, isFuture: false };
+          const startMs = startOfWeek + (idx * 24 * 3600 * 1000);
+          const endMs = startMs + (24 * 3600 * 1000);
+          if (startMs >= now) return { label, accuracy: 0, isFuture: true };
+          return { label, accuracy: averageAcrossGrid(startMs, endMs), isFuture: false };
         });
 
     const chartHeight = 190;
     const chartWidth = 320;
     const yAxisLabels = [100, 80, 60, 40, 20, 0];
-    
-    // Adjust spacing based on 6 items (Today) vs 7 items (This Week)
+
     const barWidth = chartTimeRange === "Today" ? 28 : 22;
     const gap = chartTimeRange === "Today" ? 18 : 16;
-    const startX = 55; // Leave room for Y-axis titles
-    
+    const startX = 55;
     const chartAreaWidth = intervalData.length * (barWidth + gap);
 
     return (
       <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} marginBottom={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-        
+
         {/* Header & Toggle */}
         <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={20}>
           <XStack alignItems="center" gap={12} flex={1}>
@@ -384,7 +483,7 @@ const ElectricityScreen = ({ navigation }: any) => {
               <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>Grid Accuracy</TText>
             </YStack>
           </XStack>
-          
+
           {/* Custom Toggle Switch */}
           <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} borderRadius={12} padding={4}>
             <TouchableOpacity onPress={() => setChartTimeRange("Today")} style={{ paddingVertical: 6, paddingHorizontal: 12, backgroundColor: chartTimeRange === "Today" ? (isDarkMode ? "#2D3B34" : "#FFFFFF") : "transparent", borderRadius: 8 }}>
@@ -398,18 +497,18 @@ const ElectricityScreen = ({ navigation }: any) => {
 
         <YStack height={chartHeight} width="100%">
           <Svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-            
+
             {/* Y Axis Label */}
-            <SvgText 
-              x={12} 
-              y={chartHeight / 2 - 10} 
-              fill={theme.textSecondary} 
-              fontSize={10} 
-              fontFamily="Chirp-Bold" 
-              transform={`rotate(-90, 12, ${chartHeight / 2 - 10})`} 
+            <SvgText
+              x={12}
+              y={chartHeight / 2 - 10}
+              fill={theme.textSecondary}
+              fontSize={10}
+              fontFamily="Chirp-Bold"
+              transform={`rotate(-90, 12, ${chartHeight / 2 - 10})`}
               textAnchor="middle"
             >
-              Uptime Accuracy
+              Uptime
             </SvgText>
 
             {/* Y-Axis Grid Lines & Numbers */}
@@ -431,12 +530,15 @@ const ElectricityScreen = ({ navigation }: any) => {
               const maxBarHeight = 132;
               const barH = item.isFuture ? 4 : Math.max(6, (item.accuracy / 100) * maxBarHeight);
               const yPos = 20 + maxBarHeight - barH;
-              
-              let barColor = "#EF4444";
+
+              let barColor = "#EF4444"; // Defaults to Red for 0%
               if (item.accuracy >= 70) {
                 barColor = "#00C48A";
+              } else if (item.accuracy >= 40) {
+                barColor = "#F59E0B";
               }
-              if (item.isFuture || item.accuracy === 0) {
+
+              if (item.isFuture) {
                 barColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
               }
 
@@ -451,15 +553,15 @@ const ElectricityScreen = ({ navigation }: any) => {
             })}
 
             {/* X Axis Label */}
-            <SvgText 
-              x={startX + (chartAreaWidth / 2) - gap/2} 
-              y={chartHeight - 4} 
-              fill={theme.textSecondary} 
-              fontSize={10} 
-              fontFamily="Chirp-Bold" 
+            <SvgText
+              x={startX + (chartAreaWidth / 2) - gap/2}
+              y={chartHeight - 4}
+              fill={theme.textSecondary}
+              fontSize={10}
+              fontFamily="Chirp-Bold"
               textAnchor="middle"
             >
-              {chartTimeRange === "Today" ? "Hours" : "Days"}
+              {chartTimeRange === "Today" ? "hours" : "days"}
             </SvgText>
 
           </Svg>
@@ -474,13 +576,13 @@ const ElectricityScreen = ({ navigation }: any) => {
       <SyncNotice visible={showSyncNotice} isDarkMode={isDarkMode} />
 
       <SafeAreaView style={{ flex: 1 }}>
-        
+
         {/* --- HEADER: Logo extreme left, centered title, hamburger right --- */}
         <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={8}>
           <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
-          
+
           <TText style={{ fontFamily: "Sora_700Bold", fontSize: 18 }} color={theme.textPrimary}>Strompulse</TText>
-          
+
           <TouchableOpacity onPress={() => toggleSidebar(true)}>
             <YStack width={42} height={42} justifyContent="center" alignItems="flex-end">
               <Feather name="menu" size={24} color={theme.textPrimary} />
@@ -544,17 +646,17 @@ const ElectricityScreen = ({ navigation }: any) => {
             let label = "Map";
             if (tab === "communities") { iconName = "grid"; label = "Communities"; }
             if (tab === "stats") { iconName = "bar-chart-2"; label = "Analytics"; }
-            
+
             return (
               <TouchableOpacity key={tab} activeOpacity={0.8} onPress={() => setActiveTab(tab)} style={{ flex: 1 }}>
-                <XStack 
-                  paddingVertical={10} 
-                  alignItems="center" 
-                  justifyContent="center" 
-                  borderRadius={24} 
+                <XStack
+                  paddingVertical={10}
+                  alignItems="center"
+                  justifyContent="center"
+                  borderRadius={24}
                   borderWidth={1}
                   borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}
-                  backgroundColor={isActive ? solidActionBg : "transparent"} 
+                  backgroundColor={isActive ? solidActionBg : "transparent"}
                   gap={6}
                 >
                   <Feather name={iconName as any} size={14} color={isActive ? solidActionIcon : (isDarkMode ? "#64748B" : "#94A3B8")} />
@@ -568,7 +670,7 @@ const ElectricityScreen = ({ navigation }: any) => {
         </XStack>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C48A" />}>
-          
+
           {/* DEFAULT LOCATION CARD */}
           <YStack paddingHorizontal={24} marginBottom={24}>
             {!defaultLocation ? (
@@ -588,7 +690,7 @@ const ElectricityScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity activeOpacity={0.8} onPress={() => setIsLocModalVisible(true)}>
-                <XStack 
+                <XStack
                   backgroundColor={defaultLocStatus?.isOnline ? (isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.05)" : "#FEE2E2")}
                   borderRadius={20} paddingHorizontal={16} paddingVertical={14} alignItems="center" justifyContent="space-between"
                   borderWidth={1} borderColor={defaultLocStatus?.isOnline ? (isDarkMode ? "#064E3B" : "#A7F3D0") : (isDarkMode ? "#7F1D1D" : "#FECACA")}
@@ -614,30 +716,30 @@ const ElectricityScreen = ({ navigation }: any) => {
           {activeTab === "map" && (
             <YStack paddingHorizontal={24} paddingBottom={20} zIndex={9000}>
               <YStack position="relative" height={450} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                
+
                 <YStack flex={1} backgroundColor={isDarkMode ? "#121A16" : "#F8FAFC"}>
-                  <CustomMapView 
-                    showCoverage={true} 
-                    onMarkerPress={(id) => { 
-                      setSelectedAreaId(id); 
-                      setSelectedStreetName(null); 
+                  <CustomMapView
+                    showCoverage={true}
+                    onMarkerPress={(id) => {
+                      setSelectedAreaId(id);
+                      setSelectedStreetName(null);
                       setIsMapSearchFocused(false);
-                    }} 
-                    markers={gridItems.map((item) => ({ id: item.id, title: item.name, description: item.finalStatusText, isOnline: item.isOnline, isChecking: item.isChecking, connectionState: item.connectionState, latitude: item.lat, longitude: item.lng }))} 
+                    }}
+                    markers={gridItems.map((item) => ({ id: item.id, title: item.name, description: item.finalStatusText, isOnline: item.isOnline, isChecking: item.isChecking, connectionState: item.connectionState, latitude: item.lat, longitude: item.lng }))}
                   />
                 </YStack>
 
                 <XStack position="absolute" top={16} left={16} right={16} zIndex={100} backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={16} paddingHorizontal={16} height={52} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
                   <Feather name="search" size={18} color={theme.textSecondary} />
-                  <TextInput 
-                    placeholder="Search grid..." 
-                    placeholderTextColor={theme.textSecondary} 
-                    style={{ flex: 1, marginLeft: 12, fontSize: 14, fontFamily: "Chirp-Medium", color: theme.textPrimary }} 
-                    value={mapSearchQuery} 
-                    onChangeText={(t) => { 
-                      setMapSearchQuery(t); 
-                      if(selectedAreaId) { setSelectedAreaId(null); setSelectedStreetName(null); } 
-                    }} 
+                  <TextInput
+                    placeholder="Search grid..."
+                    placeholderTextColor={theme.textSecondary}
+                    style={{ flex: 1, marginLeft: 12, fontSize: 14, fontFamily: "Chirp-Medium", color: theme.textPrimary }}
+                    value={mapSearchQuery}
+                    onChangeText={(t) => {
+                      setMapSearchQuery(t);
+                      if(selectedAreaId) { setSelectedAreaId(null); setSelectedStreetName(null); }
+                    }}
                     onFocus={() => {
                       setIsMapSearchFocused(true);
                       if (selectedAreaId) { setSelectedAreaId(null); setMapSearchQuery(""); }
@@ -726,14 +828,14 @@ const ElectricityScreen = ({ navigation }: any) => {
           {/* COMMUNITIES TAB */}
           {activeTab === "communities" && (
             <YStack paddingBottom={20} paddingHorizontal={24}>
-              
+
               <XStack marginBottom={20} gap={10}>
                 {["All", "Stable", "Outage"].map(cat => {
                   const isActive = activeCategory === cat;
                   return (
                     <TouchableOpacity key={cat} activeOpacity={0.8} onPress={() => setActiveCategory(cat as any)}>
-                      <XStack 
-                        backgroundColor={isActive ? solidActionBg : (isDarkMode ? "#1A221E" : "#FFFFFF")} 
+                      <XStack
+                        backgroundColor={isActive ? solidActionBg : (isDarkMode ? "#1A221E" : "#FFFFFF")}
                         paddingHorizontal={16} paddingVertical={8} borderRadius={16} alignItems="center"
                         borderWidth={1} borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}
                       >
@@ -761,7 +863,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                   let color = item.isOnline ? "#00C48A" : "#EF4444";
                   let bg = item.isOnline ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2");
                   let icon = item.isOnline ? "zap" : "zap-off";
-                  if (item.isPartial) { color = "#F59E0B"; bg = isDarkMode ? "rgba(245,158,11,0.1)" : "#FEF3C7"; } 
+                  if (item.isPartial) { color = "#F59E0B"; bg = isDarkMode ? "rgba(245,158,11,0.1)" : "#FEF3C7"; }
                   if (item.outOfCoverage) { color = theme.textSecondary; bg = isDarkMode ? "#1A221E" : "#F8FAFC"; icon = "help-circle"; }
 
                   return (
@@ -774,7 +876,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                           <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={4}>{item.name}</TText>
                           <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{item.finalStatusText}</TText>
                         </YStack>
-                        
+
                         <YStack width={32} height={32} borderRadius={16} backgroundColor={solidActionBg} justifyContent="center" alignItems="center">
                           <Feather name="arrow-right" size={14} color={solidActionIcon} />
                         </YStack>
@@ -795,7 +897,7 @@ const ElectricityScreen = ({ navigation }: any) => {
           {activeTab === "stats" && (
             <YStack paddingBottom={20}>
               {renderAccuracyBarChart()}
-              
+
               <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={28}>OVERVIEW</TText>
               <YStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={32}>
                 <XStack padding={18} alignItems="center">
@@ -835,12 +937,12 @@ const ElectricityScreen = ({ navigation }: any) => {
       {isSidebarOpen && (
         <YStack position="absolute" top={0} left={0} right={0} bottom={0} zIndex={99999}>
           {/* Backdrop */}
-          <TouchableOpacity 
-            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} 
-            activeOpacity={1} 
-            onPress={() => toggleSidebar(false)} 
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
+            activeOpacity={1}
+            onPress={() => toggleSidebar(false)}
           />
-          
+
           {/* Sliding Panel from Right */}
        <Animated.View style={{
             position: "absolute",
@@ -861,15 +963,15 @@ const ElectricityScreen = ({ navigation }: any) => {
             shadowRadius: 15,
           }}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-              
+
               {/* Close Button */}
               <TouchableOpacity onPress={() => toggleSidebar(false)} style={{ alignSelf: "flex-end", padding: 8, marginBottom: 12 }}>
                 <Feather name="x" size={24} color={theme.textPrimary} />
               </TouchableOpacity>
 
               {/* TOP SECTION: User Profile Picture & Full Name */}
-              <TouchableOpacity 
-                activeOpacity={0.8} 
+              <TouchableOpacity
+                activeOpacity={0.8}
                 onPress={() => { toggleSidebar(false); navigation.navigate("Profile"); }}
                 style={{ flexDirection: "row", alignItems: "center", marginBottom: 28, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#1F2E27" : "#F1F5F9" }}
               >
@@ -890,7 +992,7 @@ const ElectricityScreen = ({ navigation }: any) => {
 
               {/* MIDDLE SECTION: Navigation Links */}
               <YStack gap={4} marginBottom={28} paddingBottom={20} borderBottomWidth={1} borderBottomColor={isDarkMode ? "#1F2E27" : "#F1F5F9"}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => { toggleSidebar(false); navigation.navigate("Profile"); }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
                 >
@@ -898,7 +1000,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                   <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Profile</TText>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => { toggleSidebar(false); navigation.navigate("RequestDeviceScreen"); }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
                 >
@@ -906,7 +1008,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                   <TText fontFamily="Chirp-Bold" fontSize={15} color="#00C48A">Become a Stromer</TText>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => { toggleSidebar(false); navigation.navigate("AboutScreen"); }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
                 >
@@ -914,7 +1016,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                   <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>About Strompulse</TText>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => { toggleSidebar(false); navigation.navigate("SafetySettingsScreen"); }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
                 >
@@ -938,9 +1040,9 @@ const ElectricityScreen = ({ navigation }: any) => {
                   />
                 </XStack>
 
-                <TouchableOpacity 
-                  onPress={() => { 
-                    toggleSidebar(false); 
+                <TouchableOpacity
+                  onPress={() => {
+                    toggleSidebar(false);
                     Linking.openURL("whatsapp://send?text=Hello%20Strompulse%20Support,%20I%20need%20help%20with...").catch(() => Alert.alert("WhatsApp not found", "Please install WhatsApp for support."));
                   }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
@@ -949,7 +1051,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                   <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Help Center</TText>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={handleLogoutPress}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16, marginTop: 10 }}
                 >
@@ -971,7 +1073,7 @@ const ElectricityScreen = ({ navigation }: any) => {
             <YStack width={40} height={4} borderRadius={2} backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} alignSelf="center" marginBottom={24} />
             <TText fontFamily="Chirp-Heavy" fontSize={22} color={theme.textPrimary} marginBottom={8}>Set Home Area</TText>
             <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} marginBottom={24}>Enter your street or estate to lock in your live dashboard.</TText>
-            
+
             <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={16} paddingHorizontal={20} height={56} alignItems="center" marginBottom={16} borderWidth={1} borderColor={selectedLocResult ? "#00C48A" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}>
               <TextInput style={{ flex: 1, fontFamily: "Chirp-Medium", fontSize: 15, color: theme.textPrimary }} placeholder="e.g. Oyo Road, Bodija" placeholderTextColor={theme.textSecondary} value={selectedLocResult ? selectedLocResult.name : locSearchQuery} onChangeText={(text) => { if(selectedLocResult) setSelectedLocResult(null); setLocSearchQuery(text); }} />
               {selectedLocResult && (
@@ -980,7 +1082,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                 </TouchableOpacity>
               )}
             </XStack>
-            
+
             <TouchableOpacity onPress={saveDefaultLocation} disabled={!selectedLocResult}>
               <YStack backgroundColor={selectedLocResult ? solidActionBg : (isDarkMode ? "#1A221E" : "#E2E8F0")} height={56} borderRadius={16} justifyContent="center" alignItems="center" marginBottom={24}>
                 <TText fontFamily="Chirp-Bold" fontSize={15} color={selectedLocResult ? solidActionIcon : theme.textSecondary}>Confirm Location</TText>
@@ -1038,7 +1140,7 @@ const ElectricityScreen = ({ navigation }: any) => {
             <YStack width={40} height={4} borderRadius={2} backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} alignSelf="center" marginBottom={24} />
             <TText fontFamily="Chirp-Heavy" fontSize={22} color={theme.textPrimary} marginBottom={8}>Report Power Status</TText>
             <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textSecondary} marginBottom={24}>Your report helps other Stromers see what's happening.</TText>
-            
+
             <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={16} paddingHorizontal={20} height={56} alignItems="center" marginBottom={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
               <TextInput style={{ flex: 1, fontFamily: "Chirp-Medium", fontSize: 15, color: theme.textPrimary }} placeholder="e.g. UI / Abadina" placeholderTextColor={theme.textSecondary} value={reportArea} onChangeText={setReportArea} />
             </XStack>

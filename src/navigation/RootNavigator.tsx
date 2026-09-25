@@ -29,13 +29,11 @@ import RequestDeviceScreen from "../screens/RequestDeviceScreen";
 import CommunityZonesScreen from "../screens/CommunityZonesScreen";
 import PrivateDashboardInternalScreen from "../screens/PrivateDashboardInternalScreen";
 import LinkPhoneScreen from "../screens/LinkPhoneScreen";
+import LiveTrackingScreen from "../screens/LiveTrackingScreen";
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-/**
- * Standard Tab Icon Renderer with Solid Fill for Active State
- */
 const TabIcon = ({ 
   focused, 
   iconOutline,
@@ -51,7 +49,6 @@ const TabIcon = ({
   label: string,
   badgeCount?: number
 }) => {
-  // Active state uses Strompulse Green
   const color = focused 
     ? "#00C48A" 
     : (isDarkMode ? "#64748B" : "#94A3B8");
@@ -100,12 +97,32 @@ const TabIcon = ({
   );
 };
 
-// Floating Pill Bottom Tab Navigator
 const MainTabs = () => {
   const { isDarkMode } = useTheme();
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const { devices } = useAllGridDevices();
 
+  // Handle immediate Supabase badge updates via a dedicated listener
+  useEffect(() => {
+    let isMounted = true;
+    
+    const alertSubscription = supabase
+      .channel('public:alerts:badge')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, payload => {
+        if (isMounted) {
+          // Instantly increment unread count to prevent delay!
+          setUnreadCount(prev => prev + 1);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(alertSubscription);
+    };
+  }, []);
+
+  // Handle background sync for Grid Outages & Storage
   useEffect(() => {
     let isMounted = true;
 
@@ -118,7 +135,8 @@ const MainTabs = () => {
 
         const { data: alerts } = await supabase
           .from("alerts")
-          .select("id")
+          .select("id, created_at")
+          .order("created_at", { ascending: false })
           .limit(30);
 
         let unread = 0;
@@ -145,7 +163,7 @@ const MainTabs = () => {
             const outDate = parseStromTimestamp(device.updated_at) || new Date();
             const outTime = new Date(outDate.getTime() + 60000);
             if ((now - outTime.getTime()) < 15 * 60 * 1000) {
-              const outId = `power-outage-live-${device.id}-${device.updated_at}`;
+              const outId = `outage-live-${device.id}-${device.updated_at}`;
               if (!dismissedSet.has(outId) && !readSet.has(outId)) unread += 1;
             }
           }
@@ -158,7 +176,7 @@ const MainTabs = () => {
     };
 
     computeUnread();
-    const interval = setInterval(computeUnread, 4000);
+    const interval = setInterval(computeUnread, 5000);
 
     return () => {
       isMounted = false;
@@ -265,6 +283,7 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
       <Stack.Screen name="PrivateDashboardInternal" component={PrivateDashboardInternalScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PlaceDetailScreen" component={PlaceDetailScreen} />
       <Stack.Screen name="CommunityZonesScreen" component={CommunityZonesScreen} />
+      <Stack.Screen name="LiveTrackingScreen" component={LiveTrackingScreen} />
     </Stack.Navigator>
   );
 };
