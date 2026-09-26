@@ -438,7 +438,7 @@ const NotificationsScreen = ({ navigation }: any) => {
           >
             <Feather name="arrow-left" size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-          <TText fontSize={18} fontFamily="Chirp-Heavy" color={theme.textPrimary}>Notifications</TText>
+          <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 16 }} color={theme.textPrimary}>Notifications</TText>
         </XStack>
 
         {renderSegmentedControl()}

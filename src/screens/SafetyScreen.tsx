@@ -226,7 +226,7 @@ const SafetyScreen = ({ navigation, route }: any) => {
           />
           
           <YStack position="absolute" left={0} right={0} alignItems="center" pointerEvents="none">
-            <TText fontFamily="Chirp-Heavy" fontSize={17} color={theme.textPrimary}>Strompulse Security</TText>
+            <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 20 }} color={theme.textPrimary}>Strompulse Security</TText>
             <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Stay safe, wherever you go</TText>
           </YStack>
           

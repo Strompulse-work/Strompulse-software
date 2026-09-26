@@ -16,7 +16,7 @@ import { useAllGridDevices, computeHistoryAnalytics, formatDurationShort, parseS
 import { Loading } from "../components/UIComponents";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { firebaseDb } from "../config/firebase";
-import { ref, push } from "firebase/database";
+import { ref, push, update, increment } from "firebase/database";
 import AuthService from "../services/authService";
 
 const { height, width } = Dimensions.get("window");
@@ -200,13 +200,26 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
       const session = await AuthService.getCurrentSession();
       const userId = session?.user?.id || "anonymous";
 
-      const votesRef = ref(firebaseDb, `${areaId}/accuracy_votes`);
+      // Every raw vote goes into ONE centralized top-level node
+      // (AccuracyVotes/<areaId>/<pushId>) — not nested under the device's
+      // own PowerMonitor/<areaId> tree, and not a bare root-level node per
+      // device either. This keeps all 12 areas' votes browsable in one
+      // place in the Firebase console, without touching device data.
+      const votesRef = ref(firebaseDb, `AccuracyVotes/${areaId}`);
       await push(votesRef, {
         area_id: areaId,
         area_name: displayTitle,
         vote: vote,
         user_id: userId,
         created_at: Date.now()
+      });
+
+      // Also keep a running total so a developer can see Yes/No counts per
+      // area at a glance, without opening and counting every vote entry.
+      const summaryRef = ref(firebaseDb, `AccuracyVotes_Summary/${areaId}`);
+      await update(summaryRef, {
+        area_name: displayTitle,
+        [`${vote}Count`]: increment(1),
       });
     } catch (e) {
       console.warn("Failed to sync vote to Firebase backend:", e);
@@ -424,17 +437,20 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
               <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A">Voted: {userVote.toUpperCase()} ✓</TText>
             </YStack>
           ) : (
-            <XStack gap={6}>
-              <TouchableOpacity onPress={() => handleVote('yes')}>
-                <YStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5"} paddingHorizontal={10} paddingVertical={4} borderRadius={10}>
-                  <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A">Yes</TText>
-                </YStack>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleVote('no')}>
-                <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} paddingHorizontal={10} paddingVertical={4} borderRadius={10}>
-                  <TText fontSize={11} fontFamily="Chirp-Bold" color="#EF4444">No</TText>
-                </YStack>
-              </TouchableOpacity>
+            <XStack alignItems="center" gap={8}>
+              <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>Is this accurate?</TText>
+              <XStack gap={6}>
+                <TouchableOpacity onPress={() => handleVote('yes')}>
+                  <YStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5"} paddingHorizontal={10} paddingVertical={4} borderRadius={10}>
+                    <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A">Yes</TText>
+                  </YStack>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleVote('no')}>
+                  <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} paddingHorizontal={10} paddingVertical={4} borderRadius={10}>
+                    <TText fontSize={11} fontFamily="Chirp-Bold" color="#EF4444">No</TText>
+                  </YStack>
+                </TouchableOpacity>
+              </XStack>
             </XStack>
           )}
         </XStack>

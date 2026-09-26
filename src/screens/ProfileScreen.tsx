@@ -113,9 +113,9 @@ const ProfileScreen = ({ navigation, route }: any) => {
   }
 
   const MenuCard = ({ icon, title, rightElement, onPress, isLast = false, isDestructive = false }: any) => (
-    <TouchableOpacity 
-      style={[styles.menuItem, !isLast && styles.menuItemBorder]} 
-      onPress={onPress} 
+    <TouchableOpacity
+      style={[styles.menuItem, !isLast && styles.menuItemBorder]}
+      onPress={onPress}
       disabled={!onPress}
       activeOpacity={0.7}
     >
@@ -140,7 +140,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={theme.background} />
-      
+
       {/* Clean Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
@@ -153,7 +153,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        
+
         {/* Centered Avatar Section */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
@@ -170,11 +170,11 @@ const ProfileScreen = ({ navigation, route }: any) => {
               <MaterialCommunityIcons name="camera" size={12} color="#FFF" />
             </View>
           </View>
-          
+
           <Text style={styles.userName}>{user?.full_name || "Explorer"}</Text>
           <Text style={styles.userLocation}>{currentLocation}</Text>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.editProfileBtn}
             onPress={() => navigation.navigate("EditProfileScreen", {
               currentName: user?.full_name,
@@ -195,9 +195,9 @@ const ProfileScreen = ({ navigation, route }: any) => {
         <MenuGroup>
           <MenuCard icon="cog" title="Settings" />
           <MenuCard icon="shield-check" title="Privacy & Security" />
-          <MenuCard 
-            icon="theme-light-dark" 
-            title="Dark Mode" 
+          <MenuCard
+            icon="theme-light-dark"
+            title="Dark Mode"
             isLast={true}
             rightElement={
               <Switch
@@ -216,12 +216,12 @@ const ProfileScreen = ({ navigation, route }: any) => {
         </MenuGroup>
 
         <MenuGroup>
-          <MenuCard 
-            icon="logout-variant" 
-            title="Log out" 
-            isLast={true} 
+          <MenuCard
+            icon="logout-variant"
+            title="Log out"
+            isLast={true}
             isDestructive={true}
-            onPress={handleLogoutPress} 
+            onPress={handleLogoutPress}
           />
         </MenuGroup>
 
@@ -237,7 +237,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F4F6F8" },
   container: { flex: 1, backgroundColor: isDarkMode ? "#0B0F0D" : "#F4F6F8" },
   center: { justifyContent: "center", alignItems: "center" },
-  
+
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -247,7 +247,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     paddingBottom: 20,
   },
   iconBtn: { width: 40, height: 40, justifyContent: "center", alignItems: "center" },
-  headerTitle: { fontSize: 16, fontFamily: "Chirp-Bold", color: theme.textPrimary },
+  headerTitle: { fontSize: 16, fontFamily: "SoraTitle-Bold", color: theme.textPrimary },
 
   scrollContent: { paddingBottom: 40 },
 

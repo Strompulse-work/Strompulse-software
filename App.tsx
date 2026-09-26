@@ -18,6 +18,9 @@ import tamaguiConfig from "./tamagui.config";
 // 1. Import the local font loader from Expo
 import { useFonts } from "expo-font";
 
+// Real Sora font, used only where we explicitly want the true Sora look (e.g. the app title)
+import { Sora_700Bold as SoraTitleFont } from "@expo-google-fonts/sora";
+
 import { supabase } from "./src/config/supabase";
 import AuthService from "./src/services/authService";
 import { ThemeProvider } from "./src/theme/ThemeContext";
@@ -49,7 +52,7 @@ TextInput.defaultProps.style = { ...(TextInput.defaultProps.style || {}), ...cus
 export default function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // Get the native system color scheme for Tamagui
   const colorScheme = useColorScheme();
 
@@ -67,6 +70,9 @@ export default function App() {
     "Sora_600SemiBold": require("./assets/fonts/Chirp-Bold.ttf"),
     "Sora_700Bold": require("./assets/fonts/Chirp-Bold.ttf"),
     "Sora_800ExtraBold": require("./assets/fonts/Chirp-Heavy.ttf"),
+
+    // Real Sora, used only where we explicitly want the true Sora look (e.g. the app title)
+    "SoraTitle-Bold": SoraTitleFont,
   });
 
   useEffect(() => {
@@ -78,7 +84,7 @@ export default function App() {
 
         const [isAuthenticated] = await Promise.all([
           AuthService.isAuthenticated(),
-          new Promise((resolve) => setTimeout(resolve, 2000)), 
+          new Promise((resolve) => setTimeout(resolve, 2000)),
         ]);
 
         setIsSignedIn(isAuthenticated);
@@ -101,7 +107,7 @@ export default function App() {
       subscription?.unsubscribe();
       RealtimeService.unsubscribeAll();
     };
-  }, [fontsLoaded, fontError]); 
+  }, [fontsLoaded, fontError]);
 
   if (!fontsLoaded && !fontError) {
     return null;

@@ -581,7 +581,7 @@ const ElectricityScreen = ({ navigation }: any) => {
         <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={8}>
           <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
 
-          <TText style={{ fontFamily: "Sora_700Bold", fontSize: 18 }} color={theme.textPrimary}>Strompulse</TText>
+          <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 23 }} color={theme.textPrimary}>Strompulse</TText>
 
           <TouchableOpacity onPress={() => toggleSidebar(true)}>
             <YStack width={42} height={42} justifyContent="center" alignItems="flex-end">
