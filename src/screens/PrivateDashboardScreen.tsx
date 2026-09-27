@@ -8,7 +8,8 @@ import {
   Alert,
   TouchableWithoutFeedback,
   TouchableOpacity,
-  SafeAreaView
+  SafeAreaView,
+  Image
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -176,9 +177,13 @@ const PrivateDashboardScreen = ({ navigation }: any) => {
                 elevation={4}
               >
                 <XStack alignItems="flex-start">
-                  <YStack width={48} height={48} borderRadius={16} backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} justifyContent="center" alignItems="center" marginRight={16}>
-                    <MaterialCommunityIcons name="power-plug-outline" size={24} color="#00C48A" />
-                  </YStack>
+                  
+                  {/* Replaced Icon with Hardware Image */}
+                  <Image 
+                    source={require("../../assets/images/stromdevice.png")} 
+                    style={{ width: 52, height: 52, resizeMode: 'contain', marginRight: 16 }} 
+                  />
+
                   <YStack flex={1}>
                     <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary} marginBottom={6}>
                       Not a Stromer yet?

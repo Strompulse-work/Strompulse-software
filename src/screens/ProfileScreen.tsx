@@ -10,13 +10,13 @@ import {
   Switch,
   Image,
   Alert,
-  SafeAreaView
+  SafeAreaView,
+  ActivityIndicator
 } from "react-native";
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import AuthService from "../services/authService";
 import { useTheme } from "../theme/ThemeContext";
-import { Loading } from "../components/UIComponents";
 import { User } from "../types";
 
 const ProfileScreen = ({ navigation, route }: any) => {
@@ -107,7 +107,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
   if (loading) {
     return (
       <View style={[styles.container, styles.center]}>
-        <Loading />
+        <ActivityIndicator size="large" color="#00C48A" />
       </View>
     );
   }
