@@ -151,10 +151,10 @@ const ContactsScreen = ({ navigation }: any) => {
         
         {/* --- HEADER --- */}
         <XStack alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={24}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" }}>
-            <Feather name="chevron-left" size={20} color={theme.textPrimary} />
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ width: 40, height: 40, justifyContent: "center", alignItems: "flex-start" }}>
+            <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-          <YStack marginLeft={16}>
+          <YStack marginLeft={8}>
             <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>Contacts</TText>
             <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2} textTransform="uppercase">{emergencyNetworkCount} OF 3 ALERT SLOTS USED</TText>
           </YStack>

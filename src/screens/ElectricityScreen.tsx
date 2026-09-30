@@ -983,6 +983,14 @@ const ElectricityScreen = ({ navigation }: any) => {
                   <Feather name="cpu" size={20} color="#00C48A" />
                   <TText fontFamily="Chirp-Bold" fontSize={15} color="#00C48A">Become a Stromer</TText>
                 </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  onPress={() => { toggleSidebar(false); navigation.navigate("MySubscriptionsScreen"); }}
+                  style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
+                >
+                  <Feather name="bookmark" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>My Subscriptions</TText>
+                </TouchableOpacity>
 
                 <TouchableOpacity 
                   onPress={() => { toggleSidebar(false); navigation.navigate("AboutScreen"); }}
@@ -993,7 +1001,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
-                  onPress={() => { toggleSidebar(false); navigation.navigate("SafetySettingsScreen"); }}
+                  onPress={() => { toggleSidebar(false); navigation.navigate("PrivacySecurityScreen"); }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
                 >
                   <Feather name="shield" size={20} color={theme.textPrimary} />
@@ -1015,11 +1023,22 @@ const ElectricityScreen = ({ navigation }: any) => {
                     thumbColor="#FFFFFF"
                   />
                 </XStack>
+                
+                <TouchableOpacity 
+                  onPress={() => { 
+                    toggleSidebar(false); 
+                    navigation.navigate("SettingsScreen", { currentName: fullName, currentImage: displayAvatar }); 
+                  }}
+                  style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
+                >
+                  <Feather name="settings" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Settings</TText>
+                </TouchableOpacity>
 
                 <TouchableOpacity 
                   onPress={() => { 
                     toggleSidebar(false); 
-                    Linking.openURL("whatsapp://send?text=Hello%20Strompulse%20Support,%20I%20need%20help%20with...").catch(() => Alert.alert("WhatsApp not found", "Please install WhatsApp for support."));
+                    navigation.navigate("HelpSupportScreen");
                   }}
                   style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}
                 >

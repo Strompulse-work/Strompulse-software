@@ -187,7 +187,8 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     await AsyncStorage.setItem(JOURNEY_CONTACTS_KEY, JSON.stringify(Array.from(selectedContacts)));
 
     const recipients = allContacts.filter(c => selectedContacts.has(c.id));
-    const phoneNumbers = recipients.map(c => c.phone).join(Platform.OS === "ios" ? "," : ";");
+    // FIXED: Pass phoneNumbers as an Array of strings to expo-sms
+    const phoneNumbers = recipients.map(c => c.phone);
     
     const destStr = destination ? ` to ${destination}` : "";
     const purposeStr = purpose ? ` for ${purpose}` : "";
@@ -199,7 +200,10 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
 
     if (securitySettings.sendSms) {
       const isAvailable = await SMS.isAvailableAsync();
-      if (isAvailable) await SMS.sendSMSAsync(phoneNumbers, message);
+      if (isAvailable) {
+        // Will now populate the native SMS app with ALL selected contacts
+        await SMS.sendSMSAsync(phoneNumbers, message);
+      }
     }
 
     if (recipients.length > 0) {
@@ -234,7 +238,7 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
 
   const notifyEtaExpired = async () => {
     const recipients = allContacts.filter(c => selectedContacts.has(c.id));
-    const phoneNumbers = recipients.map(c => c.phone).join(Platform.OS === "ios" ? "," : ";");
+    const phoneNumbers = recipients.map(c => c.phone);
     const destStr = destination ? ` to ${destination}` : "";
     
     let message = `🚨 ALERT: My expected arrival time of ${eta} for my journey${destStr} has elapsed and I have not checked in.`;
@@ -260,7 +264,7 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
 
   const notifySafetyAfterExpiration = async () => {
     const recipients = allContacts.filter(c => selectedContacts.has(c.id));
-    const phoneNumbers = recipients.map(c => c.phone).join(Platform.OS === "ios" ? "," : ";");
+    const phoneNumbers = recipients.map(c => c.phone);
     
     let message = `✅ UPDATE: I'm safe! I forgot to notify that I'm safe and I arrived safely at my destination.`;
 
@@ -312,6 +316,13 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
 
   const sendArrivalMessage = async (recipients: any[]) => {
     const message = `✅ UPDATE: I have ended my journey and arrived safely at my destination.`;
+    const phoneNumbers = recipients.map(c => c.phone);
+    
+    if (securitySettings.sendSms) {
+      const isAvailable = await SMS.isAvailableAsync();
+      if (isAvailable) await SMS.sendSMSAsync(phoneNumbers, message);
+    }
+
     const primaryContact = recipients[0];
     let cleanPhone = primaryContact.phone.replace(/[^0-9]/g, '');
     if (cleanPhone.startsWith('0')) cleanPhone = '234' + cleanPhone.slice(1);
@@ -396,7 +407,9 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
               </YStack>
 
               {/* --- CONTACTS SELECTOR --- */}
-              <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginLeft={4} marginBottom={12}>SHARING WITH</TText>
+              <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginLeft={4} marginBottom={12}>
+                SHARING WITH ({selectedContacts.size} SELECTED)
+              </TText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16, gap: 12 }}>
                 {allContacts.length > 0 ? (
                   allContacts.map((contact) => {

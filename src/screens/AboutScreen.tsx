@@ -18,48 +18,44 @@ const AboutScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme, isDarkMode);
 
+  // Black icons for light mode, white for dark mode to maintain the clean aesthetic
+  const monochromeIconColor = isDarkMode ? "#FFFFFF" : "#000000";
+  const monochromeBgColor = isDarkMode ? "#1A221E" : "#F4F6F8";
+
   const capabilities = [
     {
       id: "1",
       icon: "transmission-tower",
       title: "Grid Tracking",
-      color: "#00C48A",
-      bgLight: "#ECFDF5",
-      bgDark: "rgba(0, 196, 138, 0.15)",
+      desc: "Live area mapping",
     },
     {
       id: "2",
       icon: "shield-home",
       title: "Safety First",
-      color: "#3B82F6",
-      bgLight: "#DBEAFE",
-      bgDark: "rgba(59, 130, 246, 0.15)",
+      desc: "Secure emergency SOS",
     },
     {
       id: "3",
       icon: "chart-arc",
       title: "Live Analytics",
-      color: "#F59E0B",
-      bgLight: "#FEF3C7",
-      bgDark: "rgba(245, 158, 11, 0.15)",
+      desc: "Real-time node data",
     },
     {
       id: "4",
       icon: "bell-ring",
       title: "Instant Alerts",
-      color: "#EF4444",
-      bgLight: "#FEE2E2",
-      bgDark: "rgba(239, 68, 68, 0.15)",
+      desc: "Push notifications",
     },
   ];
 
   const ActionLink = ({ icon, title, isLast }: any) => (
     <TouchableOpacity style={[styles.actionLink, !isLast && styles.actionLinkBorder]} activeOpacity={0.7}>
       <View style={styles.actionLinkLeft}>
-        <MaterialCommunityIcons name={icon} size={22} color={theme.textSecondary} />
+        <MaterialCommunityIcons name={icon} size={22} color={theme.textPrimary} />
         <Text style={styles.actionLinkText}>{title}</Text>
       </View>
-      <Feather name="external-link" size={18} color={theme.textSecondary} />
+      <Feather name="chevron-right" size={20} color={theme.textSecondary} />
     </TouchableOpacity>
   );
 
@@ -95,15 +91,12 @@ const AboutScreen = ({ navigation }: any) => {
               />
             </View>
             <Text style={styles.appName}>Strompulse</Text>
-            <View style={styles.versionBadge}>
-              <View style={styles.versionDot} />
-              <Text style={styles.versionText}>v3.0.0 (Build 1042)</Text>
-            </View>
+            <Text style={styles.appSub}>The smart power grid companion.</Text>
           </View>
 
           {/* Mission Quote Section */}
           <View style={styles.quoteSection}>
-            <MaterialCommunityIcons name="format-quote-open" size={32} color="#00C48A" style={styles.quoteIcon} />
+            <MaterialCommunityIcons name="format-quote-open" size={32} color={monochromeIconColor} style={styles.quoteIcon} />
             <Text style={styles.quoteText}>
               Empowering communities with real-time grid intelligence and seamless safety networks.
             </Text>
@@ -114,10 +107,11 @@ const AboutScreen = ({ navigation }: any) => {
           <View style={styles.bentoGrid}>
             {capabilities.map((item) => (
               <View key={item.id} style={styles.bentoCard}>
-                <View style={[styles.bentoIconBox, { backgroundColor: isDarkMode ? item.bgDark : item.bgLight }]}>
-                  <MaterialCommunityIcons name={item.icon as any} size={24} color={item.color} />
+                <View style={[styles.bentoIconBox, { backgroundColor: monochromeBgColor }]}>
+                  <MaterialCommunityIcons name={item.icon as any} size={24} color={monochromeIconColor} />
                 </View>
                 <Text style={styles.bentoTitle}>{item.title}</Text>
+                <Text style={styles.bentoDesc}>{item.desc}</Text>
               </View>
             ))}
           </View>
@@ -158,7 +152,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       top: 0,
       left: 0,
       right: 0,
-      height: 320,
+      height: 280,
       borderBottomLeftRadius: 40,
       borderBottomRightRadius: 40,
     },
@@ -182,7 +176,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
     },
     navTitle: {
       fontSize: 18,
-      fontFamily: "Sora_700Bold",
+      fontFamily: "SoraTitle-Bold",
       color: "#FFFFFF",
     },
     navSpacer: {
@@ -213,17 +207,12 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       width: 90,
       height: 90,
       borderRadius: 28,
-      backgroundColor: "#FFFFFF",
+      backgroundColor: isDarkMode ? "#1A221E" : "#F8FAFC",
       justifyContent: "center",
       alignItems: "center",
       marginBottom: 16,
       borderWidth: 1,
-      borderColor: "#E2E8F0",
-      shadowColor: "#00C48A",
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.15,
-      shadowRadius: 15,
-      elevation: 6,
+      borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
     },
     logoImage: {
       width: 55,
@@ -233,46 +222,30 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       fontSize: 26, 
       fontFamily: "Sora_800ExtraBold", 
       color: theme.textPrimary, 
-      marginBottom: 12 
+      marginBottom: 6 
     },
-    versionBadge: {
-      flexDirection: "row",
-      alignItems: "center",
-      backgroundColor: isDarkMode ? "rgba(0, 196, 138, 0.15)" : "#ECFDF5",
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 12,
-    },
-    versionDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: "#00C48A",
-      marginRight: 6,
-    },
-    versionText: { 
-      fontSize: 12, 
-      fontFamily: "Sora_700Bold", 
-      color: "#00C48A", 
+    appSub: {
+      fontSize: 13,
+      fontFamily: "Sora_500Medium",
+      color: theme.textSecondary,
     },
 
     // Mission Quote
     quoteSection: {
       marginHorizontal: 30,
-      marginBottom: 32,
+      marginBottom: 40,
       alignItems: "center",
     },
     quoteIcon: {
-      marginBottom: 8,
-      opacity: 0.8,
+      marginBottom: 12,
+      opacity: 0.9,
     },
     quoteText: {
-      fontSize: 15,
-      fontFamily: "Sora_500Medium",
-      color: theme.textSecondary,
+      fontSize: 16,
+      fontFamily: "Sora_600SemiBold",
+      color: theme.textPrimary,
       textAlign: "center",
-      lineHeight: 24,
-      fontStyle: "italic",
+      lineHeight: 26,
     },
 
     // Bento Grid Section
@@ -297,7 +270,7 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       borderRadius: 24,
       padding: 20,
       marginBottom: 16,
-      alignItems: "center",
+      alignItems: "flex-start",
       borderWidth: 1,
       borderColor: isDarkMode ? "#1F2E27" : "#E2E8F0",
       shadowColor: "#000",
@@ -312,13 +285,19 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       borderRadius: 16,
       justifyContent: "center",
       alignItems: "center",
-      marginBottom: 12,
+      marginBottom: 16,
     },
     bentoTitle: {
-      fontSize: 13,
+      fontSize: 14,
       fontFamily: "Sora_700Bold",
       color: theme.textPrimary,
-      textAlign: "center",
+      marginBottom: 6,
+    },
+    bentoDesc: {
+      fontSize: 11,
+      fontFamily: "Sora_500Medium",
+      color: theme.textSecondary,
+      lineHeight: 16,
     },
 
     // Action Links
@@ -328,13 +307,14 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       borderRadius: 24,
       borderWidth: 1,
       borderColor: isDarkMode ? "#1F2E27" : "#E2E8F0",
-      marginBottom: 32,
+      marginBottom: 40,
     },
     actionLink: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      padding: 20,
+      paddingVertical: 18,
+      paddingHorizontal: 20,
     },
     actionLinkBorder: {
       borderBottomWidth: 1,
@@ -348,21 +328,20 @@ const getStyles = (theme: any, isDarkMode: boolean) =>
       fontSize: 14,
       fontFamily: "Sora_600SemiBold",
       color: theme.textPrimary,
-      marginLeft: 12,
+      marginLeft: 14,
     },
 
     // Footer
     footer: {
       alignItems: "center",
-      marginTop: 10,
       paddingBottom: 20,
     },
     copyrightText: { 
       textAlign: "center", 
-      fontSize: 11, 
+      fontSize: 12, 
       fontFamily: "Sora_500Medium", 
       color: theme.textTertiary,
-      lineHeight: 18,
+      lineHeight: 20,
     },
   });
 

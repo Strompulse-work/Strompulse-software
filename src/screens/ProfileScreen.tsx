@@ -18,6 +18,7 @@ import * as Location from "expo-location";
 import AuthService from "../services/authService";
 import { useTheme } from "../theme/ThemeContext";
 import { User } from "../types";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const ProfileScreen = ({ navigation, route }: any) => {
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
@@ -27,9 +28,12 @@ const ProfileScreen = ({ navigation, route }: any) => {
   const [loading, setLoading] = useState(true);
   const [currentLocation, setCurrentLocation] = useState<string>("Locating...");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [fullName, setFullName] = useState<string>("Explorer");
 
+  // Real-time updates from Settings Screen
   useEffect(() => {
     if (route.params?.updatedName) {
+      setFullName(route.params.updatedName);
       setUser((prev: any) => ({ ...prev, full_name: route.params.updatedName }));
     }
     if (route.params?.updatedImage !== undefined) {
@@ -43,10 +47,17 @@ const ProfileScreen = ({ navigation, route }: any) => {
         const session = await AuthService.getCurrentSession();
         if (session) {
           setUser(session.user);
+          setFullName(session.user.full_name || "Afolabi Taiwo Glory"); // Default fallback
           if (!avatarUri && session.user.avatar_url) {
             setAvatarUri(session.user.avatar_url);
           }
         }
+
+        // Check local storage for real-time overrides
+        const localName = await AsyncStorage.getItem("global_name");
+        const localAvatar = await AsyncStorage.getItem("global_avatar");
+        if (localName) setFullName(localName);
+        if (localAvatar) setAvatarUri(localAvatar);
 
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
@@ -116,7 +127,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
     <TouchableOpacity
       style={[styles.menuItem, !isLast && styles.menuItemBorder]}
       onPress={onPress}
-      disabled={!onPress}
+      disabled={!onPress && !rightElement}
       activeOpacity={0.7}
     >
       <View style={styles.menuItemLeft}>
@@ -147,14 +158,14 @@ const ProfileScreen = ({ navigation, route }: any) => {
           <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity style={styles.iconBtn}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate("Notifications")}>
           <MaterialCommunityIcons name="bell" size={22} color={theme.textPrimary} />
         </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
-        {/* Centered Avatar Section */}
+        {/* Centered Avatar Section (No Edit Button) */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             {avatarUri ? (
@@ -162,39 +173,28 @@ const ProfileScreen = ({ navigation, route }: any) => {
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Text style={styles.avatarText}>
-                  {user?.full_name?.charAt(0).toUpperCase() || "E"}
+                  {fullName.charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
             <View style={styles.cameraBadge}>
-              <MaterialCommunityIcons name="camera" size={12} color="#FFF" />
+              <MaterialCommunityIcons name="check-decagram" size={14} color="#FFF" />
             </View>
           </View>
 
-          <Text style={styles.userName}>{user?.full_name || "Explorer"}</Text>
+          <Text style={styles.userName}>{fullName}</Text>
           <Text style={styles.userLocation}>{currentLocation}</Text>
-
-          <TouchableOpacity
-            style={styles.editProfileBtn}
-            onPress={() => navigation.navigate("EditProfileScreen", {
-              currentName: user?.full_name,
-              currentImage: avatarUri,
-            })}
-          >
-            <Text style={styles.editProfileBtnText}>Edit Profile</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Menu Groups */}
         <MenuGroup>
-          <MenuCard icon="clock-time-four" title="My Activity" />
-          <MenuCard icon="bookmark" title="My Subscriptions" />
-          <MenuCard icon="credit-card-outline" title="Payment Methods" isLast={true} />
+          <MenuCard icon="clock-time-four" title="My Activity" onPress={() => navigation.navigate("MyActivityScreen")} />
+          <MenuCard icon="bookmark" title="My Subscriptions" isLast={true} onPress={() => navigation.navigate("MySubscriptionsScreen")} />
         </MenuGroup>
 
         <MenuGroup>
-          <MenuCard icon="cog" title="Settings" />
-          <MenuCard icon="shield-check" title="Privacy & Security" />
+          <MenuCard icon="cog" title="Edit Profile" onPress={() => navigation.navigate("SettingsScreen", { currentName: fullName, currentImage: avatarUri })} />
+          <MenuCard icon="shield-check" title="Privacy & Security" onPress={() => navigation.navigate("PrivacySecurityScreen")} />
           <MenuCard
             icon="theme-light-dark"
             title="Dark Mode"
@@ -212,7 +212,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
 
         <MenuGroup>
           <MenuCard icon="information" title="About Strompulse" onPress={() => navigation.navigate("AboutScreen")} />
-          <MenuCard icon="help-circle" title="Help & Support" isLast={true} />
+          <MenuCard icon="help-circle" title="Help & Support" isLast={true} onPress={() => navigation.navigate("HelpSupportScreen")} />
         </MenuGroup>
 
         <MenuGroup>
@@ -225,8 +225,6 @@ const ProfileScreen = ({ navigation, route }: any) => {
           />
         </MenuGroup>
 
-        {/* Footer */}
-        <Text style={styles.versionText}>Version 3.0.0 (Build 1042)</Text>
 
       </ScrollView>
     </SafeAreaView>
@@ -244,14 +242,13 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'android' ? 20 : 10,
-    paddingBottom: 20,
+    paddingBottom: 10,
   },
   iconBtn: { width: 40, height: 40, justifyContent: "center", alignItems: "center" },
   headerTitle: { fontSize: 16, fontFamily: "SoraTitle-Bold", color: theme.textPrimary },
 
   scrollContent: { paddingBottom: 40 },
 
-  /* Profile Avatar Section */
   profileSection: { alignItems: "center", marginBottom: 32, marginTop: 10 },
   avatarContainer: { position: "relative", marginBottom: 16 },
   avatarImage: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#00C48A" },
@@ -280,16 +277,8 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderColor: isDarkMode ? "#0B0F0D" : "#F4F6F8",
   },
   userName: { fontSize: 20, fontFamily: "Chirp-Bold", color: theme.textPrimary, marginBottom: 4 },
-  userLocation: { fontSize: 13, fontFamily: "Chirp-Medium", color: theme.textSecondary, marginBottom: 16 },
-  editProfileBtn: {
-    backgroundColor: isDarkMode ? "#1A221E" : "#E2E8F0",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  editProfileBtnText: { fontSize: 12, fontFamily: "Chirp-Bold", color: theme.textPrimary },
+  userLocation: { fontSize: 13, fontFamily: "Chirp-Medium", color: theme.textSecondary, marginBottom: 0 },
 
-  /* Card Menus */
   menuGroup: {
     backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF",
     marginHorizontal: 20,
@@ -315,7 +304,6 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
   menuItemLeft: { flexDirection: "row", alignItems: "center" },
   menuTitle: { fontSize: 14, fontFamily: "Chirp-Bold", color: theme.textPrimary },
 
-  /* Footer */
   versionText: {
     textAlign: "center",
     fontSize: 12,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { 
   Platform, 
   StatusBar, 
@@ -9,10 +9,11 @@ import {
   TextInput
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import AuthService from "../services/authService";
+import { useFocusEffect } from "@react-navigation/native";
 
 const SETTINGS_KEY = "strompulse_security_settings";
 
@@ -26,47 +27,51 @@ const SafetySettingsScreen = ({ navigation }: any) => {
   const [customMessage, setCustomMessage] = useState("");
   const [userName, setUserName] = useState("Stromer");
 
-  // Load saved preferences
-  useEffect(() => {
-    const loadSettings = async () => {
-      const session = await AuthService.getCurrentSession();
-      if (session && session.user) {
-        setUserName(session.user.full_name?.split(' ')[0] || "Stromer");
-      }
+  // Load saved preferences via useFocusEffect to keep in sync with PrivacySecurityScreen
+  useFocusEffect(
+    useCallback(() => {
+      const loadSettings = async () => {
+        const session = await AuthService.getCurrentSession();
+        if (session && session.user) {
+          setUserName(session.user.full_name?.split(' ')[0] || "Stromer");
+        } else {
+          // Check local storage fallback
+          const localName = await AsyncStorage.getItem("global_name");
+          if (localName) setUserName(localName.split(' ')[0]);
+        }
 
-      const saved = await AsyncStorage.getItem(SETTINGS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setLocationSharing(parsed.locationSharing ?? true);
-        setSendSms(parsed.sendSms ?? true);
-        setBackgroundTrigger(parsed.backgroundTrigger ?? false);
-        setCustomMessage(parsed.customMessage || "");
-      }
-    };
-    loadSettings();
-  }, []);
+        const saved = await AsyncStorage.getItem(SETTINGS_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setLocationSharing(parsed.locationSharing ?? true);
+          setSendSms(parsed.sendSms ?? true);
+          setBackgroundTrigger(parsed.backgroundTrigger ?? false);
+          setCustomMessage(parsed.customMessage || "");
+        }
+      };
+      loadSettings();
+    }, [])
+  );
 
   const toggleSetting = async (key: string, value: boolean) => {
-    if (key === 'location') setLocationSharing(value);
-    if (key === 'sms') setSendSms(value);
-    if (key === 'background') setBackgroundTrigger(value);
+    // Optimistic UI Update
+    if (key === 'locationSharing') setLocationSharing(value);
+    if (key === 'sendSms') setSendSms(value);
+    if (key === 'backgroundTrigger') setBackgroundTrigger(value);
 
-    const newSettings = {
-      locationSharing: key === 'location' ? value : locationSharing,
-      sendSms: key === 'sms' ? value : sendSms,
-      backgroundTrigger: key === 'background' ? value : backgroundTrigger,
-      customMessage: customMessage
-    };
+    // Merge with existing settings
+    const saved = await AsyncStorage.getItem(SETTINGS_KEY);
+    const currentSettings = saved ? JSON.parse(saved) : {};
+    
+    const newSettings = { ...currentSettings, [key]: value };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings));
   };
 
   const saveCustomMessage = async () => {
-    const newSettings = {
-      locationSharing,
-      sendSms,
-      backgroundTrigger,
-      customMessage
-    };
+    const saved = await AsyncStorage.getItem(SETTINGS_KEY);
+    const currentSettings = saved ? JSON.parse(saved) : {};
+    
+    const newSettings = { ...currentSettings, customMessage };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings));
   };
 
@@ -77,10 +82,10 @@ const SafetySettingsScreen = ({ navigation }: any) => {
       <SafeAreaView style={{ flex: 1 }}>
         {/* --- MINIMALIST HEADER --- */}
         <XStack alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={24}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 12, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" }}>
-            <Feather name="chevron-left" size={20} color={theme.textPrimary} />
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ width: 40, height: 40, justifyContent: "center", alignItems: "flex-start" }}>
+            <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-          <YStack marginLeft={16}>
+          <YStack marginLeft={8}>
             <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>Security Settings</TText>
             <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2} textTransform="uppercase">TRIGGERS & PRIVACY</TText>
           </YStack>
@@ -147,7 +152,7 @@ const SafetySettingsScreen = ({ navigation }: any) => {
                 trackColor={{ false: isDarkMode ? "#2D3B34" : "#E2E8F0", true: "#00C48A" }}
                 thumbColor={"#FFFFFF"}
                 ios_backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}
-                onValueChange={(val) => toggleSetting('location', val)}
+                onValueChange={(val) => toggleSetting('locationSharing', val)}
                 value={locationSharing}
               />
             </XStack>
@@ -165,7 +170,7 @@ const SafetySettingsScreen = ({ navigation }: any) => {
                 trackColor={{ false: isDarkMode ? "#2D3B34" : "#E2E8F0", true: "#3B82F6" }}
                 thumbColor={"#FFFFFF"}
                 ios_backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}
-                onValueChange={(val) => toggleSetting('sms', val)}
+                onValueChange={(val) => toggleSetting('sendSms', val)}
                 value={sendSms}
               />
             </XStack>
@@ -183,7 +188,7 @@ const SafetySettingsScreen = ({ navigation }: any) => {
                 trackColor={{ false: isDarkMode ? "#2D3B34" : "#E2E8F0", true: "#F59E0B" }}
                 thumbColor={"#FFFFFF"}
                 ios_backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}
-                onValueChange={(val) => toggleSetting('background', val)}
+                onValueChange={(val) => toggleSetting('backgroundTrigger', val)}
                 value={backgroundTrigger}
               />
             </XStack>
@@ -194,7 +199,7 @@ const SafetySettingsScreen = ({ navigation }: any) => {
           <XStack backgroundColor={isDarkMode ? "rgba(59,130,246,0.1)" : "#EFF6FF"} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "rgba(59,130,246,0.2)" : "#DBEAFE"} padding={16} alignItems="flex-start">
             <Feather name="info" size={16} color="#3B82F6" style={{ marginTop: 2, marginRight: 10 }} />
             <TText flex={1} fontFamily="Chirp-Medium" fontSize={12} color={isDarkMode ? "#93C5FD" : "#1D4ED8"} lineHeight={18}>
-              Background trigger is an Android-first feature. iOS support is coming in the next update.
+              Background trigger requires native hardware permissions. 
             </TText>
           </XStack>
 

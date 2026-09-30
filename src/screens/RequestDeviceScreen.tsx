@@ -28,19 +28,19 @@ const RequestDeviceScreen = ({ navigation }: any) => {
   const solidActionBg = isDarkMode ? "#FFFFFF" : "#000000";
   const solidActionIcon = isDarkMode ? "#000000" : "#FFFFFF";
 
-  const myNodes = [
-    { id: 1, name: "Home Node", status: "Presently Stable", voltage: "224V", isOnline: true },
-    { id: 2, name: "Shop Node", status: "Power Outage", voltage: null, isOnline: false },
-    { id: 3, name: "Parents Node", status: "Presently Stable", voltage: "218V", isOnline: true },
+  const usagePlaces = [
+    { id: 1, name: "Your Home", subtitle: "Monitor your personal residence 24/7", icon: "home" },
+    { id: 2, name: "Shop or Business", subtitle: "Keep track of power at your workspace", icon: "store" },
+    { id: 3, name: "Parents' House", subtitle: "Ensure your loved ones always have power", icon: "heart" },
   ];
 
   const features = [
-    { icon: "zap", title: "Instant Outage Alerts", desc: "Know the exact second your power goes off." },
-    { icon: "zap-off", title: "Restoration Notifications", desc: "Get alerted the moment electricity comes back." },
-    { icon: "bar-chart-2", title: "Daily Usage History", desc: "Track hours of power received per day or week." },
-    { icon: "dollar-sign", title: "Cost Estimator", desc: "Estimate spending based on real uptime data." },
-    { icon: "globe", title: "Monitor From Anywhere", desc: "Check all your nodes remotely without phone calls." },
-    { icon: "cpu", title: "Zero Installation", desc: "Plug into any socket and connect in 60 seconds." },
+    { icon: "alert", title: "Instant Outage Alerts", desc: "Know the exact second your power goes off." },
+    { icon: "flash", title: "Restoration Notifications", desc: "Get alerted the moment electricity comes back." },
+    { icon: "chart-bar", title: "Daily Usage History", desc: "Track hours of power received per day or week." },
+    { icon: "currency-usd", title: "Cost Estimator", desc: "Estimate spending based on real uptime data." },
+    { icon: "earth", title: "Monitor From Anywhere", desc: "Check all your nodes remotely without phone calls." },
+    { icon: "power-plug", title: "Zero Installation", desc: "Plug into any socket and connect in 60 seconds." },
   ];
 
   const badges = [
@@ -107,34 +107,29 @@ const RequestDeviceScreen = ({ navigation }: any) => {
             <Text style={styles.heroTitle}>Power your peace of mind.</Text>
           </View>
 
-          {/* Your Nodes Section (Grouped List Style) */}
+          {/* Where to Use Section */}
           <View style={styles.devicesHeaderRow}>
-            <Text style={styles.sectionTravelHeader}>Your Installed Nodes</Text>
-            <View style={styles.onlinePill}>
-              <View style={styles.onlineDot} />
-              <Text style={styles.onlinePillText}>2 online</Text>
-            </View>
+            <Text style={styles.sectionTravelHeader}>Where to use</Text>
           </View>
 
           <View style={styles.listContainer}>
-            {myNodes.map((node, index) => (
+            {usagePlaces.map((node, index) => (
               <View 
                 key={node.id} 
                 style={[
                   styles.listRow, 
-                  index === myNodes.length - 1 && { borderBottomWidth: 0 }
+                  index === usagePlaces.length - 1 && { borderBottomWidth: 0 }
                 ]}
               >
-                <View style={[styles.listIconBox, { backgroundColor: node.isOnline ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2") }]}>
-                  <MaterialCommunityIcons name={node.isOnline ? "lightning-bolt" : "power-plug-off"} size={18} color={node.isOnline ? "#00C48A" : "#EF4444"} />
+                <View style={[styles.listIconBox, { backgroundColor: isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5" }]}>
+                  <MaterialCommunityIcons name={node.icon as any} size={18} color="#00C48A" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.listRowTitle}>{node.name}</Text>
                   <Text style={styles.listRowSubtitle}>
-                    {node.voltage ? `${node.voltage} • ` : ""}{node.status}
+                    {node.subtitle}
                   </Text>
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textSecondary} />
               </View>
             ))}
           </View>
@@ -257,9 +252,6 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
 
   devicesHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 24, marginBottom: 12 },
   sectionTravelHeader: { fontSize: 12, fontFamily: "Sora_700Bold", color: theme.textSecondary, marginLeft: 24, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1.5 },
-  onlinePill: { flexDirection: "row", alignItems: "center", backgroundColor: isDarkMode ? "#064E3B" : "#ECFDF5", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: isDarkMode ? "#047857" : "#A7F3D0" },
-  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#00C48A", marginRight: 6 },
-  onlinePillText: { fontSize: 11, fontFamily: "Sora_700Bold", color: isDarkMode ? "#A7F3D0" : "#064E3B" },
   
   // Profile List Group Containers
   listContainer: {

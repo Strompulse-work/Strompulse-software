@@ -31,6 +31,13 @@ import PrivateDashboardInternalScreen from "../screens/PrivateDashboardInternalS
 import LinkPhoneScreen from "../screens/LinkPhoneScreen";
 import LiveTrackingScreen from "../screens/LiveTrackingScreen";
 
+// --- NEW PROFILE SUB-SCREENS ---
+import MyActivityScreen from "../screens/MyActivityScreen";
+import MySubscriptionsScreen from "../screens/MySubscriptionsScreen";
+import SettingsScreen from "../screens/SettingsScreen";
+import PrivacySecurityScreen from "../screens/PrivacySecurityScreen";
+import HelpSupportScreen from "../screens/HelpSupportScreen";
+
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
@@ -284,6 +291,13 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
       <Stack.Screen name="PlaceDetailScreen" component={PlaceDetailScreen} />
       <Stack.Screen name="CommunityZonesScreen" component={CommunityZonesScreen} />
       <Stack.Screen name="LiveTrackingScreen" component={LiveTrackingScreen} />
+      
+      {/* --- NEW PROFILE SUB-SCREENS --- */}
+      <Stack.Screen name="MyActivityScreen" component={MyActivityScreen} />
+      <Stack.Screen name="MySubscriptionsScreen" component={MySubscriptionsScreen} />
+      <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+      <Stack.Screen name="PrivacySecurityScreen" component={PrivacySecurityScreen} />
+      <Stack.Screen name="HelpSupportScreen" component={HelpSupportScreen} />
     </Stack.Navigator>
   );
 };
