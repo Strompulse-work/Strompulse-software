@@ -179,16 +179,28 @@ export class AuthService {
     }
   }
 
+  // UPDATED: Now dynamically checks if the identifier is an email or phone number
+  // and correctly sets the type to "signup" for emails or "sms" for phones.
   static async verifyOTP(
-    phone: string,
+    identifier: string,
     token: string,
   ): Promise<ApiResponse<AuthSession>> {
     try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone,
-        token,
-        type: "sms",
-      });
+      const isPhone = this.isPhoneNumber(identifier);
+      
+      let verifyParams: any = {
+        token: token,
+      };
+
+      if (isPhone) {
+        verifyParams.phone = identifier;
+        verifyParams.type = "sms";
+      } else {
+        verifyParams.email = identifier;
+        verifyParams.type = "signup"; // CRITICAL: This allows email 6-digit OTP verification
+      }
+
+      const { data, error } = await supabase.auth.verifyOtp(verifyParams);
 
       if (error) return { success: false, error: error.message };
       if (!data.user || !data.session) return { success: false, error: "OTP verification failed" };
@@ -308,7 +320,6 @@ export class AuthService {
   static async requestPasswordReset(email: string): Promise<ApiResponse<void>> {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        // UPDATED: Now points to the correct Strompulse deep link
         redirectTo: "strompulse://auth/reset-password",
       });
 

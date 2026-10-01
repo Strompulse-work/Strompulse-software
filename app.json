@@ -25,7 +25,8 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Strompulse requires background location to track live journey sharing and emergency SOS broadcasts.",
         "NSContactsUsageDescription": "Strompulse needs contact access to select and alert your emergency security network.",
         "NSPhotoLibraryUsageDescription": "Strompulse requires gallery access to update your profile photo.",
-        "NSFaceIDUsageDescription": "Strompulse uses Face ID to secure your app access."
+        "NSFaceIDUsageDescription": "Strompulse uses Face ID to secure your app access.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -36,7 +37,8 @@
         "android.permission.READ_CONTACTS",
         "android.permission.SEND_SMS",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
