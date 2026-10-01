@@ -11,7 +11,8 @@ import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 import { supabase } from "../config/supabase";
-import { useAllGridDevices, parseStromTimestamp, DEVICE_LOCATIONS } from "../hooks/useDeviceData";
+import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
+import { DEVICE_LOCATIONS } from "../constants/gridLocations";
 import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 

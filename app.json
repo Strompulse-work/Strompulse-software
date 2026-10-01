@@ -18,21 +18,35 @@
       "**/*"
     ],
     "ios": {
-      "bundleIdentifier": "com.strompulse.app"
+      "bundleIdentifier": "com.strompulse.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Strompulse uses your location to show nearby electricity grid status and power availability.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Strompulse requires background location to track live journey sharing and emergency SOS broadcasts.",
+        "NSContactsUsageDescription": "Strompulse needs contact access to select and alert your emergency security network.",
+        "NSPhotoLibraryUsageDescription": "Strompulse requires gallery access to update your profile photo.",
+        "NSFaceIDUsageDescription": "Strompulse uses Face ID to secure your app access."
+      }
     },
     "android": {
       "package": "com.strompulse.app",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CONTACTS",
+        "android.permission.SEND_SMS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "plugins": [
       "expo-location",
       "expo-notifications",
       "expo-font",
-      "expo-web-browser"
-     ],
+      "expo-web-browser",
+      "expo-image-picker",
+      "expo-local-authentication"
+    ],
     "extra": {
       "eas": {
         "projectId": "e9719fd5-2b71-4c9d-8591-57628005cfa2"
