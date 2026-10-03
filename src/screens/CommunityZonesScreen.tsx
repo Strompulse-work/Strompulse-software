@@ -14,7 +14,6 @@ import Svg, { Rect, Text as SvgText, Line } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
 import { useAllGridDevices, computeHistoryAnalytics, formatDurationShort, parseStromTimestamp } from "../hooks/useDeviceData";
 import { DEVICE_LOCATIONS } from "../constants/gridLocations";
-import { Loading } from "../components/UIComponents";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { firebaseDb } from "../config/firebase";
 import { ref, push, update, increment } from "firebase/database";
@@ -27,29 +26,30 @@ const CHECKING_COLOR = "#F59E0B";
 // ---------------------------------------------------------------------------
 // REAL-TIME UPTIME CALCULATION
 // ---------------------------------------------------------------------------
-// Firebase only ever stores a restoration EVENT under `history/<timestamp>`
-// (confirmed shape: { latitude, longitude, status: 1, timestamp, voltage } —
-// a snapshot taken the instant power came back, with no duration/end field
-// of its own). There is no record of when an outage started, only when it
-// ended. Given that, the most honest thing we can compute per device is:
+// Firebase only ever stores a restoration EVENT under `history/<timestamp>` —
+// a snapshot taken the instant power came BACK on. There is no record of when
+// an outage started, only when it ended.
 //
-//   - Each restoration event implies an "up" interval starting at its own
-//     timestamp and running until the NEXT restoration event (if one
-//     exists), because a later restoration only happens after another
-//     outage occurred in between.
-//   - The most recent restoration's "up" interval only extends all the way
-//     to "now" if the device is CURRENTLY online. If it's currently
-//     offline, we stop that interval at its own timestamp — we have no
-//     record of when the current outage began, so we never claim uptime we
-//     can't back up with data.
-//   - A device with no restoration history at all falls back to its
-//     current live state for the whole window (100% if online, 0% if not).
+// A restoration event only ever happens after an outage (that's what it's
+// restoring from), so the gap between any two consecutive restorations always
+// contains an unlogged outage somewhere inside it — we just don't know where.
+// Assuming the WHOLE gap was "up" badly overstates uptime: a single Friday-
+// night restoration could retroactively paint an entire dead Sunday-to-
+// Thursday week green, because nothing contradicted it... until this fix.
 //
-// This recalculates from whatever `device.history`/`device.isOnline` looks
-// like at render time, so as Firebase pushes new restorations or the
-// connection hook flips a device on/off, the next render produces fresh
-// percentages — no static/mock data involved.
+// Instead, a gap is only trusted as continuous uptime when it's short enough
+// that an unnoticed flicker is plausible — capped at one reporting bucket
+// (4 hours, the smallest interval this app charts). Anything longer gets NO
+// credit: it's treated as unknown/not-up rather than guessed as up, so the
+// chart never claims uptime the data can't back up.
+//
+// The one exception is the device's CURRENT state: the most recent
+// restoration's "up" interval extends all the way to "now" only if the
+// device is confirmed online right now — nothing has happened since to
+// contradict that.
 // ---------------------------------------------------------------------------
+
+const MAX_TRUSTED_GAP_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 const buildUpIntervalsFromHistory = (
   historyNode: any,
@@ -74,7 +74,21 @@ const buildUpIntervalsFromHistory = (
   for (let i = 0; i < events.length; i++) {
     const start = events[i];
     const isLast = i === events.length - 1;
-    const end = isLast ? (isOnline ? nowMs : start) : events[i + 1];
+
+    if (isLast) {
+      // Only the most recent restoration can extend to "now" — and only if
+      // the device is confirmed online right now. Nothing since has
+      // contradicted that.
+      const end = isOnline ? nowMs : start;
+      if (end > start) intervals.push({ start, end });
+      continue;
+    }
+
+    // A restoration always follows an outage, so this gap necessarily
+    // contains one somewhere. Trust it only if it's short enough to
+    // plausibly be a single brief flicker.
+    const gap = events[i + 1] - start;
+    const end = gap <= MAX_TRUSTED_GAP_MS ? events[i + 1] : start;
     if (end > start) intervals.push({ start, end });
   }
   return intervals;
@@ -94,9 +108,6 @@ const sumOverlapMs = (
   return total;
 };
 
-// Formats a restoration Date the way people actually talk about time:
-// 12-hour clock with am/pm, and "today"/"yesterday" instead of a bare date
-// when it's recent enough for that to be more natural to read.
 const formatFriendlyRestorationTime = (date: Date): string => {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -122,9 +133,6 @@ const formatFriendlyRestorationTime = (date: Date): string => {
   return `on ${dateStr} at ${timeStr}`;
 };
 
-// Real, Firebase-driven uptime % (0-100) for a device within [startMs, endMs).
-// Returns null when the interval hasn't happened yet, so callers can render it
-// as a neutral/future bar instead of a fake 0%.
 const calculateIntervalUptime = (device: any, startMs: number, endMs: number, nowMs: number): number | null => {
   if (startMs >= nowMs) return null;
 
@@ -146,14 +154,13 @@ const calculateIntervalUptime = (device: any, startMs: number, endMs: number, no
 const CommunityZonesScreen = ({ route, navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
   const [userVote, setUserVote] = useState<string | null>(null);
-
   const [chartTimeRange, setChartTimeRange] = useState<"Today" | "This Week">("Today");
-
-  // Ticks once a second so the chart keeps recalculating as time passes, even
-  // when Firebase hasn't pushed a new value — the current interval's uptime %
-  // should keep climbing live while a device stays online, and the "future"
-  // cutoff should keep moving forward.
   const [nowTick, setNowTick] = useState(Date.now());
+
+  // FORCED GREEN DESIGN FOR ALL ACTION BUTTONS/ARROWS
+  const solidActionBg = "#00C48A";
+  const solidActionIcon = "#FFFFFF";
+
   useEffect(() => {
     const timer = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -186,11 +193,6 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
       const session = await AuthService.getCurrentSession();
       const userId = session?.user?.id || "anonymous";
 
-      // Every raw vote goes into ONE centralized top-level node
-      // (AccuracyVotes/<areaId>/<pushId>) — not nested under the device's
-      // own PowerMonitor/<areaId> tree, and not a bare root-level node per
-      // device either. This keeps all 12 areas' votes browsable in one
-      // place in the Firebase console, without touching device data.
       const votesRef = ref(firebaseDb, `AccuracyVotes/${areaId}`);
       await push(votesRef, {
         area_id: areaId,
@@ -200,8 +202,6 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
         created_at: Date.now()
       });
 
-      // Also keep a running total so a developer can see Yes/No counts per
-      // area at a glance, without opening and counting every vote entry.
       const summaryRef = ref(firebaseDb, `AccuracyVotes_Summary/${areaId}`);
       await update(summaryRef, {
         area_name: displayTitle,
@@ -215,7 +215,7 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
   if (loading && !liveDevice) {
     return (
       <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center">
-        <Loading />
+        <ActivityIndicator size="large" color="#00C48A" />
       </YStack>
     );
   }
@@ -243,20 +243,17 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
 
   const historyAnalytics = computeHistoryAnalytics(liveDevice?.history, 'Today', isOnline);
 
-  // --- STRICT REAL-TIME FIREBASE CALCULATION FOR ACCURACY BAR CHART ---
   const renderAccuracyBarChart = () => {
     const now = nowTick;
     const nowDate = new Date(now);
     const currentDay = nowDate.getDay();
 
-    // Time Boundaries
     const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
     const startOfWeek = startOfToday - (currentDay * 24 * 60 * 60 * 1000);
 
     const labelsToday = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"];
     const labelsWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-    // Calculate Bins
     const intervalData = chartTimeRange === "Today"
       ? labelsToday.map((label, idx) => {
           const startMs = startOfToday + (idx * 4 * 3600 * 1000);
@@ -276,7 +273,7 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
         });
 
     const chartHeight = 190;
-    const chartWidth = width - 48; // Account for screen padding
+    const chartWidth = width - 48;
     const yAxisLabels = [100, 80, 60, 40, 20, 0];
 
     const barWidth = chartTimeRange === "Today" ? 22 : 18;
@@ -313,7 +310,6 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
         <YStack height={chartHeight} width="100%">
           <Svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
 
-            {/* Y Axis Label */}
             <SvgText
               x={12}
               y={chartHeight / 2 - 10}
@@ -344,7 +340,7 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
               const barH = item.isFuture ? 6 : Math.max(6, (item.accuracy / 100) * maxBarHeight);
               const yPos = 10 + maxBarHeight - barH;
 
-              let barColor = "#EF4444"; // Defaults to Red for 0%
+              let barColor = "#EF4444";
               if (item.accuracy >= 70) barColor = "#00C48A";
               else if (item.accuracy >= 40) barColor = "#F59E0B";
 
@@ -362,7 +358,6 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
               );
             })}
 
-            {/* X Axis Label */}
             <SvgText
               x={startX + (availableWidth / 2)}
               y={chartHeight - 4}
@@ -457,10 +452,12 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
                 <Feather name="shield" size={16} color="#00C48A" />
               </YStack>
               <TText flex={1} fontSize={13} fontFamily="Chirp-Medium" color={theme.textPrimary} lineHeight={18}>
-                Analytics is 70 percent accurate, If you need 100 percent accuracy, request personal strompulse device
+                Analytics is 70% accurate, If you need 100% accuracy, request personal strompulse device
               </TText>
             </XStack>
-            <Feather name="arrow-right" size={18} color="#00C48A" style={{ marginLeft: 8 }} />
+            <YStack width={32} height={32} borderRadius={16} backgroundColor={solidActionBg} justifyContent="center" alignItems="center" style={{ marginLeft: 8 }}>
+              <Feather name="arrow-right" size={14} color={solidActionIcon} />
+            </YStack>
           </XStack>
         </TouchableOpacity>
 

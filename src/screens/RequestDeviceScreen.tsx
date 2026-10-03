@@ -8,8 +8,6 @@ import {
   Platform, 
   StatusBar,
   SafeAreaView,
-  Image,
-  Dimensions,
   Linking,
   Alert
 } from "react-native";
@@ -17,16 +15,13 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "../theme/ThemeContext";
 
-const { height, width } = Dimensions.get("window");
-const HEADER_HEIGHT = height * 0.45;
-
 const RequestDeviceScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
   const styles = getStyles(theme, isDarkMode);
 
-  // Solid action color matching your other screens
-  const solidActionBg = isDarkMode ? "#FFFFFF" : "#000000";
-  const solidActionIcon = isDarkMode ? "#000000" : "#FFFFFF";
+  // Forced Green Action Color
+  const solidActionBg = "#00C48A";
+  const solidActionIcon = "#FFFFFF";
 
   const usagePlaces = [
     { id: 1, name: "Your Home", subtitle: "Monitor your personal residence 24/7", icon: "home" },
@@ -53,34 +48,46 @@ const RequestDeviceScreen = ({ navigation }: any) => {
   ];
 
   const handleRequestNode = () => {
-    Linking.openURL(`whatsapp://send?text=${encodeURIComponent("Hello Strompulse, I want to request a personal hardware node (₦50,000). Please guide me through delivery.")}`).catch(() => Alert.alert("WhatsApp not found", "Please install WhatsApp to complete your node request."));
+    Alert.alert(
+      "Request Node",
+      "How would you like to contact us?",
+      [
+        {
+          text: "WhatsApp",
+          onPress: () => {
+            Linking.openURL(`whatsapp://send?phone=2348136334468&text=${encodeURIComponent("Hello Strompulse,\n\nI want to request a personal hardware node and become a Stromer. Please guide me through the process.")}`)
+              .catch(() => Alert.alert("WhatsApp not found", "Please install WhatsApp to complete your node request."));
+          }
+        },
+        {
+          text: "Email",
+          onPress: () => {
+            Linking.openURL(`mailto:strompulse.de@gmail.com?subject=Request for Strompulse Node&body=${encodeURIComponent("Hello Strompulse,\n\nI want to request a personal hardware node and become a Stromer. Please guide me through the process.\n\nThank you.")}`)
+              .catch(() => Alert.alert("Email App not found", "Could not open your default email client."));
+          }
+        },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
       
-      {/* 1. Fixed Parallax Background Image */}
-      <Image 
-        source={require("../../assets/images/gridstrom2.png")} 
-        style={styles.bgImage} 
-        resizeMode="cover"
-      />
-
-      {/* 2. Floating Top Header */}
+      {/* 1. Floating Top Header */}
       <SafeAreaView style={styles.floatingHeader}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <MaterialCommunityIcons name="arrow-left" size={22} color={theme.textPrimary} />
         </TouchableOpacity>
       </SafeAreaView>
 
-      {/* 3. The Scrollable Bottom Sheet */}
+      {/* 2. The Scrollable Bottom Sheet */}
       <ScrollView 
         showsVerticalScrollIndicator={false} 
-        contentContainerStyle={{ flexGrow: 1 }}
+        contentContainerStyle={{ flexGrow: 1, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 80 }}
         bounces={false}
       >
-        <View style={{ height: HEADER_HEIGHT }} />
 
         <View style={styles.sheetContent}>
           
@@ -185,13 +192,6 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     flex: 1, 
     backgroundColor: isDarkMode ? "#0B0F0D" : "#1E293B",
   },
-  
-  bgImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: "100%",
-    height: HEADER_HEIGHT + 60,
-  },
-  
   floatingHeader: {
     position: "absolute",
     top: Platform.OS === 'android' ? StatusBar.currentHeight : 20,
@@ -215,6 +215,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 5,
+    marginTop: 20
   },
   
   sheetContent: {
@@ -223,7 +224,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderTopRightRadius: 36,
     paddingTop: 0, 
     paddingBottom: 40,
-    minHeight: height - HEADER_HEIGHT + 40,
+    flex: 1,
   },
 
   premiumHeroCard: {
@@ -231,7 +232,7 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderRadius: 28,
     padding: 24,
     marginBottom: 24,
-    marginTop: -50,
+    marginTop: 24, // Replaced negative margin since we removed the BG Image
     overflow: "hidden",
     shadowColor: "#00C48A",
     shadowOffset: { width: 0, height: 8 },

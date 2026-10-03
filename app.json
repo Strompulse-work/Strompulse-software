@@ -7,7 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/images/strompulselogo.png",
     "splash": {
-      "image": "./assets/images/strompulselogo.png",
       "resizeMode": "contain",
       "backgroundColor": "#FFFFFF"
     },
@@ -42,8 +41,21 @@
       ]
     },
     "plugins": [
+      [
+        "react-native-maps",
+        {
+          "iosGoogleMapsApiKey": "AIzaSyCeWigelvMAGJ_X-qj8UqY6CoGTbzBShfA",
+          "androidGoogleMapsApiKey": "AIzaSyB76SNOIgP1dkPZXhlPPIU_650y45Cd1Mo"
+        }
+      ],
       "expo-location",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/strompulselogo.png",
+          "color": "#00C48A"
+        }
+      ],
       "expo-font",
       "expo-web-browser",
       "expo-image-picker",

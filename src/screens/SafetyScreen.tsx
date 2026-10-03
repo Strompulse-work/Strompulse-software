@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from "react";
 import { 
   Platform, StatusBar, Animated, SafeAreaView, Dimensions, 
-  ScrollView, Alert, TouchableOpacity, Pressable, View, ActivityIndicator, Image 
+  ScrollView, Alert, TouchableOpacity, Pressable, View, ActivityIndicator, Image, Switch 
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -25,7 +25,7 @@ const JOURNEY_CONTACTS_KEY = "strompulse_journey_contacts";
 const SETTINGS_KEY = "strompulse_security_settings";
 
 const SafetyScreen = ({ navigation, route }: any) => {
-  const { theme, isDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   const [isJourneyActive, setIsJourneyActive] = useState(false);
   const [alertSent, setAlertSent] = useState(false);
@@ -35,11 +35,23 @@ const SafetyScreen = ({ navigation, route }: any) => {
   const [securitySettings, setSecuritySettings] = useState({ locationSharing: true, sendSms: true, customMessage: "" });
   const [user, setUser] = useState<any>(null);
 
+  // Sidebar Drawer state hooks added
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const sidebarAnim = useRef(new Animated.Value(width)).current;
+  const [localAvatar, setLocalAvatar] = useState<string | null>(null);
+  const [localName, setLocalName] = useState<string | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       const fetchRealtimeData = async () => {
         const session = await AuthService.getCurrentSession();
         if (session) setUser(session.user);
+
+        const savedAvatar = await AsyncStorage.getItem("global_avatar");
+        if (savedAvatar) setLocalAvatar(savedAvatar);
+        
+        const savedName = await AsyncStorage.getItem("global_name");
+        if (savedName) setLocalName(savedName);
 
         const savedSettings = await AsyncStorage.getItem(SETTINGS_KEY);
         if (savedSettings) setSecuritySettings(JSON.parse(savedSettings));
@@ -70,6 +82,49 @@ const SafetyScreen = ({ navigation, route }: any) => {
       fetchRealtimeData();
     }, [route.params])
   );
+
+  const displayAvatar = localAvatar || user?.avatar_url || user?.user_metadata?.avatar_url || null;
+  const fullName = localName || user?.full_name || "Afolabi Taiwo Glory";
+
+  const toggleSidebar = (open: boolean) => {
+    if (open) {
+      setIsSidebarOpen(true);
+      Animated.timing(sidebarAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(sidebarAnim, {
+        toValue: width,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => setIsSidebarOpen(false));
+    }
+  };
+
+  const handleLogoutPress = () => {
+    toggleSidebar(false);
+    Alert.alert(
+      "Log Out",
+      "Are you sure you want to log out of your account?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Log Out",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await AuthService.logout();
+            } catch (err) {
+              console.error("Error logging out:", err);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
 
   const handleStopJourney = async () => {
     setIsJourneyActive(false);
@@ -222,24 +277,29 @@ const SafetyScreen = ({ navigation, route }: any) => {
           
           <Image 
             source={require("../../assets/images/strompulselogo.png")} 
-            style={{ width: 48, height: 48, resizeMode: "contain" }} 
+            style={{ width: 40, height: 40, resizeMode: "contain" }} 
           />
           
           <YStack position="absolute" left={0} right={0} alignItems="center" pointerEvents="none">
-            <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 20 }} color={theme.textPrimary}>Strompulse Security</TText>
+            <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 20 }} color={theme.textPrimary}>Security</TText>
             <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Stay safe, wherever you go</TText>
           </YStack>
           
-          <TouchableOpacity onPress={() => navigation.navigate("SafetySettingsScreen")} style={{ backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", padding: 10, borderRadius: 20, borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0" }}>
-            <Feather name="settings" size={20} color={theme.textPrimary} />
-          </TouchableOpacity>
+          <XStack alignItems="center" gap={16}>
+            <TouchableOpacity onPress={() => navigation.navigate("SafetySettingsScreen")} style={{ padding: 4 }}>
+              <Feather name="settings" size={22} color={theme.textPrimary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => toggleSidebar(true)} style={{ padding: 4 }}>
+              <Feather name="menu" size={24} color={theme.textPrimary} />
+            </TouchableOpacity>
+          </XStack>
         </XStack>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
 
           {/* --- ACTIVE JOURNEY BANNER --- */}
           {isJourneyActive && (
-            <XStack marginHorizontal={24} marginTop={10} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} borderRadius={20} padding={16} borderWidth={1} borderColor="#00C48A" alignItems="center" justifyContent="space-between">
+            <XStack marginHorizontal={24} marginTop={10} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} borderRadius={20} padding={16} borderWidth={1} borderColor="#00C48A" alignItems="center" justifyContent="space-between" marginBottom={10}>
               <XStack alignItems="center" gap={12}>
                 <YStack width={10} height={10} borderRadius={5} backgroundColor="#00C48A" />
                 <YStack>
@@ -296,55 +356,6 @@ const SafetyScreen = ({ navigation, route }: any) => {
             </TText>
           </XStack>
 
-          {/* --- SHARE MY JOURNEY CARD --- */}
-          <TouchableOpacity onPress={() => navigation.navigate("JourneyShareScreen", { isJourneyActive })}>
-            <XStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={16} padding={20} alignItems="center">
-              <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
-                <Feather name="map-pin" size={16} color="#00C48A" />
-              </YStack>
-              <YStack flex={1} marginLeft={16}>
-                <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Share My Journey</TText>
-                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Let your contacts follow your trip in real time</TText>
-              </YStack>
-              <Feather name="chevron-right" size={20} color={theme.textSecondary} />
-            </XStack>
-          </TouchableOpacity>
-
-          {/* --- BIG LIVE MAP (Movable & Interactive with CustomMapView) --- */}
-          <YStack marginHorizontal={24} height={400} backgroundColor={isDarkMode ? "#121A16" : "#E2E8F0"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} overflow="hidden" position="relative" marginBottom={16}>
-            {currentCoords ? (
-              <CustomMapView 
-                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-                showCoverage={false}
-                showLegend={false}
-                region={{
-                  latitude: currentCoords.lat,
-                  longitude: currentCoords.lng,
-                  latitudeDelta: 0.015,
-                  longitudeDelta: 0.015,
-                }}
-                markers={[{
-                  id: "current_user",
-                  title: currentLocation.split(',')[0],
-                  latitude: currentCoords.lat,
-                  longitude: currentCoords.lng,
-                  connectionState: "online"
-                }]}
-              />
-            ) : (
-              <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center">
-                <ActivityIndicator size="small" color="#00C48A" />
-              </YStack>
-            )}
-            
-            {/* Overlay hint if journey is not active */}
-            {!isJourneyActive && (
-              <YStack position="absolute" bottom={0} left={0} right={0} paddingVertical={16} backgroundColor={isDarkMode ? "rgba(18,26,22,0.85)" : "rgba(255,255,255,0.95)"} alignItems="center">
-                <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Turn on Share My Journey above to track trips</TText>
-              </YStack>
-            )}
-          </YStack>
-
           {/* --- EMERGENCY CONTACTS CARD WITH AVATARS --- */}
           <TouchableOpacity onPress={() => navigation.navigate("ContactsScreen")}>
             <YStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={16}>
@@ -382,8 +393,139 @@ const SafetyScreen = ({ navigation, route }: any) => {
             </YStack>
           </TouchableOpacity>
 
+          {/* --- SHARE MY JOURNEY CARD --- */}
+          <TouchableOpacity onPress={() => navigation.navigate("JourneyShareScreen", { isJourneyActive })}>
+            <XStack marginHorizontal={24} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={16} padding={20} alignItems="center">
+              <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+                <Feather name="map-pin" size={16} color="#00C48A" />
+              </YStack>
+              <YStack flex={1} marginLeft={16}>
+                <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Share My Journey</TText>
+                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Let your contacts follow your trip in real time</TText>
+              </YStack>
+              <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+            </XStack>
+          </TouchableOpacity>
+
+          {/* --- BIG LIVE MAP --- */}
+          <YStack marginHorizontal={24} height={400} backgroundColor={isDarkMode ? "#121A16" : "#E2E8F0"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} overflow="hidden" position="relative" marginBottom={16}>
+            {currentCoords ? (
+              <CustomMapView 
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                showCoverage={false}
+                showLegend={false}
+                region={{
+                  latitude: currentCoords.lat,
+                  longitude: currentCoords.lng,
+                  latitudeDelta: 0.015,
+                  longitudeDelta: 0.015,
+                }}
+                markers={[{
+                  id: "current_user",
+                  title: currentLocation.split(',')[0],
+                  latitude: currentCoords.lat,
+                  longitude: currentCoords.lng,
+                  connectionState: "online"
+                }]}
+              />
+            ) : (
+              <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} justifyContent="center" alignItems="center">
+                <ActivityIndicator size="small" color="#00C48A" />
+              </YStack>
+            )}
+            
+            {/* Overlay hint if journey is not active */}
+            {!isJourneyActive && (
+              <YStack position="absolute" bottom={0} left={0} right={0} paddingVertical={16} backgroundColor={isDarkMode ? "rgba(18,26,22,0.85)" : "rgba(255,255,255,0.95)"} alignItems="center">
+                <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Turn on Share My Journey above to track trips</TText>
+              </YStack>
+            )}
+          </YStack>
+
         </ScrollView>
       </SafeAreaView>
+
+      {/* --- SIDEBAR DRAWER --- */}
+      {isSidebarOpen && (
+        <YStack position="absolute" top={0} left={0} right={0} bottom={0} zIndex={99999}>
+          <TouchableOpacity style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} activeOpacity={1} onPress={() => toggleSidebar(false)} />
+          <Animated.View style={{
+            position: "absolute", top: 0, bottom: 0, right: 0, width: width * 0.78,
+            backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF",
+            transform: [{ translateX: sidebarAnim }],
+            paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 50,
+            paddingHorizontal: 20, borderLeftWidth: 1,
+            borderLeftColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
+            elevation: 20, shadowColor: "#000", shadowOffset: { width: -5, height: 0 }, shadowOpacity: 0.3, shadowRadius: 15,
+          }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+              <TouchableOpacity onPress={() => toggleSidebar(false)} style={{ alignSelf: "flex-end", padding: 8, marginBottom: 12 }}>
+                <Feather name="x" size={24} color={theme.textPrimary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity activeOpacity={0.8} onPress={() => { toggleSidebar(false); navigation.navigate("Profile"); }} style={{ flexDirection: "row", alignItems: "center", marginBottom: 28, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#1F2E27" : "#F1F5F9" }}>
+                {displayAvatar ? (
+                  <Image source={{ uri: displayAvatar }} style={{ width: 56, height: 56, borderRadius: 28, borderWidth: 2, borderColor: "#00C48A", marginRight: 14 }} />
+                ) : (
+                  <YStack width={56} height={56} borderRadius={28} backgroundColor="#064E3B" justifyContent="center" alignItems="center" borderWidth={2} borderColor="#00C48A" marginRight={14}>
+                    <TText fontFamily="Chirp-Heavy" fontSize={22} color="#FFFFFF">{fullName.charAt(0).toUpperCase()}</TText>
+                  </YStack>
+                )}
+                <YStack flex={1}>
+                  <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary} numberOfLines={1}>{fullName}</TText>
+                  <TText fontFamily="Chirp-Medium" fontSize={12} color="#00C48A" marginTop={2}>View Profile →</TText>
+                </YStack>
+              </TouchableOpacity>
+
+              <YStack gap={4} marginBottom={28} paddingBottom={20} borderBottomWidth={1} borderBottomColor={isDarkMode ? "#1F2E27" : "#F1F5F9"}>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("Profile"); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="user" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Profile</TText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("RequestDeviceScreen"); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="cpu" size={20} color="#00C48A" />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color="#00C48A">Become a Stromer</TText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("MySubscriptionsScreen"); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="bookmark" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>My Subscriptions</TText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("AboutScreen"); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="info" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>About Strompulse</TText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("PrivacySecurityScreen"); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="shield" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Privacy and Security</TText>
+                </TouchableOpacity>
+              </YStack>
+
+              <YStack gap={4}>
+                <XStack paddingVertical={14} alignItems="center" justifyContent="space-between">
+                  <XStack alignItems="center" gap={16}>
+                    <Feather name="moon" size={20} color={theme.textPrimary} />
+                    <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Dark Mode</TText>
+                  </XStack>
+                  <Switch value={isDarkMode} onValueChange={() => toggleDarkMode()} trackColor={{ false: theme.border, true: "#00C48A" }} thumbColor="#FFFFFF" />
+                </XStack>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("SettingsScreen", { currentName: fullName, currentImage: displayAvatar }); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="settings" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Settings</TText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { toggleSidebar(false); navigation.navigate("HelpSupportScreen"); }} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>
+                  <Feather name="help-circle" size={20} color={theme.textPrimary} />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Help Center</TText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleLogoutPress} style={{ paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 16, marginTop: 10 }}>
+                  <Feather name="log-out" size={20} color="#EF4444" />
+                  <TText fontFamily="Chirp-Bold" fontSize={15} color="#EF4444">Log out</TText>
+                </TouchableOpacity>
+              </YStack>
+            </ScrollView>
+          </Animated.View>
+        </YStack>
+      )}
+
     </YStack>
   );
 };

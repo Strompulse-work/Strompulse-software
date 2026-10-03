@@ -1,24 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import { StyleSheet, View, Text } from "react-native";
-import MapView, { Marker, Circle, PROVIDER_DEFAULT } from "react-native-maps";
+import MapView, { Marker, Circle, PROVIDER_GOOGLE } from "react-native-maps";
 import { useTheme } from "../theme/ThemeContext";
-
-const MINIMAL_MAP_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
-  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
-  { featureType: "administrative.land_parcel", elementType: "labels.text.fill", stylers: [{ color: "#bdbdbd" }] },
-  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
-  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
-  { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
-  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
-  { featureType: "road.local", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#e9e9e9" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
-];
 
 const STATUS_COLORS = {
   online: { solid: "#00C48A", coverage: "rgba(0, 196, 138, 0.25)" },
@@ -71,13 +54,13 @@ const CustomMapView = ({
     <View style={[styles.container, style]}>
       <MapView
         ref={mapRef}
-        provider={PROVIDER_DEFAULT}
+        provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={initialRegion}
-        customMapStyle={isDarkMode ? [] : MINIMAL_MAP_STYLE}
         showsUserLocation={true}
         showsMyLocationButton={false}
         pitchEnabled={false}
+        toolbarEnabled={false}
       >
         {markers.map((marker, index) => {
           const statusColors = getMarkerStatusColors(marker);
@@ -108,7 +91,6 @@ const CustomMapView = ({
         })}
       </MapView>
 
-      {/* Conditionally Render Floating Legend Card */}
       {showLegend && (
         <View style={[
           styles.legendContainer, 
@@ -138,12 +120,12 @@ const CustomMapView = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    borderRadius: 16,
+    width: "100%",
+    height: "100%",
     overflow: "hidden",
   },
   map: {
-    width: "100%",
-    height: "100%",
+    ...StyleSheet.absoluteFillObject,
   },
   markerWrapper: {
     alignItems: "center",

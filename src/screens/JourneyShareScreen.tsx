@@ -17,7 +17,7 @@ import * as SMS from "expo-sms";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "../theme/ThemeContext";
 import { useFocusEffect } from "@react-navigation/native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import AuthService from "../services/authService";
 import { supabase } from "../config/supabase";
 
@@ -187,7 +187,6 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     await AsyncStorage.setItem(JOURNEY_CONTACTS_KEY, JSON.stringify(Array.from(selectedContacts)));
 
     const recipients = allContacts.filter(c => selectedContacts.has(c.id));
-    // FIXED: Pass phoneNumbers as an Array of strings to expo-sms
     const phoneNumbers = recipients.map(c => c.phone);
     
     const destStr = destination ? ` to ${destination}` : "";
@@ -448,6 +447,7 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                 {currentCoords && mapRegion ? (
                   <MapView 
                     style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                    provider={PROVIDER_GOOGLE}
                     region={mapRegion}
                     showsUserLocation={true} 
                     showsMyLocationButton={false}

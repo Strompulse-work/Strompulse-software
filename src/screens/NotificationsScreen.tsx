@@ -438,13 +438,8 @@ const NotificationsScreen = ({ navigation }: any) => {
 
       <SafeAreaView style={{ flex: 1 }}>
         <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={20} position="relative">
-          <TouchableOpacity 
-            onPress={() => navigation.goBack()} 
-            style={{ position: "absolute", left: 24, padding: 8, zIndex: 10 }}
-          >
-            <Feather name="arrow-left" size={24} color={theme.textPrimary} />
-          </TouchableOpacity>
-          <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 16 }} color={theme.textPrimary}>Notifications</TText>
+         
+          <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 18 }} color={theme.textPrimary}>Notifications</TText>
         </XStack>
 
         {renderSegmentedControl()}
