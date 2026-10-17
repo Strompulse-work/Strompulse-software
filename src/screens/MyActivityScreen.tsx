@@ -39,7 +39,12 @@ const parseUserActivity = (item: any, isDarkMode: boolean) => {
   const type = item.type?.toLowerCase() || '';
   const rawTitle = item.title?.toLowerCase() || '';
   const rawMessage = item.message?.toLowerCase() || '';
-  const createdAt = item.created_at ? new Date(item.created_at) : new Date();
+  
+  let createdAt = new Date();
+  if (item.created_at) {
+    const isUnix = /^\d+$/.test(String(item.created_at));
+    createdAt = isUnix ? new Date(Number(item.created_at)) : new Date(item.created_at);
+  }
 
   let icon = "clock-outline";
   let color = "#3B82F6";
@@ -102,7 +107,16 @@ const MyActivityScreen = ({ navigation }: any) => {
           const session = await AuthService.getCurrentSession();
           const currentUserId = session?.user?.id;
           
-          if (isMounted && currentUserId) {
+          if (!currentUserId) {
+            // Explicitly set null to trigger the "Logged Out" UI state
+            if (isMounted) {
+              setUserId(null);
+              setActivities([]);
+            }
+            return;
+          }
+
+          if (isMounted) {
             setUserId(currentUserId);
             
             // Limit query strictly to the last 10 days
@@ -115,10 +129,13 @@ const MyActivityScreen = ({ navigation }: any) => {
               .select('*')
               .eq('user_id', currentUserId)
               .gte('created_at', tenDaysAgo.toISOString())
-              .order('created_at', { ascending: false });
+              .order('created_at', { ascending: false })
+              .limit(100);
 
             if (!error && data) {
               setActivities(data.map(item => parseUserActivity(item, isDarkMode)));
+            } else if (error) {
+              console.error("Supabase Query Error:", error.message);
             }
           }
         } catch (err) {
@@ -180,6 +197,16 @@ const MyActivityScreen = ({ navigation }: any) => {
       {loading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator size="large" color="#00C48A" />
+        </View>
+      ) : !userId ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 40 }}>
+          <MaterialCommunityIcons name="account-lock-outline" size={48} color={theme.textSecondary} style={{ opacity: 0.5, marginBottom: 16 }} />
+          <Text style={{ fontFamily: "Chirp-Medium", fontSize: 14, color: theme.textSecondary, textAlign: "center", marginBottom: 12 }}>
+            You are currently logged out of this Expo Go session.
+          </Text>
+          <Text style={{ fontFamily: "Chirp-Medium", fontSize: 13, color: theme.textSecondary, textAlign: "center" }}>
+            Please log back in to view your activity history.
+          </Text>
         </View>
       ) : activities.length === 0 ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 40 }}>

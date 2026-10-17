@@ -11,6 +11,9 @@ import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
 
 import AuthNavigator from "./AuthNavigator";
 
+// --- PUSH NOTIFICATIONS ---
+import { registerForPushNotificationsAsync } from "../utils/pushRegistration";
+
 // --- TAB SCREENS ---
 import SafetyScreen from "../screens/SafetyScreen";
 import ElectricityScreen from "../screens/ElectricityScreen"; 
@@ -30,6 +33,11 @@ import CommunityZonesScreen from "../screens/CommunityZonesScreen";
 import PrivateDashboardInternalScreen from "../screens/PrivateDashboardInternalScreen";
 import LinkPhoneScreen from "../screens/LinkPhoneScreen";
 import LiveTrackingScreen from "../screens/LiveTrackingScreen";
+import EmergencyMapScreen from "../screens/EmergencyMapScreen";
+
+// --- NEW SAFETY SUB-SCREENS ---
+import SafetyToolsScreen from "../screens/SafetyToolsScreen";
+import SafetyTipsScreen from "../screens/SafetyTipsScreen";
 
 // --- NEW PROFILE SUB-SCREENS ---
 import MyActivityScreen from "../screens/MyActivityScreen";
@@ -56,9 +64,10 @@ const TabIcon = ({
   label: string,
   badgeCount?: number
 }) => {
+  // Unselected items are pure black (#000000) in light mode, and slate (#64748B) in dark mode
   const color = focused 
     ? "#00C48A" 
-    : (isDarkMode ? "#64748B" : "#94A3B8");
+    : (isDarkMode ? "#64748B" : "#000000");
 
   const formattedBadge = badgeCount && badgeCount > 99 ? "99+" : `${badgeCount}`;
 
@@ -127,6 +136,11 @@ const MainTabs = () => {
       isMounted = false;
       supabase.removeChannel(alertSubscription);
     };
+  }, []);
+
+  // --- NEW: Register for push notifications when tabs load ---
+  useEffect(() => {
+    registerForPushNotificationsAsync();
   }, []);
 
   // Handle background sync for Grid Outages & Storage
@@ -283,6 +297,8 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
       <Stack.Screen name="JourneyShareScreen" component={JourneyShareScreen} />
       <Stack.Screen name="ContactsScreen" component={ContactsScreen} />
       <Stack.Screen name="SafetySettingsScreen" component={SafetySettingsScreen} />
+      <Stack.Screen name="SafetyToolsScreen" component={SafetyToolsScreen} />
+      <Stack.Screen name="SafetyTipsScreen" component={SafetyTipsScreen} />
       <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} />
       <Stack.Screen name="AboutScreen" component={AboutScreen} />
       <Stack.Screen name="RequestDeviceScreen" component={RequestDeviceScreen} />
@@ -291,6 +307,7 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
       <Stack.Screen name="PlaceDetailScreen" component={PlaceDetailScreen} />
       <Stack.Screen name="CommunityZonesScreen" component={CommunityZonesScreen} />
       <Stack.Screen name="LiveTrackingScreen" component={LiveTrackingScreen} />
+      <Stack.Screen name="EmergencyMapScreen" component={EmergencyMapScreen} />
       
       {/* --- NEW PROFILE SUB-SCREENS --- */}
       <Stack.Screen name="MyActivityScreen" component={MyActivityScreen} />

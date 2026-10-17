@@ -25,7 +25,11 @@ const CustomMapView = ({
   showCoverage = false, 
   showLegend = true, 
   onMarkerPress,
-  region 
+  region,
+  minZoomLevel,
+  mapBoundaries,
+  zoomEnabled = true,     // Added prop
+  scrollEnabled = true    // Added prop
 }: { 
   markers?: any[]; 
   style?: any; 
@@ -33,22 +37,27 @@ const CustomMapView = ({
   showLegend?: boolean;
   onMarkerPress?: (id: string) => void;
   region?: any;
+  minZoomLevel?: number;
+  mapBoundaries?: { northEast: { latitude: number; longitude: number }, southWest: { latitude: number; longitude: number } };
+  zoomEnabled?: boolean;  // Added type
+  scrollEnabled?: boolean; // Added type
 }) => {
   const { isDarkMode } = useTheme();
   const mapRef = useRef<MapView>(null);
 
+  // Animate map dynamically when city changes
   useEffect(() => {
     if (region && mapRef.current) {
       mapRef.current.animateToRegion(region, 800);
     }
   }, [region]);
 
-  const initialRegion = {
-    latitude: 7.4000,
-    longitude: 3.8800,
-    latitudeDelta: 0.12,
-    longitudeDelta: 0.12,
-  };
+  // Physically lock the map panning to the city borders
+  useEffect(() => {
+    if (mapBoundaries && mapRef.current) {
+      mapRef.current.setMapBoundaries(mapBoundaries.northEast, mapBoundaries.southWest);
+    }
+  }, [mapBoundaries]);
 
   return (
     <View style={[styles.container, style]}>
@@ -56,7 +65,15 @@ const CustomMapView = ({
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
-        initialRegion={initialRegion}
+        initialRegion={region || {
+          latitude: 7.4000,
+          longitude: 3.8800,
+          latitudeDelta: 0.12,
+          longitudeDelta: 0.12,
+        }}
+        minZoomLevel={minZoomLevel} 
+        zoomEnabled={zoomEnabled}     // Passed to native map
+        scrollEnabled={scrollEnabled} // Passed to native map
         showsUserLocation={true}
         showsMyLocationButton={false}
         pitchEnabled={false}

@@ -19,7 +19,11 @@
     "ios": {
       "bundleIdentifier": "com.strompulse.app",
       "supportsTablet": false,
+      "config": {
+        "googleMapsApiKey": "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA"
+      },
       "infoPlist": {
+        "GMSApiKey": "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA",
         "NSLocationWhenInUseUsageDescription": "Strompulse uses your location to show nearby electricity grid status and power availability.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Strompulse requires background location to track live journey sharing and emergency SOS broadcasts.",
         "NSContactsUsageDescription": "Strompulse needs contact access to select and alert your emergency security network.",
@@ -30,6 +34,11 @@
     },
     "android": {
       "package": "com.strompulse.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo"
+        }
+      },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -41,13 +50,6 @@
       ]
     },
     "plugins": [
-      [
-        "react-native-maps",
-        {
-          "iosGoogleMapsApiKey": "AIzaSyCeWigelvMAGJ_X-qj8UqY6CoGTbzBShfA",
-          "androidGoogleMapsApiKey": "AIzaSyB76SNOIgP1dkPZXhlPPIU_650y45Cd1Mo"
-        }
-      ],
       "expo-location",
       [
         "expo-notifications",

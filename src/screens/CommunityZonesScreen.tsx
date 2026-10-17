@@ -26,29 +26,6 @@ const CHECKING_COLOR = "#F59E0B";
 // ---------------------------------------------------------------------------
 // REAL-TIME UPTIME CALCULATION
 // ---------------------------------------------------------------------------
-// Firebase only ever stores a restoration EVENT under `history/<timestamp>` —
-// a snapshot taken the instant power came BACK on. There is no record of when
-// an outage started, only when it ended.
-//
-// A restoration event only ever happens after an outage (that's what it's
-// restoring from), so the gap between any two consecutive restorations always
-// contains an unlogged outage somewhere inside it — we just don't know where.
-// Assuming the WHOLE gap was "up" badly overstates uptime: a single Friday-
-// night restoration could retroactively paint an entire dead Sunday-to-
-// Thursday week green, because nothing contradicted it... until this fix.
-//
-// Instead, a gap is only trusted as continuous uptime when it's short enough
-// that an unnoticed flicker is plausible — capped at one reporting bucket
-// (4 hours, the smallest interval this app charts). Anything longer gets NO
-// credit: it's treated as unknown/not-up rather than guessed as up, so the
-// chart never claims uptime the data can't back up.
-//
-// The one exception is the device's CURRENT state: the most recent
-// restoration's "up" interval extends all the way to "now" only if the
-// device is confirmed online right now — nothing has happened since to
-// contradict that.
-// ---------------------------------------------------------------------------
-
 const MAX_TRUSTED_GAP_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 const buildUpIntervalsFromHistory = (
@@ -76,17 +53,11 @@ const buildUpIntervalsFromHistory = (
     const isLast = i === events.length - 1;
 
     if (isLast) {
-      // Only the most recent restoration can extend to "now" — and only if
-      // the device is confirmed online right now. Nothing since has
-      // contradicted that.
       const end = isOnline ? nowMs : start;
       if (end > start) intervals.push({ start, end });
       continue;
     }
 
-    // A restoration always follows an outage, so this gap necessarily
-    // contains one somewhere. Trust it only if it's short enough to
-    // plausibly be a single brief flicker.
     const gap = events[i + 1] - start;
     const end = gap <= MAX_TRUSTED_GAP_MS ? events[i + 1] : start;
     if (end > start) intervals.push({ start, end });
@@ -463,36 +434,33 @@ const CommunityZonesScreen = ({ route, navigation }: any) => {
 
         <TText fontSize={12} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12}>TODAY'S INSIGHTS</TText>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16, gap: 12 }}>
+        <YStack marginBottom={24}>
           {historyAnalytics.currentStreakMs !== null ? (
-            <YStack width={160} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"}>
-              <YStack width={32} height={32} borderRadius={10} backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5"} justifyContent="center" alignItems="center" marginBottom={12}>
-                <Feather name="zap" size={16} color="#00C48A" />
+            <XStack borderRadius={20} padding={16} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"}>
+              <YStack width={44} height={44} borderRadius={12} backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#D1FAE5"} justifyContent="center" alignItems="center" marginRight={16}>
+                <Feather name="zap" size={20} color="#00C48A" />
               </YStack>
-              <TText fontSize={12} fontFamily="Chirp-Bold" color="#00C48A" marginBottom={6}>Current streak</TText>
-              <TText fontSize={11} fontFamily="Chirp-Regular" lineHeight={16} color={theme.textSecondary}>Stable for {formatDurationShort(historyAnalytics.currentStreakMs)} since last restoration.</TText>
-            </YStack>
+              <YStack flex={1}>
+                <TText fontSize={14} fontFamily="Chirp-Bold" color="#00C48A" marginBottom={4}>Current streak</TText>
+                <TText fontSize={12} fontFamily="Chirp-Medium" lineHeight={18} color={theme.textSecondary}>Stable for {formatDurationShort(historyAnalytics.currentStreakMs)} since last restoration.</TText>
+              </YStack>
+            </XStack>
           ) : (
-            <YStack width={160} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#7F1D1D" : "#FECACA"} backgroundColor={isDarkMode ? "rgba(239,68,68,0.05)" : "#FEF2F2"}>
-              <YStack width={32} height={32} borderRadius={10} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FECACA"} justifyContent="center" alignItems="center" marginBottom={12}>
-                <Feather name="zap-off" size={16} color="#EF4444" />
+            <XStack borderRadius={20} padding={16} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#7F1D1D" : "#FECACA"} backgroundColor={isDarkMode ? "rgba(239,68,68,0.05)" : "#FEF2F2"}>
+              <YStack width={44} height={44} borderRadius={12} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FECACA"} justifyContent="center" alignItems="center" marginRight={16}>
+                <Feather name="zap-off" size={20} color="#EF4444" />
               </YStack>
-              <TText fontSize={12} fontFamily="Chirp-Bold" color="#EF4444" marginBottom={6}>Currently down</TText>
-              <TText fontSize={11} fontFamily="Chirp-Regular" lineHeight={16} color={theme.textSecondary}>
-                {historyAnalytics.latestRestorationAt ? `Last restored ${formatFriendlyRestorationTime(historyAnalytics.latestRestorationAt)}.` : "No restoration events recorded yet."}
-              </TText>
-            </YStack>
+              <YStack flex={1}>
+                <TText fontSize={14} fontFamily="Chirp-Bold" color="#EF4444" marginBottom={4}>Currently down</TText>
+                <TText fontSize={12} fontFamily="Chirp-Medium" lineHeight={18} color={theme.textSecondary}>
+                  {historyAnalytics.latestRestorationAt ? `Last restored ${formatFriendlyRestorationTime(historyAnalytics.latestRestorationAt)}.` : "No restoration events recorded yet."}
+                </TText>
+              </YStack>
+            </XStack>
           )}
-          <YStack width={160} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"}>
-            <YStack width={32} height={32} borderRadius={10} backgroundColor={isDarkMode ? "rgba(139,92,246,0.15)" : "#EDE9FE"} justifyContent="center" alignItems="center" marginBottom={12}>
-              <Feather name="refresh-cw" size={16} color={isDarkMode ? "#A78BFA" : "#8B5CF6"} />
-            </YStack>
-            <TText fontSize={12} fontFamily="Chirp-Bold" color={isDarkMode ? "#A78BFA" : "#8B5CF6"} marginBottom={6}>Restorations</TText>
-            <TText fontSize={11} fontFamily="Chirp-Regular" lineHeight={16} color={theme.textSecondary}>{historyAnalytics.totalRestorationsInRange} power-restoration event recorded today.</TText>
-          </YStack>
-        </ScrollView>
+        </YStack>
 
-        <TText fontSize={12} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginTop={12}>PERFORMANCE ANALYTICS</TText>
+        <TText fontSize={12} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginTop={8}>PERFORMANCE ANALYTICS</TText>
 
         {renderAccuracyBarChart()}
 
