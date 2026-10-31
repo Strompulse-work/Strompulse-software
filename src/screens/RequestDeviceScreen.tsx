@@ -109,6 +109,20 @@ const RequestDeviceScreen = ({ navigation }: any) => {
             </View>
           </LinearGradient>
 
+          {/* Already own a device? Link it with the access code */}
+          <TouchableOpacity activeOpacity={0.85} onPress={() => navigation.navigate("MainTabs", { screen: "Stromer" })} style={styles.accessCard}>
+            <View style={[styles.listIconBox, { backgroundColor: isDarkMode ? "rgba(0,196,138,0.12)" : "#ECFDF5" }]}>
+              <MaterialCommunityIcons name="key-variant" size={18} color="#00C48A" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.listRowTitle}>Already have a device?</Text>
+              <Text style={styles.listRowSubtitle}>Enter your access code to view its live data</Text>
+            </View>
+            <View style={styles.accessArrow}>
+              <MaterialCommunityIcons name="arrow-right" size={14} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
+
           {/* Massive Hero Title */}
           <View style={styles.heroSection}>
             <Text style={styles.heroTitle}>Power your peace of mind.</Text>
@@ -247,6 +261,19 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
   pricingAmount: { fontSize: 34, fontFamily: "Sora_800ExtraBold", color: "#FFF", marginBottom: 8 },
   pricingDesc: { fontSize: 12, fontFamily: "Sora_500Medium", color: "rgba(255,255,255,0.85)", lineHeight: 18 },
   bgHeroIcon: { position: "absolute", right: -30, bottom: -40, transform: [{ rotate: "-20deg" }] },
+
+  accessCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 20,
+    marginBottom: 24,
+    padding: 16,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: "#00C48A",
+    backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF",
+  },
+  accessArrow: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#00C48A", justifyContent: "center", alignItems: "center" },
 
   heroSection: { paddingHorizontal: 24, marginBottom: 20 },
   heroTitle: { fontSize: 26, fontFamily: "Sora_800ExtraBold", color: theme.textPrimary, letterSpacing: -0.5, lineHeight: 34 },

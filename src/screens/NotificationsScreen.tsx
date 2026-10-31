@@ -1,14 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from "react";
-import {
-  StatusBar,
-  Platform,
-  SafeAreaView,
-  ActivityIndicator,
-  ScrollView,
-  TouchableOpacity
-} from "react-native";
+import { StatusBar, Platform, SafeAreaView, ActivityIndicator, ScrollView, TouchableOpacity, Alert } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
 import { supabase } from "../config/supabase";
 import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
@@ -17,73 +10,78 @@ import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const getRelativeTime = (date: Date) => {
-  const now = new Date();
-  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-  if (diffInSeconds < 60) return "Just now";
-  
-  const diffInMinutes = Math.floor(diffInSeconds / 60);
-  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-  
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) return `${diffInHours}h ago`;
-  
-  const diffInDays = Math.floor(diffInHours / 24);
-  if (diffInDays < 7) return `${diffInDays}d ago`;
-  
-  const diffInWeeks = Math.floor(diffInDays / 7);
-  return `${diffInWeeks}w ago`;
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60) return "Just now";
+  const m = Math.floor(diff / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24); if (d < 7) return `${d}d ago`;
+  return `${Math.floor(d / 7)}w ago`;
 };
 
 const getDateGroup = (date: Date) => {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
-
   if (date.toDateString() === today.toDateString()) return "Today";
   if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
   return "Earlier";
 };
 
+// Pull coordinates out of the alert's data payload, or out of the Google Maps link inside the message text.
+const extractCoords = (dbAlert: any, message: string) => {
+  const meta = dbAlert.data || dbAlert.metadata || dbAlert.payload || {};
+  const lat = meta.lat ?? meta.latitude;
+  const lng = meta.lng ?? meta.longitude;
+  if (typeof lat === "number" && typeof lng === "number") return { lat, lng };
+  const match = message.match(/maps\.google\.com\/\?q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (match) return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
+  return null;
+};
+
+const stripLinks = (message: string) => message.replace(/\s*https?:\/\/\S+/g, "").trim();
+
 const parseDbAlert = (dbAlert: any, isDarkMode: boolean) => {
-  const type = dbAlert.type?.toLowerCase() || '';
-  const title = dbAlert.title || 'System Notification';
-  const message = dbAlert.message || '';
+  const type = dbAlert.type?.toLowerCase() || "";
+  const title = dbAlert.title || "System Notification";
+  const message = dbAlert.message || "";
   const createdAt = dbAlert.created_at ? new Date(dbAlert.created_at) : new Date();
+  const meta = dbAlert.data || dbAlert.metadata || dbAlert.payload || {};
 
-  let category = 'security';
-  let uiType = 'general';
-  let bg = isDarkMode ? 'rgba(59,130,246,0.1)' : '#EFF6FF'; 
-  let color = '#3B82F6'; 
-  let icon = 'bell';
+  let uiType = "general";
+  let bg = isDarkMode ? "rgba(59,130,246,0.1)" : "#EFF6FF";
+  let color = "#3B82F6";
+  let icon = "bell";
+  let senderName = meta.senderName || meta.sender_name || "";
 
-  if (type.includes('emergency') || title.toLowerCase().includes('sos')) {
-    category = 'security';
-    uiType = 'sos';
-    bg = isDarkMode ? 'rgba(239,68,68,0.1)' : '#FEE2E2'; 
-    color = '#EF4444'; 
-    icon = 'alert-circle';
-  } else if (type.includes('journey') || message.toLowerCase().includes('journey')) {
-    category = 'security';
-    uiType = 'journey';
-    bg = isDarkMode ? 'rgba(0,196,138,0.1)' : '#ECFDF5'; 
-    color = '#00C48A'; 
-    icon = 'navigation';
+  if (type.includes("emergency") || title.toLowerCase().includes("sos")) {
+    uiType = "sos"; bg = isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2"; color = "#EF4444"; icon = "alert-circle";
+    if (!senderName) senderName = title.replace(/^.*?(SOS alert from|SOS from)\s*/i, "").replace(/^🚨\s*/, "").trim();
+  } else if (type.includes("journey_end")) {
+    uiType = "journey_end"; bg = isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"; color = "#00C48A"; icon = "check-circle";
+  } else if (type.includes("journey") || message.toLowerCase().includes("journey")) {
+    uiType = "journey"; bg = isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"; color = "#00C48A"; icon = "navigation";
+    if (!senderName) senderName = title.replace(/ started a journey$/i, "").trim();
+  } else if (type.includes("location")) {
+    uiType = "location"; bg = isDarkMode ? "rgba(59,130,246,0.1)" : "#EFF6FF"; color = "#3B82F6"; icon = "map-pin";
+    if (!senderName) senderName = title.replace(/ shared their location$/i, "").trim();
   }
 
   return {
-    id: dbAlert.id || Math.random().toString(),
+    id: dbAlert.id || `${title}-${createdAt.getTime()}`,
     type: uiType,
-    category,
+    category: "security",
     title,
-    body: message,
+    body: stripLinks(message),
     time: getRelativeTime(createdAt),
     dateGroup: getDateGroup(createdAt),
     isUnread: true,
     userColor: color,
     userBg: bg,
-    icon: icon,
-    rawDate: createdAt
+    icon,
+    rawDate: createdAt,
+    senderId: dbAlert.sender_id || dbAlert.user_id || meta.senderId || null,
+    senderName: senderName || "Contact",
+    coords: extractCoords(dbAlert, message),
   };
 };
 
@@ -106,9 +104,9 @@ const NotificationsScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     Promise.all([
-      AsyncStorage.getItem('strompulse_verified_outages_v1'),
-      AsyncStorage.getItem('strompulse_dismissed_alerts'),
-      AsyncStorage.getItem('strompulse_read_alerts')
+      AsyncStorage.getItem("strompulse_verified_outages_v1"),
+      AsyncStorage.getItem("strompulse_dismissed_alerts"),
+      AsyncStorage.getItem("strompulse_read_alerts"),
     ]).then(([outageData, dismissedData, readData]) => {
       if (outageData) setPersistedOutages(JSON.parse(outageData));
       if (dismissedData) setDismissedIds(new Set(JSON.parse(dismissedData)));
@@ -120,114 +118,86 @@ const NotificationsScreen = ({ navigation }: any) => {
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
-      let alertSubscription: any;
+
+      // Subscribe FIRST so no time-sensitive SOS insert is missed while the initial fetch runs
+      const alertSubscription = supabase
+        .channel("public:alerts")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "alerts" }, (payload) => {
+          if (!isMounted) return;
+          const parsed = parseDbAlert(payload.new, isDarkMode);
+          setSupabaseAlerts((prev) => (prev.some((a) => a.id === parsed.id) ? prev : [parsed, ...prev]));
+        })
+        .subscribe();
 
       const fetchSupabase = async () => {
-        setLoading(true);
         const { data, error } = await supabase
-          .from('alerts')
-          .select('*')
-          .order('created_at', { ascending: false })
+          .from("alerts")
+          .select("*")
+          .order("created_at", { ascending: false })
           .limit(30);
-
-        if (!error && data && isMounted) {
-          setSupabaseAlerts(data.map(alert => parseDbAlert(alert, isDarkMode)));
-        }
-        setLoading(false);
-
-        alertSubscription = supabase
-          .channel('public:alerts')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, payload => {
-            if (isMounted) {
-              setSupabaseAlerts(prev => [parseDbAlert(payload.new, isDarkMode), ...prev]);
-            }
-          })
-          .subscribe();
+        if (!error && data && isMounted) setSupabaseAlerts(data.map((a) => parseDbAlert(a, isDarkMode)));
+        if (isMounted) setLoading(false);
       };
-
       fetchSupabase();
 
       return () => {
         isMounted = false;
-        if (alertSubscription) supabase.removeChannel(alertSubscription);
+        supabase.removeChannel(alertSubscription);
       };
     }, [isDarkMode])
   );
 
   useEffect(() => {
     if (!isStorageLoaded || devicesLoading || devices.length === 0) return;
-
-    setPersistedOutages(prev => {
+    setPersistedOutages((prev) => {
       const stored = [...prev];
       let hasChanges = false;
 
-      devices.forEach(device => {
+      devices.forEach((device) => {
         if (device.history) {
           const rawKeys = Object.keys(device.history).sort();
-
           for (let i = 0; i < rawKeys.length - 1; i++) {
-            const currentSessionStart = rawKeys[i];
-            const historyNode = device.history[currentSessionStart];
-
-            let exactOutageTime: Date | null = null;
-            if (historyNode?.last_seen) {
-              exactOutageTime = parseStromTimestamp(historyNode.last_seen);
-            } else if (historyNode?.timestamp) {
-              exactOutageTime = parseStromTimestamp(historyNode.timestamp);
-            } else if (typeof historyNode?.durationSeconds === 'number') {
-              const start = parseStromTimestamp(currentSessionStart);
-              if (start) exactOutageTime = new Date(start.getTime() + (historyNode.durationSeconds * 1000));
+            const sessionStart = rawKeys[i];
+            const node = device.history[sessionStart];
+            let outageTime: Date | null = null;
+            if (node?.last_seen) outageTime = parseStromTimestamp(node.last_seen);
+            else if (node?.timestamp) outageTime = parseStromTimestamp(node.timestamp);
+            else if (typeof node?.durationSeconds === "number") {
+              const start = parseStromTimestamp(sessionStart);
+              if (start) outageTime = new Date(start.getTime() + node.durationSeconds * 1000);
             }
-
-            if (exactOutageTime) {
-              const outageId = `outage-hist-${device.id}-${currentSessionStart}`;
-              if (!stored.some(e => e.id === outageId)) {
-                stored.push({
-                  id: outageId,
-                  deviceId: device.id,
-                  type: 'outage',
-                  rawDate: exactOutageTime.toISOString()
-                });
+            if (outageTime) {
+              const outageId = `outage-hist-${device.id}-${sessionStart}`;
+              if (!stored.some((e) => e.id === outageId)) {
+                stored.push({ id: outageId, deviceId: device.id, type: "outage", rawDate: outageTime.toISOString() });
                 hasChanges = true;
               }
             }
           }
         }
-
-        if (!device.isOnline && device.connectionState === 'offline') {
+        if (!device.isOnline && device.connectionState === "offline") {
           const lastSeen = parseStromTimestamp(device.updated_at) || new Date();
-          const liveOutageExactDate = new Date(lastSeen.getTime() + 60000);
           const liveId = `outage-live-${device.id}-${device.updated_at}`;
-
-          if (!stored.some(e => e.id === liveId)) {
-            stored.push({
-              id: liveId,
-              deviceId: device.id,
-              type: 'outage',
-              rawDate: liveOutageExactDate.toISOString()
-            });
+          if (!stored.some((e) => e.id === liveId)) {
+            stored.push({ id: liveId, deviceId: device.id, type: "outage", rawDate: new Date(lastSeen.getTime() + 60000).toISOString() });
             hasChanges = true;
           }
         }
       });
 
-      const validStored = stored.filter(item => {
-        if (item.id.startsWith('outage-live-')) {
-          const liveDev = devices.find(d => d.id === item.deviceId);
-          if (liveDev && liveDev.isOnline) {
-            hasChanges = true;
-            return false;
-          }
+      const validStored = stored.filter((item) => {
+        if (item.id.startsWith("outage-live-")) {
+          const liveDev = devices.find((d) => d.id === item.deviceId);
+          if (liveDev && liveDev.isOnline) { hasChanges = true; return false; }
         }
         return true;
       });
 
       if (hasChanges) {
         const sorted = validStored.sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime()).slice(0, 100);
-        AsyncStorage.setItem('strompulse_verified_outages_v1', JSON.stringify(sorted));
+        AsyncStorage.setItem("strompulse_verified_outages_v1", JSON.stringify(sorted));
         return sorted;
       }
-
       return prev;
     });
   }, [devices, devicesLoading, isStorageLoaded]);
@@ -235,79 +205,54 @@ const NotificationsScreen = ({ navigation }: any) => {
   const derivedPowerAlerts = useMemo(() => {
     const alerts: any[] = [];
     const now = Date.now();
-
-    devices.forEach(device => {
-      const meta = DEVICE_LOCATIONS[device.id] || { name: device.id, type: "area" };
-
+    devices.forEach((device) => {
+      const meta = (DEVICE_LOCATIONS as any)[device.id] || { name: device.id, type: "area" };
       if (device.history) {
-        Object.keys(device.history).forEach(key => {
+        Object.keys(device.history).forEach((key) => {
           const restoredDate = parseStromTimestamp(key);
           if (!restoredDate) return;
-
-          const isRecent = (now - restoredDate.getTime()) < 15 * 60 * 1000;
-
           alerts.push({
-            id: `power-restored-${device.id}-${key}`,
-            deviceId: device.id,
-            type: "restored",
-            category: "electricity",
+            id: `power-restored-${device.id}-${key}`, deviceId: device.id, areaName: meta.name,
+            type: "restored", category: "electricity",
             title: `Power restored • ${meta.name}`,
             body: `Grid sensors confirm power came back online in ${meta.name}.`,
-            time: getRelativeTime(restoredDate),
-            dateGroup: getDateGroup(restoredDate),
-            isUnread: isRecent,
-            userColor: "#00C48A",
-            userBg: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5",
-            icon: "zap",
-            rawDate: restoredDate
+            time: getRelativeTime(restoredDate), dateGroup: getDateGroup(restoredDate),
+            isUnread: now - restoredDate.getTime() < 15 * 60 * 1000,
+            userColor: "#00C48A", userBg: isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5", icon: "zap", rawDate: restoredDate,
           });
         });
       }
     });
-
-    persistedOutages.forEach(outage => {
-      const meta = DEVICE_LOCATIONS[outage.deviceId] || { name: outage.deviceId, type: "area" };
+    persistedOutages.forEach((outage) => {
+      const meta = (DEVICE_LOCATIONS as any)[outage.deviceId] || { name: outage.deviceId, type: "area" };
       const outageDate = new Date(outage.rawDate);
-      const isRecent = (now - outageDate.getTime()) < 15 * 60 * 1000;
-
       alerts.push({
-        id: outage.id,
-        deviceId: outage.deviceId,
-        type: "outage",
-        category: "electricity",
+        id: outage.id, deviceId: outage.deviceId, areaName: meta.name,
+        type: "outage", category: "electricity",
         title: `Power outage • ${meta.name}`,
         body: `Sensors confirmed a power cut. IBEDC notified.`,
-        time: getRelativeTime(outageDate),
-        dateGroup: getDateGroup(outageDate),
-        isUnread: isRecent,
-        userColor: "#EF4444", 
-        userBg: isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2",
-        icon: "zap-off",
-        rawDate: outageDate
+        time: getRelativeTime(outageDate), dateGroup: getDateGroup(outageDate),
+        isUnread: now - outageDate.getTime() < 15 * 60 * 1000,
+        userColor: "#EF4444", userBg: isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2", icon: "zap-off", rawDate: outageDate,
       });
     });
-
     return alerts;
   }, [devices, persistedOutages, isDarkMode]);
 
   const finalNotifications = useMemo(() => {
     return [...supabaseAlerts, ...derivedPowerAlerts]
-      .filter(item => !dismissedIds.has(item.id))
-      .map(item => ({
-        ...item,
-        isUnread: readIds.has(item.id) ? false : item.isUnread 
-      }))
+      .filter((item) => !dismissedIds.has(item.id))
+      .map((item) => ({ ...item, isUnread: readIds.has(item.id) ? false : item.isUnread }))
       .sort((a, b) => new Date(b.rawDate || 0).getTime() - new Date(a.rawDate || 0).getTime());
   }, [supabaseAlerts, derivedPowerAlerts, dismissedIds, readIds]);
 
-  const activeSosAlert = finalNotifications.find(n => n.type === 'sos');
-  
+  const activeSosAlert = finalNotifications.find((n) => n.type === "sos");
+
   const standardNotifications = finalNotifications.filter((item) => {
     if (activeSosAlert && item.id === activeSosAlert.id) return false;
     if (activeTab === "All") return true;
-    if (activeTab === "Security" && item.category === "security") return true;
-    if (activeTab === "Electricity" && item.category === "electricity") return true;
-    return false;
+    if (activeTab === "Security") return item.category === "security";
+    return item.category === "electricity";
   });
 
   const unreadCounts = useMemo(() => ({
@@ -321,43 +266,43 @@ const NotificationsScreen = ({ navigation }: any) => {
     if (!acc[group]) acc[group] = [];
     acc[group].push(current);
     return acc;
-  }, {} as Record<string, typeof standardNotifications>);
+  }, {} as Record<string, any[]>);
 
   const formatCount = (count: number) => (count > 99 ? "99+" : `${count}`);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('blur', () => {
-      if (finalNotifications.length > 0) {
-        setReadIds(prevReadIds => {
-          const newReadIds = new Set(prevReadIds);
-          let changed = false;
-          finalNotifications.forEach(n => {
-            if (!newReadIds.has(n.id)) {
-              newReadIds.add(n.id);
-              changed = true;
-            }
-          });
-          if (changed) {
-            AsyncStorage.setItem('strompulse_read_alerts', JSON.stringify([...newReadIds]));
-          }
-          return newReadIds;
-        });
-      }
+    const unsubscribe = navigation.addListener("blur", () => {
+      if (finalNotifications.length === 0) return;
+      setReadIds((prev) => {
+        const next = new Set(prev);
+        let changed = false;
+        finalNotifications.forEach((n) => { if (!next.has(n.id)) { next.add(n.id); changed = true; } });
+        if (changed) AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...next]));
+        return next;
+      });
     });
     return unsubscribe;
   }, [navigation, finalNotifications]);
 
   const handleDismissSos = async (id: string) => {
-    const newDismissed = new Set(dismissedIds);
-    newDismissed.add(id);
-    setDismissedIds(newDismissed);
-    
-    const newRead = new Set(readIds);
-    newRead.add(id);
-    setReadIds(newRead);
-    
-    await AsyncStorage.setItem('strompulse_dismissed_alerts', JSON.stringify([...newDismissed]));
-    await AsyncStorage.setItem('strompulse_read_alerts', JSON.stringify([...newRead]));
+    const newDismissed = new Set(dismissedIds); newDismissed.add(id); setDismissedIds(newDismissed);
+    const newRead = new Set(readIds); newRead.add(id); setReadIds(newRead);
+    await AsyncStorage.setItem("strompulse_dismissed_alerts", JSON.stringify([...newDismissed]));
+    await AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...newRead]));
+  };
+
+  const openTracking = (item: any, mode: "journey" | "sos" | "location") => {
+    if (mode !== "journey" && !item.coords && !item.senderId) {
+      Alert.alert("Location not shared", `${item.senderName} didn't include a location with this alert. Try calling them directly.`);
+      return;
+    }
+    navigation.navigate("LiveTrackingScreen", {
+      mode,
+      senderName: item.senderName,
+      senderId: item.senderId,
+      initialLat: item.coords?.lat,
+      initialLng: item.coords?.lng,
+    });
   };
 
   const renderSegmentedControl = () => (
@@ -366,38 +311,12 @@ const NotificationsScreen = ({ navigation }: any) => {
         const isActive = activeTab === tab;
         const unreadCount = unreadCounts[tab];
         return (
-          <TouchableOpacity
-            key={tab}
-            activeOpacity={0.8}
-            onPress={() => setActiveTab(tab)}
-            style={{ flex: 1 }}
-          >
-            <XStack
-              paddingVertical={10}
-              alignItems="center"
-              justifyContent="center"
-              borderRadius={24}
-              borderWidth={1}
-              borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}
-              backgroundColor={isActive ? solidActionBg : "transparent"}
-            >
-              <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? solidActionIcon : (isDarkMode ? "#64748B" : "#94A3B8")}>
-                {tab}
-              </TText>
+          <TouchableOpacity key={tab} activeOpacity={0.8} onPress={() => setActiveTab(tab)} style={{ flex: 1 }}>
+            <XStack paddingVertical={10} alignItems="center" justifyContent="center" borderRadius={24} borderWidth={1} borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")} backgroundColor={isActive ? solidActionBg : "transparent"}>
+              <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? solidActionIcon : (isDarkMode ? "#64748B" : "#94A3B8")}>{tab}</TText>
               {unreadCount > 0 && (
-                <YStack
-                  minWidth={16}
-                  height={16}
-                  borderRadius={8}
-                  backgroundColor="#EF4444"
-                  justifyContent="center"
-                  alignItems="center"
-                  paddingHorizontal={4}
-                  marginLeft={6}
-                >
-                  <TText color="#FFFFFF" fontSize={9} fontFamily="Chirp-Heavy">
-                    {formatCount(unreadCount)}
-                  </TText>
+                <YStack minWidth={16} height={16} borderRadius={8} backgroundColor="#EF4444" justifyContent="center" alignItems="center" paddingHorizontal={4} marginLeft={6}>
+                  <TText color="#FFFFFF" fontSize={9} fontFamily="Chirp-Heavy">{formatCount(unreadCount)}</TText>
                 </YStack>
               )}
             </XStack>
@@ -408,107 +327,75 @@ const NotificationsScreen = ({ navigation }: any) => {
   );
 
   const renderCardIcon = (item: any) => {
-    if (item.type === 'journey') {
-      const initial = item.title.charAt(0).toUpperCase();
+    if (item.type === "journey") {
       return (
         <YStack position="relative" marginRight={14}>
           <YStack width={44} height={44} borderRadius={22} backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} justifyContent="center" alignItems="center">
-            <TText fontSize={18} fontFamily="Chirp-Heavy" color={isDarkMode ? "#94A3B8" : "#64748B"}>{initial}</TText>
+            <TText fontSize={18} fontFamily="Chirp-Heavy" color={isDarkMode ? "#94A3B8" : "#64748B"}>{item.senderName.charAt(0).toUpperCase()}</TText>
           </YStack>
           <YStack position="absolute" bottom={-2} right={-2} width={16} height={16} borderRadius={8} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} justifyContent="center" alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
-            <Feather name="map-pin" size={8} color="#EF4444" />
+            <Feather name="navigation" size={8} color="#00C48A" />
           </YStack>
         </YStack>
       );
     }
-    
     return (
       <YStack position="relative" marginRight={14}>
         <YStack width={44} height={44} borderRadius={22} backgroundColor={item.userBg} justifyContent="center" alignItems="center">
           <Feather name={item.icon} size={20} color={item.userColor} />
         </YStack>
-        <YStack position="absolute" top={0} left={0} width={10} height={10} borderRadius={5} backgroundColor={item.userColor} borderWidth={2} borderColor={isDarkMode ? "#121A16" : "#FFFFFF"} />
       </YStack>
     );
   };
 
+  const ActionPill = ({ label, color, onPress }: any) => (
+    <TouchableOpacity onPress={onPress}>
+      <XStack paddingHorizontal={14} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={color} alignSelf="flex-start" marginTop={12}>
+        <TText fontFamily="Chirp-Bold" fontSize={11} color={color}>{label}</TText>
+      </XStack>
+    </TouchableOpacity>
+  );
+
+  const showInitialLoader = loading && supabaseAlerts.length === 0 && derivedPowerAlerts.length === 0;
+
   return (
     <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} />
-
       <SafeAreaView style={{ flex: 1 }}>
-        <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={20} position="relative">
-         
+        <XStack justifyContent="center" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={20}>
           <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 18 }} color={theme.textPrimary}>Notifications</TText>
         </XStack>
 
         {renderSegmentedControl()}
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}>
-          
-          {/* --- ACTIVE SOS COMPONENT --- */}
           {activeSosAlert && (activeTab === "All" || activeTab === "Security") && (
-            <YStack 
-              backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} 
-              borderRadius={24} 
-              padding={20} 
-              marginBottom={24} 
-              borderWidth={2} 
-              borderColor="#EF4444"
-              shadowColor="#EF4444"
-              shadowOffset={{ width: 0, height: 4 }}
-              shadowOpacity={0.15}
-              shadowRadius={12}
-              elevation={8}
-            >
+            <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} marginBottom={24} borderWidth={2} borderColor="#EF4444" shadowColor="#EF4444" shadowOffset={{ width: 0, height: 4 }} shadowOpacity={0.15} shadowRadius={12} elevation={8}>
               <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={16}>
                 <XStack alignItems="center" flex={1}>
-                  <YStack position="relative" marginRight={12}>
-                    <YStack width={44} height={44} borderRadius={12} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} justifyContent="center" alignItems="center">
-                      <YStack width={26} height={26} borderRadius={6} backgroundColor="#EF4444" justifyContent="center" alignItems="center">
-                        <TText fontSize={9} fontFamily="Chirp-Heavy" color="#FFFFFF">SOS</TText>
-                      </YStack>
+                  <YStack width={44} height={44} borderRadius={12} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} justifyContent="center" alignItems="center" marginRight={12}>
+                    <YStack width={26} height={26} borderRadius={6} backgroundColor="#EF4444" justifyContent="center" alignItems="center">
+                      <TText fontSize={9} fontFamily="Chirp-Heavy" color="#FFFFFF">SOS</TText>
                     </YStack>
-                    <YStack position="absolute" top={-4} left={-4} width={12} height={12} borderRadius={6} backgroundColor="#EF4444" borderWidth={2} borderColor={isDarkMode ? "#121A16" : "#FFFFFF"} />
                   </YStack>
-
                   <YStack flex={1}>
-                    <XStack alignItems="center" marginBottom={4}>
-                      <YStack backgroundColor="rgba(239,68,68,0.15)" paddingHorizontal={6} paddingVertical={2} borderRadius={6} marginRight={8}>
-                        <TText color="#EF4444" fontSize={9} fontFamily="Chirp-Bold" letterSpacing={0.5}>EMERGENCY</TText>
-                      </YStack>
-                    </XStack>
+                    <YStack backgroundColor="rgba(239,68,68,0.15)" paddingHorizontal={6} paddingVertical={2} borderRadius={6} alignSelf="flex-start" marginBottom={4}>
+                      <TText color="#EF4444" fontSize={9} fontFamily="Chirp-Bold" letterSpacing={0.5}>EMERGENCY</TText>
+                    </YStack>
                     <TText fontSize={16} fontFamily="Chirp-Heavy" color={theme.textPrimary}>{activeSosAlert.title}</TText>
                   </YStack>
                 </XStack>
                 <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{activeSosAlert.time}</TText>
               </XStack>
-
-              <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={20} marginBottom={20}>
-                {activeSosAlert.body}
-              </TText>
-
+              <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={20} marginBottom={20}>{activeSosAlert.body}</TText>
               <XStack gap={12}>
-                <TouchableOpacity 
-                  style={{ flex: 2 }}
-                  onPress={() => {
-                    navigation.navigate("LiveTrackingScreen", { 
-                      senderName: activeSosAlert.title.replace('SOS from ', ''),
-                      initialLat: 7.5186, 
-                      initialLng: 4.5266
-                    });
-                  }}
-                >
+                <TouchableOpacity style={{ flex: 2 }} onPress={() => openTracking(activeSosAlert, "sos")}>
                   <XStack backgroundColor="#EF4444" borderRadius={16} paddingVertical={14} justifyContent="center" alignItems="center">
                     <Feather name="map-pin" size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
                     <TText fontSize={14} fontFamily="Chirp-Bold" color="#FFFFFF">View Location</TText>
                   </XStack>
                 </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={{ flex: 1 }}
-                  onPress={() => handleDismissSos(activeSosAlert.id)}
-                >
+                <TouchableOpacity style={{ flex: 1 }} onPress={() => handleDismissSos(activeSosAlert.id)}>
                   <YStack backgroundColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} borderRadius={16} paddingVertical={14} justifyContent="center" alignItems="center">
                     <TText fontSize={14} fontFamily="Chirp-Bold" color={theme.textSecondary}>Dismiss</TText>
                   </YStack>
@@ -517,97 +404,44 @@ const NotificationsScreen = ({ navigation }: any) => {
             </YStack>
           )}
 
-          {loading || devicesLoading ? (
+          {showInitialLoader ? (
             <YStack alignItems="center" marginTop={60}>
-               <ActivityIndicator size="small" color="#00C48A" />
-               <TText marginTop={12} fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary}>Loading notifications...</TText>
+              <ActivityIndicator size="small" color="#00C48A" />
+              <TText marginTop={12} fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary}>Loading notifications...</TText>
             </YStack>
           ) : Object.keys(groupedNotifs).length === 0 && !activeSosAlert ? (
             <YStack alignItems="center" marginTop={60}>
-              <Feather name="bell-off" size={32} color={theme.textSecondary} style={{ opacity: 0.5, marginBottom: 12 }} />
-              <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textSecondary}>No notifications yet.</TText>
+              {activeTab === "Electricity" && devicesLoading ? <ActivityIndicator size="small" color="#00C48A" /> : (
+                <>
+                  <Feather name="bell-off" size={32} color={theme.textSecondary} style={{ opacity: 0.5, marginBottom: 12 }} />
+                  <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textSecondary}>No notifications yet.</TText>
+                </>
+              )}
             </YStack>
           ) : (
-            ["Today", "Yesterday", "Earlier"].filter(key => groupedNotifs[key]).map((groupKey) => (
+            ["Today", "Yesterday", "Earlier"].filter((key) => groupedNotifs[key]).map((groupKey) => (
               <YStack key={groupKey} marginBottom={24}>
                 <TText fontSize={11} fontFamily="Chirp-Bold" letterSpacing={1.5} color={theme.textSecondary} marginBottom={12} marginLeft={4}>{groupKey.toUpperCase()}</TText>
-
-                <YStack>
-                  {groupedNotifs[groupKey].map((item: any) => {
-                    
-                    let cardBorderColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
-
-                    return (
-                      <XStack 
-                        key={item.id}
-                        backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"}
-                        borderRadius={20}
-                        padding={16}
-                        marginBottom={12}
-                        borderWidth={1}
-                        borderColor={cardBorderColor}
-                        alignItems="flex-start" 
-                        opacity={item.isUnread ? 1 : (isDarkMode ? 0.6 : 0.55)}
-                      >
-                        {/* ICON */}
-                        {renderCardIcon(item)}
-
-                        {/* CONTENT */}
-                        <YStack flex={1} marginTop={2}>
-                          <XStack justifyContent="space-between" alignItems="center" marginBottom={4}>
-                            <TText fontSize={15} fontFamily="Chirp-Heavy" color={theme.textPrimary} flex={1} marginRight={8} numberOfLines={1}>
-                              {item.title}
-                            </TText>
-                            <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{item.time}</TText>
-                          </XStack>
-                          
-                          <TText 
-                            fontSize={13} 
-                            fontFamily="Chirp-Regular" 
-                            color={theme.textSecondary} 
-                            lineHeight={20}
-                            paddingRight={4}
-                          >
-                            {item.body}
-                          </TText>
-
-                          {/* ACTION PILL BUTTONS (Clickable even when faded) */}
-                          {item.type === 'journey' && (
-                            <TouchableOpacity 
-                              onPress={() => navigation.navigate("LiveTrackingScreen", { 
-                                senderName: item.title.replace(' started a journey', ''),
-                                initialLat: 7.5186,
-                                initialLng: 4.5266
-                              })}
-                            >
-                              <XStack paddingHorizontal={14} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor="#00C48A" alignSelf="flex-start" marginTop={12}>
-                                <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A">Track Journey</TText>
-                              </XStack>
-                            </TouchableOpacity>
-                          )}
-
-                          {(item.type === 'outage' || item.type === 'restored') && (
-                            <TouchableOpacity 
-                              onPress={() => navigation.navigate("CommunityZonesScreen", { 
-                                areaId: item.deviceId, 
-                                areaName: item.title.split(' • ')[1] 
-                              })}
-                            >
-                              <XStack paddingHorizontal={14} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={item.userColor} alignSelf="flex-start" marginTop={12}>
-                                <TText fontFamily="Chirp-Bold" fontSize={11} color={item.userColor}>View Status</TText>
-                              </XStack>
-                            </TouchableOpacity>
-                          )}
-                        </YStack>
-                        
-                        {/* UNREAD GREEN DOT */}
-                        {item.isUnread && (
-                          <YStack width={8} height={8} borderRadius={4} backgroundColor="#00C48A" alignSelf="center" marginLeft={8} />
-                        )}
+                {groupedNotifs[groupKey].map((item: any) => (
+                  <XStack key={item.id} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={20} padding={16} marginBottom={12} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} alignItems="flex-start" opacity={item.isUnread ? 1 : (isDarkMode ? 0.6 : 0.55)}>
+                    {renderCardIcon(item)}
+                    <YStack flex={1} marginTop={2}>
+                      <XStack justifyContent="space-between" alignItems="center" marginBottom={4}>
+                        <TText fontSize={15} fontFamily="Chirp-Heavy" color={theme.textPrimary} flex={1} marginRight={8} numberOfLines={1}>{item.title}</TText>
+                        <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{item.time}</TText>
                       </XStack>
-                    );
-                  })}
-                </YStack>
+                      <TText fontSize={13} fontFamily="Chirp-Regular" color={theme.textSecondary} lineHeight={20} paddingRight={4}>{item.body}</TText>
+
+                      {item.type === "journey" && <ActionPill label="Follow Their Journey" color="#00C48A" onPress={() => openTracking(item, "journey")} />}
+                      {item.type === "location" && <ActionPill label="View Location" color="#3B82F6" onPress={() => openTracking(item, "location")} />}
+                      {item.type === "sos" && <ActionPill label="View Location" color="#EF4444" onPress={() => openTracking(item, "sos")} />}
+                      {(item.type === "outage" || item.type === "restored") && (
+                        <ActionPill label="View Status" color={item.userColor} onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: item.deviceId, areaName: item.areaName })} />
+                      )}
+                    </YStack>
+                    {item.isUnread && <YStack width={8} height={8} borderRadius={4} backgroundColor="#00C48A" alignSelf="center" marginLeft={8} />}
+                  </XStack>
+                ))}
               </YStack>
             ))
           )}

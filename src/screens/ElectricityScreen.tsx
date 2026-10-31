@@ -1,13 +1,13 @@
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
+import "react-native-get-random-values";
+import { v4 as uuidv4 } from "uuid";
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Platform, StatusBar, RefreshControl, Animated,
+  Platform, StatusBar, RefreshControl, View, Animated, Keyboard,
   TextInput, ActivityIndicator, Image, SafeAreaView, Dimensions,
-  Modal, TouchableOpacity, ScrollView, Linking, Alert, Switch
+  Modal, TouchableOpacity, ScrollView, Alert, Switch
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
-import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import Svg, { Rect, Text as SvgText, Line } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
 import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
@@ -19,72 +19,108 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 
 const { height, width } = Dimensions.get("window");
-
-const CHECKING_COLOR = "#F59E0B";
 const MAX_TRUSTED_GAP_MS = 4 * 60 * 60 * 1000;
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const CITY_DATA: Record<string, { 
-  lat: number; 
-  lng: number; 
-  radius: number; 
-  latDelta: number; 
-  lngDelta: number;
-  northEast: { latitude: number; longitude: number };
-  southWest: { latitude: number; longitude: number };
-}> = {
-  "Ibadan": { 
-    lat: 7.3775, lng: 3.9059, 
-    radius: 30000.0, 
-    latDelta: 0.15, lngDelta: 0.15,
-    northEast: { latitude: 7.6000, longitude: 4.1500 },
-    southWest: { latitude: 7.1500, longitude: 3.6500 }
-  },
-  "Lagos": { 
-    lat: 6.5244, lng: 3.3792, 
-    radius: 40000.0, 
-    latDelta: 0.3, lngDelta: 0.3,
-    northEast: { latitude: 6.7500, longitude: 3.6500 },
-    southWest: { latitude: 6.3500, longitude: 3.1000 }
-  },
-  "Abuja": { 
-    lat: 9.0765, lng: 7.3986, 
-    radius: 40000.0, 
-    latDelta: 0.3, lngDelta: 0.3,
-    northEast: { latitude: 9.3000, longitude: 7.6000 },
-    southWest: { latitude: 8.8000, longitude: 7.1000 }
-  }
+const GOOGLE_API_KEY = Platform.OS === "ios" ? "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA" : "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo";
+
+const CITY_DATA: Record<string, { lat: number; lng: number; radius: number; latDelta: number; lngDelta: number; northEast: any; southWest: any }> = {
+  Ibadan: { lat: 7.3775, lng: 3.9059, radius: 30000.0, latDelta: 0.15, lngDelta: 0.15, northEast: { latitude: 7.6, longitude: 4.15 }, southWest: { latitude: 7.15, longitude: 3.65 } },
+  Lagos: { lat: 6.5244, lng: 3.3792, radius: 40000.0, latDelta: 0.3, lngDelta: 0.3, northEast: { latitude: 6.75, longitude: 3.65 }, southWest: { latitude: 6.35, longitude: 3.1 } },
+  Abuja: { lat: 9.0765, lng: 7.3986, radius: 40000.0, latDelta: 0.3, lngDelta: 0.3, northEast: { latitude: 9.3, longitude: 7.6 }, southWest: { latitude: 8.8, longitude: 7.1 } },
 };
 
-const buildUpIntervalsFromHistory = (
-  historyNode: any,
-  isOnline: boolean,
-  nowMs: number
-): Array<{ start: number; end: number }> => {
+// ---------------- helpers ----------------
+const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const isInsideCity = (lat: number, lng: number, city: string) => {
+  const c = CITY_DATA[city];
+  if (!c) return true;
+  return lat >= c.southWest.latitude && lat <= c.northEast.latitude && lng >= c.southWest.longitude && lng <= c.northEast.longitude;
+};
+
+const placesHeaders = (fieldMask?: string) => {
+  const headers: any = { "Content-Type": "application/json", "X-Goog-Api-Key": GOOGLE_API_KEY };
+  if (fieldMask) headers["X-Goog-FieldMask"] = fieldMask;
+  if (Platform.OS === "ios") headers["X-Ios-Bundle-Identifier"] = "com.strompulse.app";
+  if (Platform.OS === "android") headers["X-Android-Package"] = "com.strompulse.app";
+  return headers;
+};
+
+// Autocomplete strictly inside the selected city's bounding box
+const cityAutocomplete = async (input: string, city: string, sessionToken?: string) => {
+  const c = CITY_DATA[city] || CITY_DATA.Ibadan;
+  const body: any = {
+    input,
+    includedRegionCodes: ["ng"],
+    locationRestriction: {
+      rectangle: {
+        low: { latitude: c.southWest.latitude, longitude: c.southWest.longitude },
+        high: { latitude: c.northEast.latitude, longitude: c.northEast.longitude },
+      },
+    },
+  };
+  if (sessionToken) body.sessionToken = sessionToken;
+  const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", { method: "POST", headers: placesHeaders(), body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) {
+    console.warn("[Places autocomplete]", data.error.status, data.error.message);
+    return [];
+  }
+  return (data.suggestions || [])
+    .filter((d: any) => d.placePrediction)
+    .map((d: any) => ({
+      id: d.placePrediction.placeId,
+      title: d.placePrediction.structuredFormat?.mainText?.text || d.placePrediction.text.text,
+      subtitle: d.placePrediction.structuredFormat?.secondaryText?.text || "",
+      fullText: d.placePrediction.text.text,
+    }));
+};
+
+const fetchPlaceLocation = async (placeId: string, sessionToken?: string) => {
+  const url = `https://places.googleapis.com/v1/places/${placeId}${sessionToken ? `?sessionToken=${sessionToken}` : ""}`;
+  const res = await fetch(url, { headers: placesHeaders("location") });
+  const data = await res.json();
+  return data.location ? { lat: data.location.latitude as number, lng: data.location.longitude as number } : null;
+};
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const startOfIsoWeek = (d: Date) => {
+  const s = startOfDay(d);
+  return new Date(s.getFullYear(), s.getMonth(), s.getDate() - ((s.getDay() + 6) % 7));
+};
+const getIsoWeek = (date: Date) => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return { week: Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7), year: d.getUTCFullYear() };
+};
+const formatHourLabel = (h: number) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
+
+const buildUpIntervalsFromHistory = (historyNode: any, isOnline: boolean, nowMs: number) => {
   if (!historyNode) return [];
-
-  const events = Object.keys(historyNode)
-    .map((key) => {
-      const entry = historyNode[key];
-      const tsSource = entry && typeof entry === "object" && entry.timestamp ? entry.timestamp : key;
-      const parsed = parseStromTimestamp(String(tsSource));
-      return parsed ? parsed.getTime() : null;
-    })
-    .filter((ts): ts is number => typeof ts === "number" && !Number.isNaN(ts))
-    .sort((a, b) => a - b);
-
-  if (events.length === 0) return [];
-
+  const events = Object.keys(historyNode).map((key) => {
+    const entry = historyNode[key];
+    const tsSource = entry && typeof entry === "object" && entry.timestamp ? entry.timestamp : key;
+    const parsed = parseStromTimestamp(String(tsSource));
+    return parsed ? parsed.getTime() : null;
+  }).filter((ts): ts is number => typeof ts === "number" && !Number.isNaN(ts)).sort((a, b) => a - b);
   const intervals: Array<{ start: number; end: number }> = [];
   for (let i = 0; i < events.length; i++) {
     const start = events[i];
-    const isLast = i === events.length - 1;
-
-    if (isLast) {
+    if (i === events.length - 1) {
       const end = isOnline ? nowMs : start;
       if (end > start) intervals.push({ start, end });
       continue;
     }
-
     const gap = events[i + 1] - start;
     const end = gap <= MAX_TRUSTED_GAP_MS ? events[i + 1] : start;
     if (end > start) intervals.push({ start, end });
@@ -92,145 +128,179 @@ const buildUpIntervalsFromHistory = (
   return intervals;
 };
 
-const sumOverlapMs = (
-  intervals: Array<{ start: number; end: number }>,
-  rangeStart: number,
-  rangeEnd: number
-): number => {
+const sumOverlapMs = (intervals: Array<{ start: number; end: number }>, rangeStart: number, rangeEnd: number) => {
   let total = 0;
   for (const iv of intervals) {
-    const overlapStart = Math.max(iv.start, rangeStart);
-    const overlapEnd = Math.min(iv.end, rangeEnd);
-    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+    const s = Math.max(iv.start, rangeStart);
+    const e = Math.min(iv.end, rangeEnd);
+    if (e > s) total += e - s;
   }
   return total;
 };
 
-const calculateIntervalUptime = (device: any, startMs: number, endMs: number, nowMs: number): number | null => {
+const calculateIntervalUptime = (device: any, startMs: number, endMs: number, nowMs: number) => {
   if (startMs >= nowMs) return null;
-
   const clampedEnd = Math.min(endMs, nowMs);
   const durationMs = clampedEnd - startMs;
   if (durationMs <= 0) return null;
-
   const hasHistory = device?.history && Object.keys(device.history).length > 0;
-  if (!hasHistory) {
-    return device?.isOnline ? 100 : 0;
-  }
-
+  if (!hasHistory) return device?.isOnline ? 100 : 0;
   const intervals = buildUpIntervalsFromHistory(device.history, !!device.isOnline, nowMs);
-  const upMs = sumOverlapMs(intervals, startMs, clampedEnd);
-  const pct = Math.round((upMs / durationMs) * 100);
-  return Math.max(0, Math.min(100, pct));
+  return Math.max(0, Math.min(100, Math.round((sumOverlapMs(intervals, startMs, clampedEnd) / durationMs) * 100)));
 };
 
-const SyncNotice = ({ visible, isDarkMode }: { visible: boolean; isDarkMode: boolean }) => {
+// ---------------- chart ----------------
+type ChartBar = { label: string; subLabel?: string; value: number | null; isFuture?: boolean };
+
+const UptimeBarChart = ({ bars, yTitle, xTitle, isDarkMode, textColor, variant = "actual", minSlotWidth = 0, showValues = false }: {
+  bars: ChartBar[]; yTitle: string; xTitle?: string; isDarkMode: boolean; textColor: string; variant?: "actual" | "predicted"; minSlotWidth?: number; showValues?: boolean;
+}) => {
+  const baseWidth = width - 88;
+  const startX = 44;
+  const chartWidth = Math.max(baseWidth, minSlotWidth * bars.length + startX + 8);
+  const endX = chartWidth - 8;
+  const slot = (endX - startX) / bars.length;
+  const barW = Math.max(6, Math.min(24, slot * 0.55));
+  const rotateLabels = bars.length > 12;
+  const top = showValues ? 22 : 12;
+  const plotH = 140;
+  const axisY = top + plotH;
+  const labelArea = rotateLabels ? 34 : bars.some((b) => b.subLabel) ? 30 : 18;
+  const chartHeight = axisY + labelArea + (xTitle ? 18 : 4);
+  const gridColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
+
+  const svg = (
+    <Svg width={chartWidth} height={chartHeight}>
+      <SvgText x={12} y={top + plotH / 2} fill={textColor} fontSize={10} fontFamily="Chirp-Bold" textAnchor="middle" transform={`rotate(-90, 12, ${top + plotH / 2})`}>{yTitle}</SvgText>
+      {[100, 80, 60, 40, 20, 0].map((v) => {
+        const y = top + plotH * (1 - v / 100);
+        return (
+          <React.Fragment key={`g${v}`}>
+            <SvgText x={startX - 6} y={y + 3} fill={textColor} fontSize={9} fontFamily="Chirp-Medium" textAnchor="end">{v}</SvgText>
+            <Line x1={startX} y1={y} x2={endX} y2={y} stroke={gridColor} strokeWidth={1} strokeDasharray={v === 0 ? undefined : "4,4"} />
+          </React.Fragment>
+        );
+      })}
+      {bars.map((b, i) => {
+        const cx = startX + slot * i + slot / 2;
+        const hasValue = !b.isFuture && b.value !== null && b.value !== undefined;
+        const v = hasValue ? (b.value as number) : 0;
+        const h = hasValue ? Math.max(4, (v / 100) * plotH) : 4;
+        const y = axisY - h;
+        let fill = variant === "predicted" ? "#3B82F6" : v >= 70 ? "#00C48A" : v >= 40 ? "#F59E0B" : "#EF4444";
+        if (!hasValue) fill = gridColor;
+        return (
+          <React.Fragment key={`b${i}`}>
+            <Rect x={cx - barW / 2} y={y} width={barW} height={h} rx={Math.min(barW / 2, 6)} fill={fill} opacity={variant === "predicted" && hasValue ? 0.85 : 1} />
+            {showValues && hasValue && <SvgText x={cx} y={y - 5} fill={textColor} fontSize={9} fontFamily="Chirp-Bold" textAnchor="middle">{`${v}%`}</SvgText>}
+            {rotateLabels ? (
+              <SvgText x={cx + 3} y={axisY + 6} fill={textColor} fontSize={8} fontFamily="Chirp-Medium" textAnchor="end" transform={`rotate(-90, ${cx + 3}, ${axisY + 6})`}>{b.label}</SvgText>
+            ) : (
+              <>
+                <SvgText x={cx} y={axisY + 13} fill={textColor} fontSize={10} fontFamily="Chirp-Bold" textAnchor="middle">{b.label}</SvgText>
+                {b.subLabel ? <SvgText x={cx} y={axisY + 25} fill={textColor} fontSize={8} fontFamily="Chirp-Medium" textAnchor="middle">{b.subLabel}</SvgText> : null}
+              </>
+            )}
+          </React.Fragment>
+        );
+      })}
+      {xTitle ? <SvgText x={startX + (endX - startX) / 2} y={chartHeight - 4} fill={textColor} fontSize={10} fontFamily="Chirp-Bold" textAnchor="middle">{xTitle}</SvgText> : null}
+    </Svg>
+  );
+
+  if (chartWidth > baseWidth) {
+    return (
+      <YStack>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>{svg}</ScrollView>
+        <XStack justifyContent="flex-end" alignItems="center" gap={4} marginTop={4}>
+          <Feather name="chevrons-right" size={10} color={textColor} />
+          <TText fontFamily="Chirp-Medium" fontSize={10} color={textColor}>Scroll for more hours</TText>
+        </XStack>
+      </YStack>
+    );
+  }
+  return svg;
+};
+
+const SyncNotice = ({ visible, isDarkMode }: any) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: visible ? 1 : 0, duration: 250, useNativeDriver: true }).start();
-  }, [visible]);
-
+  useEffect(() => { Animated.timing(fadeAnim, { toValue: visible ? 1 : 0, duration: 250, useNativeDriver: true }).start(); }, [visible]);
   if (!visible) return null;
-
   return (
-    <Animated.View pointerEvents="none" style={{
-      position: "absolute", top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 120 : 140,
-      alignSelf: 'center', zIndex: 200, opacity: fadeAnim,
-      backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF",
-      borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
-      paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20,
-      flexDirection: "row", alignItems: "center",
-      shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10
-    }}>
+    <Animated.View pointerEvents="none" style={{ position: "absolute", top: 120, alignSelf: "center", zIndex: 200, opacity: fadeAnim, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderWidth: 1, borderColor: isDarkMode ? "#2D3B34" : "#E2E8F0", paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, flexDirection: "row", alignItems: "center" }}>
       <ActivityIndicator size="small" color="#00C48A" style={{ marginRight: 12 }} />
-      <TText fontFamily="Chirp-Bold" fontSize={12} color={isDarkMode ? "#A7F3D0" : "#064E3B"}>
-        Updating city grid may take some seconds...
-      </TText>
+      <TText fontFamily="Chirp-Bold" fontSize={12} color={isDarkMode ? "#A7F3D0" : "#064E3B"}>Updating city grid...</TText>
     </Animated.View>
   );
 };
 
+type Range = "Today" | "This Week" | "This Month";
+
 const ElectricityScreen = ({ navigation }: any) => {
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
-  const [refreshing, setRefreshing] = useState(false);
+  const cardBg = isDarkMode ? "#121A16" : "#FFFFFF";
+  const softBg = isDarkMode ? "#1A221E" : "#F8FAFC";
+  const divider = isDarkMode ? "#2D3B34" : "#E2E8F0";
+
   const [activeTab, setActiveTab] = useState<"map" | "communities" | "stats">("map");
-  const [activeCategory, setActiveCategory] = useState<"All" | "Stable" | "Outage">("All");
   const [selectedCity, setSelectedCity] = useState("Ibadan");
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [mapRegion, setMapRegion] = useState<any>(null);
 
   const [mapSearchQuery, setMapSearchQuery] = useState("");
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
-  const [selectedStreetName, setSelectedStreetName] = useState<string | null>(null);
+  const [selectedSearchItem, setSelectedSearchItem] = useState<any | null>(null);
   const [isMapSearchFocused, setIsMapSearchFocused] = useState(false);
-  const [recentMapSearch, setRecentMapSearch] = useState<any | null>(null);
 
   const [communitySearchQuery, setCommunitySearchQuery] = useState("");
   const [isCityDropdownOpen, setIsCityDropdownOpen] = useState(false);
-  const [apiSearchResults, setApiSearchResults] = useState<any[]>([]);
-  const [isSearchingApi, setIsSearchingApi] = useState(false);
-  const [sessionToken, setSessionToken] = useState(uuidv4());
-
-  const [user, setUser] = useState<any>(null);
-  const [localAvatar, setLocalAvatar] = useState<string | null>(null);
-  const [localName, setLocalName] = useState<string | null>(null);
   const [defaultLocation, setDefaultLocation] = useState<any | null>(null);
-  
-  // Modal states
+  const [recentMapSearch, setRecentMapSearch] = useState<any | null>(null);
+
   const [isLocModalVisible, setIsLocModalVisible] = useState(false);
-  const [homeModalTab, setHomeModalTab] = useState<"analytics" | "update">("analytics"); 
+  const [homeModalTab, setHomeModalTab] = useState<"analytics" | "address">("analytics");
+  const [homeChartTimeRange, setHomeChartTimeRange] = useState<Range>("Today");
+  const [chartTimeRange, setChartTimeRange] = useState<Range>("Today");
 
   const [locSearchQuery, setLocSearchQuery] = useState("");
   const [locSearchResults, setLocSearchResults] = useState<any[]>([]);
   const [isLocSearching, setIsLocSearching] = useState(false);
   const [selectedLocResult, setSelectedLocResult] = useState<any>(null);
+  const [isSavingLoc, setIsSavingLoc] = useState(false);
 
+  const [apiSearchResults, setApiSearchResults] = useState<any[]>([]);
+  const [isSearchingApi, setIsSearchingApi] = useState(false);
+  const [sessionToken, setSessionToken] = useState(uuidv4());
+
+  const [showSyncNotice, setShowSyncNotice] = useState(true);
+  const [isConnected, setIsConnected] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [user, setUser] = useState<any>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const sidebarAnim = useRef(new Animated.Value(width)).current;
+  const [localAvatar, setLocalAvatar] = useState<string | null>(null);
+  const [localName, setLocalName] = useState<string | null>(null);
 
-  const [isReportModalVisible, setIsReportModalVisible] = useState(false);
-  const [reportArea, setReportArea] = useState("");
-  const [reportStatus, setReportStatus] = useState<"stable" | "outage" | null>(null);
-  const [showSyncNotice, setShowSyncNotice] = useState(true);
-
-  const [chartTimeRange, setChartTimeRange] = useState<"Today" | "This Week">("Today");
-
-  const [isConnected, setIsConnected] = useState(true);
-
-  const solidActionBg = "#00C48A";
-  const solidActionIcon = "#FFFFFF";
-
-  const GOOGLE_API_KEY = Platform.OS === 'ios' ? "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA" : "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo";
-
-  // Watch for city changes to dynamically flip map view location
   useEffect(() => {
-    const coords = CITY_DATA[selectedCity] || CITY_DATA["Ibadan"];
-    setMapRegion({
-      latitude: coords.lat,
-      longitude: coords.lng,
-      latitudeDelta: coords.latDelta,
-      longitudeDelta: coords.lngDelta,
-    });
+    const c = CITY_DATA[selectedCity] || CITY_DATA.Ibadan;
+    setMapRegion({ latitude: c.lat, longitude: c.lng, latitudeDelta: c.latDelta, longitudeDelta: c.lngDelta });
+    setMapSearchQuery("");
+    setSelectedAreaId(null);
+    setSelectedSearchItem(null);
   }, [selectedCity]);
 
-  useEffect(() => { const timer = setTimeout(() => setShowSyncNotice(false), 4000); return () => clearTimeout(timer); }, []);
-
+  useEffect(() => { const t = setTimeout(() => setShowSyncNotice(false), 4000); return () => clearTimeout(t); }, []);
+  // 30s tick is enough for live status/charts and keeps the screen smooth
+  useEffect(() => { const t = setInterval(() => setCurrentTime(Date.now()), 30000); return () => clearInterval(t); }, []);
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setIsConnected(!!state.isConnected && state.isInternetReachable !== false);
-    });
+    const unsubscribe = NetInfo.addEventListener((state) => setIsConnected(!!state.isConnected && state.isInternetReachable !== false));
     return () => unsubscribe();
   }, []);
 
   useFocusEffect(
     React.useCallback(() => {
-      const fetchInitData = async () => {
+      (async () => {
         try {
           const session = await AuthService.getCurrentSession();
           if (session) setUser(session.user);
@@ -238,452 +308,313 @@ const ElectricityScreen = ({ navigation }: any) => {
           setLocalName(await AsyncStorage.getItem("global_name"));
           const savedLoc = await AsyncStorage.getItem("strompulse_default_location");
           if (savedLoc) setDefaultLocation(JSON.parse(savedLoc));
-
-          const savedRecentSearch = await AsyncStorage.getItem("strompulse_recent_map_search");
-          if (savedRecentSearch) setRecentMapSearch(JSON.parse(savedRecentSearch));
+          const savedRecent = await AsyncStorage.getItem("strompulse_recent_map_search");
+          if (savedRecent) setRecentMapSearch(JSON.parse(savedRecent));
         } catch (e) {}
-      };
-      fetchInitData();
+      })();
     }, [])
   );
 
   const displayAvatar = localAvatar || user?.avatar_url || user?.user_metadata?.avatar_url || null;
-  const fullName = localName || user?.full_name || "Afolabi Taiwo Glory";
+  const fullName = localName || user?.full_name || "Stromer";
 
   const toggleSidebar = (open: boolean) => {
     if (open) {
       setIsSidebarOpen(true);
-      Animated.timing(sidebarAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
+      Animated.timing(sidebarAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
     } else {
-      Animated.timing(sidebarAnim, {
-        toValue: width,
-        duration: 250,
-        useNativeDriver: true,
-      }).start(() => setIsSidebarOpen(false));
+      Animated.timing(sidebarAnim, { toValue: width, duration: 250, useNativeDriver: true }).start(() => setIsSidebarOpen(false));
     }
   };
 
   const handleLogoutPress = () => {
     toggleSidebar(false);
-    Alert.alert(
-      "Log Out",
-      "Are you sure you want to log out of your account?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Log Out",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AuthService.logout();
-            } catch (err) {
-              console.error("Error logging out:", err);
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
+    Alert.alert("Log Out", "Are you sure you want to log out of your account?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log Out", style: "destructive", onPress: async () => { try { await AuthService.logout(); } catch (err) {} } },
+    ], { cancelable: true });
   };
 
   const { devices, loading: devicesLoading } = useAllGridDevices();
 
-  const getNearestNode = (lat: number, lng: number, nodesList: any[]) => {
-    if (!nodesList || nodesList.length === 0) return null;
-    let nearest = nodesList[0];
-    let minDistance = Infinity;
-    nodesList.forEach(node => {
-      const R = 6371;
-      const dLat = (node.lat - lat) * (Math.PI / 180);
-      const dLon = (node.lng - lng) * (Math.PI / 180);
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat * (Math.PI / 180)) * Math.cos(node.lat * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const dist = R * c;
-      if (dist < minDistance) { minDistance = dist; nearest = node; }
-    });
+  const getNearestNode = (lat: number, lng: number, nodes: any[]) => {
+    if (!nodes || nodes.length === 0) return null;
+    let nearest = nodes[0];
+    let min = Infinity;
+    nodes.forEach((n) => { const d = getDistanceFromLatLonInKm(lat, lng, n.lat, n.lng); if (d < min) { min = d; nearest = n; } });
     return nearest;
   };
 
   const gridItems = Object.keys(DEVICE_LOCATIONS).map((id) => {
     const liveDevice = devices.find((d) => d.id === id || d.id?.toUpperCase() === id.toUpperCase());
-    const meta = DEVICE_LOCATIONS[id as keyof typeof DEVICE_LOCATIONS];
-    const connectionState = liveDevice ? (liveDevice.connectionState || (liveDevice.isOnline ? 'online' : 'offline')) : 'offline';
-    
-    let isOnline = connectionState === 'online';
-    let isChecking = connectionState === 'checking';
-
-    if (!isConnected) {
-      isOnline = false;
-      isChecking = true;
-    }
-
-    const realUptime = liveDevice?.uptime !== undefined ? liveDevice.uptime : (isOnline ? 100 : 0);
+    const meta: any = (DEVICE_LOCATIONS as any)[id];
+    const connectionState = liveDevice ? liveDevice.connectionState || (liveDevice.isOnline ? "online" : "offline") : "offline";
+    let isOnline = connectionState === "online";
+    let isChecking = connectionState === "checking";
+    if (!isConnected) { isOnline = false; isChecking = true; }
+    const realUptime = liveDevice?.uptime !== undefined ? liveDevice.uptime : isOnline ? 100 : 0;
     const outOfCoverage = !liveDevice;
     const isPartial = isOnline && realUptime > 0 && realUptime < 100;
-    
     let finalStatusText = outOfCoverage ? "Out of Coverage" : isChecking ? "Checking Status" : isOnline ? "Presently Stable" : "Power Outage";
     if (isPartial && isConnected) finalStatusText = "Partial Stability";
     if (!isConnected) finalStatusText = "Checking Status";
-
-    return { id, name: meta.name, type: meta.type, lat: meta.lat, lng: meta.lng, roads: meta.roads, city: "Ibadan", isOnline, isChecking, connectionState: isConnected ? connectionState : 'checking', uptime: realUptime, outOfCoverage, isPartial, finalStatusText, history: liveDevice?.history, fullDeviceData: liveDevice };
+    return {
+      id, name: meta.name, type: meta.type, lat: meta.lat, lng: meta.lng, roads: meta.roads || [], city: meta.city || "Ibadan",
+      isOnline, isChecking, connectionState: isConnected ? connectionState : "checking", uptime: realUptime,
+      outOfCoverage, isPartial, finalStatusText, history: liveDevice?.history, fullDeviceData: liveDevice,
+    };
   });
+  const cityGridItems = gridItems.filter((g) => g.city === selectedCity);
 
-  let defaultLocStatus = null;
+  let defaultLocStatus: any = null;
   if (defaultLocation && gridItems.length > 0) {
-    defaultLocStatus = defaultLocation.isCustom ? getNearestNode(defaultLocation.lat, defaultLocation.lng, gridItems) : gridItems.find(g => g.id === defaultLocation.id);
+    defaultLocStatus = defaultLocation.isCustom ? getNearestNode(defaultLocation.lat, defaultLocation.lng, gridItems) : gridItems.find((g) => g.id === defaultLocation.id);
   }
+  const homeDevice = defaultLocStatus?.fullDeviceData || null;
 
-  // Calculate real-time Monthly Analytics for the modal
-  const renderMonthlyAccuracyChart = () => {
-    const now = new Date(currentTime);
-    const monthName = now.toLocaleString('default', { month: 'long' });
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-
-    const weeks = [
-      { label: "Wk 1", startDay: 1, endDay: 7 },
-      { label: "Wk 2", startDay: 8, endDay: 14 },
-      { label: "Wk 3", startDay: 15, endDay: 21 },
-      { label: "Wk 4", startDay: 22, endDay: new Date(currentYear, currentMonth + 1, 0).getDate() }
-    ];
-
-    const intervalData = weeks.map(wk => {
-      const startMs = new Date(currentYear, currentMonth, wk.startDay).getTime();
-      const endMs = new Date(currentYear, currentMonth, wk.endDay, 23, 59, 59, 999).getTime();
-      
-      if (startMs > now.getTime()) {
-         return { label: wk.label, accuracy: 0, isFuture: true };
+  // ---------- analytics data ----------
+  const getCityPct = (sMs: number, eMs: number, nowMs: number) => {
+    let total = 0, counted = 0;
+    cityGridItems.forEach((item) => {
+      if (item.fullDeviceData) {
+        const pct = calculateIntervalUptime(item.fullDeviceData, sMs, eMs, nowMs);
+        if (pct !== null) { total += pct; counted++; }
       }
-      
-      const pct = defaultLocStatus?.fullDeviceData 
-        ? calculateIntervalUptime(defaultLocStatus.fullDeviceData, startMs, Math.min(endMs, now.getTime()), now.getTime()) 
-        : 0;
-      return { label: wk.label, accuracy: pct ?? 0, isFuture: false };
     });
+    return counted > 0 ? Math.round(total / counted) : null;
+  };
 
-    const chartHeight = 200;
-    const chartWidth = width - 88;
-    const yAxisLabels = [100, 80, 60, 40, 20, 0];
-    const barWidth = 26;
-    const startX = 40;
-    const availableWidth = chartWidth - startX - 10;
-    const gap = availableWidth / intervalData.length;
+  const pctFor = (source: "city" | "home", s: number, e: number, nowMs: number) =>
+    source === "home" ? (homeDevice ? calculateIntervalUptime(homeDevice, s, e, nowMs) : null) : getCityPct(s, e, nowMs);
 
+  const buildRangeBars = (range: Range, source: "city" | "home"): ChartBar[] => {
+    const now = new Date(currentTime);
+    const nowMs = now.getTime();
+    if (range === "Today") {
+      const sod = startOfDay(now);
+      return Array.from({ length: 24 }, (_, h) => {
+        const s = new Date(sod.getFullYear(), sod.getMonth(), sod.getDate(), h).getTime();
+        const isFuture = s >= nowMs;
+        return { label: formatHourLabel(h), value: isFuture ? null : pctFor(source, s, s + 3600000, nowMs), isFuture };
+      });
+    }
+    if (range === "This Week") {
+      const sow = startOfIsoWeek(now);
+      return DAY_NAMES.map((name, i) => {
+        const d = new Date(sow.getFullYear(), sow.getMonth(), sow.getDate() + i);
+        const s = d.getTime();
+        const e = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+        const isFuture = s >= nowMs;
+        return { label: name, subLabel: `${d.getDate()} ${MONTHS[d.getMonth()]}`, value: isFuture ? null : pctFor(source, s, e, nowMs), isFuture };
+      });
+    }
+    const y = now.getFullYear(), m = now.getMonth();
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    const ranges: [number, number][] = [];
+    for (let st = 1; st <= lastDay; st += 7) ranges.push([st, Math.min(st + 6, lastDay)]);
+    return ranges.map(([a, b], i) => {
+      const s = new Date(y, m, a).getTime();
+      const e = new Date(y, m, b + 1).getTime();
+      const isFuture = s > nowMs;
+      return { label: `Wk ${i + 1}`, subLabel: a === b ? `${a} ${MONTHS[m]}` : `${a}–${b} ${MONTHS[m]}`, value: isFuture ? null : pctFor(source, s, e, nowMs), isFuture };
+    });
+  };
+
+  // Prediction = average uptime for the same weekday over the previous 4 weeks
+  const buildPrediction = (source: "city" | "home") => {
+    const now = new Date(currentTime);
+    const nowMs = now.getTime();
+    const thisMon = startOfIsoWeek(now);
+    const nextMon = new Date(thisMon.getFullYear(), thisMon.getMonth(), thisMon.getDate() + 7);
+    const bars: ChartBar[] = DAY_NAMES.map((name, i) => {
+      const target = new Date(nextMon.getFullYear(), nextMon.getMonth(), nextMon.getDate() + i);
+      const samples: number[] = [];
+      for (let w = 1; w <= 4; w++) {
+        const d = new Date(target.getFullYear(), target.getMonth(), target.getDate() - 7 * w);
+        const s = d.getTime();
+        if (s >= nowMs) continue;
+        const e = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+        const v = pctFor(source, s, e, nowMs);
+        if (v !== null && v !== undefined) samples.push(v);
+      }
+      return { label: name, subLabel: `${target.getDate()} ${MONTHS[target.getMonth()]}`, value: samples.length ? Math.round(samples.reduce((a, b) => a + b, 0) / samples.length) : null };
+    });
+    return { bars, ...getIsoWeek(nextMon) };
+  };
+
+  const xTitleFor = (r: Range) => (r === "Today" ? "Hour of day" : r === "This Week" ? "Day of week" : "Week of month");
+
+  const renderRangeSelector = (value: Range, onChange: (r: Range) => void) => (
+    <XStack backgroundColor={isDarkMode ? "#121A16" : "#F1F5F9"} borderRadius={12} padding={4} alignSelf="flex-start">
+      {(["Today", "This Week", "This Month"] as Range[]).map((r) => (
+        <TouchableOpacity key={r} onPress={() => onChange(r)} style={{ paddingVertical: 6, paddingHorizontal: 12, backgroundColor: value === r ? "#00C48A" : "transparent", borderRadius: 8 }}>
+          <TText fontSize={11} fontFamily="Chirp-Bold" color={value === r ? "#FFFFFF" : theme.textSecondary}>{r === "Today" ? "Today" : r === "This Week" ? "This week" : "This month"}</TText>
+        </TouchableOpacity>
+      ))}
+    </XStack>
+  );
+
+  const renderAnalyticsCard = (title: string, subtitle: string, range: Range, setRange: (r: Range) => void, source: "city" | "home") => (
+    <YStack backgroundColor={cardBg} borderRadius={24} padding={20} borderWidth={1} borderColor={divider} marginBottom={16}>
+      <XStack alignItems="center" gap={12} marginBottom={16}>
+        <YStack width={36} height={36} borderRadius={12} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+          <Feather name="bar-chart-2" size={18} color="#00C48A" />
+        </YStack>
+        <YStack flex={1}>
+          <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>{title}</TText>
+          <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{subtitle}</TText>
+        </YStack>
+      </XStack>
+      <YStack marginBottom={16}>{renderRangeSelector(range, setRange)}</YStack>
+      <UptimeBarChart bars={buildRangeBars(range, source)} yTitle="Uptime (%)" xTitle={xTitleFor(range)} isDarkMode={isDarkMode} textColor={theme.textSecondary} minSlotWidth={range === "Today" ? 20 : 0} />
+      <XStack gap={14} marginTop={12} flexWrap="wrap">
+        {[{ c: "#00C48A", l: "70%+" }, { c: "#F59E0B", l: "40–69%" }, { c: "#EF4444", l: "<40%" }, { c: divider, l: "No data" }].map((x) => (
+          <XStack key={x.l} alignItems="center" gap={6}>
+            <YStack width={8} height={8} borderRadius={4} backgroundColor={x.c} />
+            <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary}>{x.l}</TText>
+          </XStack>
+        ))}
+      </XStack>
+    </YStack>
+  );
+
+  const renderPredictionCard = (source: "city" | "home") => {
+    const { bars, week, year } = buildPrediction(source);
+    const hasAny = bars.some((b) => b.value !== null);
     return (
-      <YStack backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={20} padding={20} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
-        <XStack alignItems="center" gap={12} marginBottom={24}>
-          <YStack width={36} height={36} borderRadius={12} backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5"} justifyContent="center" alignItems="center">
-            <Feather name="bar-chart-2" size={16} color="#00C48A" />
+      <YStack backgroundColor={cardBg} borderRadius={24} padding={20} borderWidth={1} borderColor={divider} marginBottom={16}>
+        <XStack alignItems="center" gap={12} marginBottom={16}>
+          <YStack width={36} height={36} borderRadius={12} backgroundColor={isDarkMode ? "rgba(59,130,246,0.15)" : "#EFF6FF"} justifyContent="center" alignItems="center">
+            <Feather name="trending-up" size={16} color="#3B82F6" />
           </YStack>
           <YStack flex={1}>
-            <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>{monthName} Analytics</TText>
-            <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{defaultLocation?.name}</TText>
+            <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>Prediction for Next Week (Week {week}, {year})</TText>
+            <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Based on the last 4 weeks of grid history</TText>
           </YStack>
         </XStack>
-        
-        <YStack height={chartHeight} width="100%">
-          <Svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-            <SvgText x={10} y={chartHeight / 2 - 10} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Bold" transform={`rotate(-90, 10, ${chartHeight / 2 - 10})`} textAnchor="middle">
-              Uptime
-            </SvgText>
-
-            {yAxisLabels.map((val, idx) => {
-              const yPos = 10 + (idx * 26);
-              return (
-                <React.Fragment key={`grid-${idx}`}>
-                  <SvgText x={30} y={yPos + 4} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Medium" textAnchor="end">{val}</SvgText>
-                  <Line x1={38} y1={yPos} x2={chartWidth} y2={yPos} stroke={isDarkMode ? "#2D3B34" : "#E2E8F0"} strokeWidth="1" strokeDasharray="4,4" />
-                </React.Fragment>
-              );
-            })}
-
-            {intervalData.map((item, index) => {
-              const xPos = startX + (gap * index) + (gap - barWidth) / 2;
-              const maxBarHeight = 130;
-              const barH = item.isFuture ? 6 : Math.max(6, (item.accuracy / 100) * maxBarHeight);
-              const yPos = 10 + maxBarHeight - barH;
-              
-              let barColor = "#EF4444";
-              if (item.accuracy >= 70) barColor = "#00C48A";
-              else if (item.accuracy >= 40) barColor = "#F59E0B";
-              if (item.isFuture) barColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
-
-              return (
-                <React.Fragment key={`bar-${index}`}>
-                  <Rect x={xPos} y={yPos} width={barWidth} height={barH} rx={barWidth/2} fill={barColor} />
-                  <SvgText x={xPos + barWidth/2} y={chartHeight - 24} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Medium" textAnchor="middle">{item.label}</SvgText>
-                </React.Fragment>
-              );
-            })}
-            
-            <SvgText x={startX + (availableWidth / 2)} y={chartHeight - 4} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Bold" textAnchor="middle">Week</SvgText>
-          </Svg>
-        </YStack>
+        {hasAny ? (
+          <UptimeBarChart bars={bars} yTitle="Expected Uptime (%)" xTitle="Day" isDarkMode={isDarkMode} textColor={theme.textSecondary} variant="predicted" showValues />
+        ) : (
+          <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary} textAlign="center" paddingVertical={24}>Not enough history yet to predict next week.</TText>
+        )}
       </YStack>
     );
   };
 
-  // RESTORED locationBias to capture tiny streets while favoring selected city
+  // ---------- home address ----------
+  const saveDefaultLocation = async () => {
+    if (!selectedLocResult) return;
+    setIsSavingLoc(true);
+    try {
+      let toSave = { ...selectedLocResult, city: selectedCity };
+      if (selectedLocResult.isGooglePlace && (!toSave.lat || !toSave.lng)) {
+        const loc = await fetchPlaceLocation(selectedLocResult.id);
+        if (!loc) { Alert.alert("Couldn't get address", "Please try another address."); return; }
+        if (!isInsideCity(loc.lat, loc.lng, selectedCity)) { Alert.alert("Outside coverage", `Please choose an address inside ${selectedCity}.`); return; }
+        toSave = { ...toSave, lat: loc.lat, lng: loc.lng };
+      }
+      setDefaultLocation(toSave);
+      await AsyncStorage.setItem("strompulse_default_location", JSON.stringify(toSave));
+      setLocSearchQuery("");
+      setLocSearchResults([]);
+      setSelectedLocResult(null);
+      setHomeModalTab("analytics");
+      if (!defaultLocation) setIsLocModalVisible(false);
+    } catch (e) {
+      Alert.alert("Error", "Couldn't save your home address. Please try again.");
+    } finally {
+      setIsSavingLoc(false);
+    }
+  };
+
+  // Change Home Address search (Google, restricted to city)
   useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (locSearchQuery.trim().length > 2) {
-        const query = locSearchQuery.toLowerCase().trim();
-
-        const hasLocalMatch = gridItems.some(item => 
-          item.name.toLowerCase().includes(query) || 
-          item.roads.some(road => road.toLowerCase().includes(query))
-        );
-
-        if (hasLocalMatch) {
-          setLocSearchResults([]);
-          return;
-        }
-
+    const t = setTimeout(async () => {
+      const q = locSearchQuery.trim();
+      if (q.length > 2) {
         setIsLocSearching(true);
         try {
-          const headers: any = {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_API_KEY
-          };
-          if (Platform.OS === 'ios') headers['X-Ios-Bundle-Identifier'] = 'com.strompulse.app';
-          if (Platform.OS === 'android') headers['X-Android-Package'] = 'com.strompulse.app';
-
-          const cityCoords = CITY_DATA[selectedCity] || CITY_DATA["Ibadan"];
-
-          const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-              input: locSearchQuery.trim(),
-              includedRegionCodes: ["ng"],
-              locationBias: {
-                circle: {
-                  center: { latitude: cityCoords.lat, longitude: cityCoords.lng },
-                  radius: 50000.0 // Expanded to properly catch tiny streets
-                }
-              }
-            })
-          });
-          const data = await res.json();
-          
-          if (data.error) {
-             console.error("Home Search API Error:", data.error.message);
-             setLocSearchResults([]);
-             return;
-          }
-
-          if (data.suggestions) {
-            setLocSearchResults(data.suggestions.map((d: any) => ({
-              id: d.placePrediction.placeId,
-              name: d.placePrediction.text.text,
-              isGooglePlace: true,
-              isCustom: true
-            })));
-          } else {
-             setLocSearchResults([]);
-          }
-        } catch (error) {
-           console.error("Home Search Error:", error);
-           setLocSearchResults([]);
-        } finally { setIsLocSearching(false); }
-      } else { setLocSearchResults([]); }
+          const results = await cityAutocomplete(q, selectedCity);
+          setLocSearchResults(results.map((r: any) => ({ id: r.id, name: r.fullText, title: r.title, subtitle: r.subtitle, isGooglePlace: true, isCustom: true })));
+        } catch { setLocSearchResults([]); } finally { setIsLocSearching(false); }
+      } else setLocSearchResults([]);
     }, 400);
-    return () => clearTimeout(delayDebounceFn);
+    return () => clearTimeout(t);
   }, [locSearchQuery, selectedCity]);
 
-  const saveDefaultLocation = async () => {
-    if (selectedLocResult) {
-      let finalLocationToSave = { ...selectedLocResult };
-
-      if (selectedLocResult.isGooglePlace && (!finalLocationToSave.lat || !finalLocationToSave.lng)) {
-        try {
-          const headers: any = {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_API_KEY,
-            'X-Goog-FieldMask': 'location'
-          };
-          if (Platform.OS === 'ios') headers['X-Ios-Bundle-Identifier'] = 'com.strompulse.app';
-          if (Platform.OS === 'android') headers['X-Android-Package'] = 'com.strompulse.app';
-
-          const res = await fetch(`https://places.googleapis.com/v1/places/${selectedLocResult.id}`, {
-             headers: headers
-          });
-          const data = await res.json();
-          if (data.location) {
-             finalLocationToSave.lat = data.location.latitude;
-             finalLocationToSave.lng = data.location.longitude;
-          }
-        } catch (e) {
-           console.error("Save Location Error:", e);
-        }
-      }
-
-      setDefaultLocation(finalLocationToSave);
-      await AsyncStorage.setItem("strompulse_default_location", JSON.stringify(finalLocationToSave));
-      setIsLocModalVisible(false);
-      setLocSearchQuery("");
-      setSelectedLocResult(null);
-    }
-  };
-
-  // RESTORED locationBias to capture tiny streets while favoring selected city
+  // ---------- map search ----------
   useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (mapSearchQuery.trim().length > 2) {
-        const query = mapSearchQuery.toLowerCase().trim();
-
-        const hasLocalMatch = gridItems.some(item => 
-          item.name.toLowerCase().includes(query) || 
-          item.roads.some(road => road.toLowerCase().includes(query))
-        );
-
-        if (hasLocalMatch) {
-          setApiSearchResults([]);
-          return;
-        }
-
+    const t = setTimeout(async () => {
+      const q = mapSearchQuery.trim();
+      if (q.length > 2 && !selectedSearchItem) {
         setIsSearchingApi(true);
         try {
-          const headers: any = {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_API_KEY
-          };
-          if (Platform.OS === 'ios') headers['X-Ios-Bundle-Identifier'] = 'com.strompulse.app';
-          if (Platform.OS === 'android') headers['X-Android-Package'] = 'com.strompulse.app';
-
-          const cityCoords = CITY_DATA[selectedCity] || CITY_DATA["Ibadan"];
-
-          const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-              input: mapSearchQuery.trim(),
-              sessionToken: sessionToken,
-              includedRegionCodes: ["ng"],
-              locationBias: {
-                circle: {
-                  center: { latitude: cityCoords.lat, longitude: cityCoords.lng },
-                  radius: 50000.0 // Expanded to properly catch tiny streets
-                }
-              }
-            }),
-          });
-          
-          const data = await res.json();
-
-          if (data.error) {
-            console.error("Map Search API Error:", data.error.message);
-            setApiSearchResults([]);
-            return;
-          }
-
-          if (data.suggestions && data.suggestions.length > 0) {
-            setApiSearchResults(data.suggestions.map((d: any) => ({
-              id: d.placePrediction.placeId,
-              displayTitle: d.placePrediction.text.text,
-              isGooglePlace: true,
-              finalStatusText: "Google Map Street"
-            })));
-          } else {
-             setApiSearchResults([]);
-          }
-        } catch (error) {
-          console.error("Map Search Error:", error);
-          setApiSearchResults([]);
-        } finally {
-          setIsSearchingApi(false);
-        }
-      } else {
-        setApiSearchResults([]);
-      }
+          const results = await cityAutocomplete(q, selectedCity, sessionToken);
+          setApiSearchResults(results.map((r: any) => ({ id: r.id, displayTitle: r.title, subtitle: r.subtitle, isGooglePlace: true, finalStatusText: r.subtitle || `Street in ${selectedCity}` })));
+        } catch { setApiSearchResults([]); } finally { setIsSearchingApi(false); }
+      } else setApiSearchResults([]);
     }, 400);
-    return () => clearTimeout(delayDebounceFn);
-  }, [mapSearchQuery, sessionToken, selectedCity]);
-
-  const combinedSearchResults: any[] = [];
-  if (mapSearchQuery.trim().length > 0) {
-    const query = mapSearchQuery.toLowerCase().trim();
-
-    gridItems.forEach(item => {
-      if (item.name.toLowerCase().includes(query)) {
-        combinedSearchResults.push({ ...item, displayTitle: item.name, isStreet: false });
-      }
-      item.roads.forEach(road => {
-        if (road.toLowerCase().includes(query)) {
-          combinedSearchResults.push({ ...item, displayTitle: road, isStreet: true, finalStatusText: item.finalStatusText });
-        }
-      });
-    });
-
-    apiSearchResults.forEach(apiItem => {
-      combinedSearchResults.push(apiItem);
-    });
-  }
+    return () => clearTimeout(t);
+  }, [mapSearchQuery, selectedCity]);
 
   const handleSelectSearchResult = async (item: any) => {
-    setSelectedAreaId(item.id);
-    setSelectedStreetName((item.isStreet || item.isGooglePlace) ? item.displayTitle : null);
-    setMapSearchQuery(item.displayTitle);
+    Keyboard.dismiss();
     setIsMapSearchFocused(false);
+    setMapSearchQuery(item.displayTitle);
 
-    let finalLat = item.lat;
-    let finalLng = item.lng;
+    let lat = item.lat, lng = item.lng;
+    let areaId = item.isGooglePlace ? null : item.id;
 
-    if (item.isGooglePlace && (!finalLat || !finalLng)) {
-       try {
-          const headers: any = {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_API_KEY,
-            'X-Goog-FieldMask': 'location' 
-          };
-          if (Platform.OS === 'ios') headers['X-Ios-Bundle-Identifier'] = 'com.strompulse.app';
-          if (Platform.OS === 'android') headers['X-Android-Package'] = 'com.strompulse.app';
-
-          const res = await fetch(`https://places.googleapis.com/v1/places/${item.id}`, {
-             headers: headers
-          });
-          const data = await res.json();
-          if (data.location) {
-             finalLat = data.location.latitude;
-             finalLng = data.location.longitude;
-
-             const nearestNode = getNearestNode(finalLat, finalLng, gridItems);
-             if (nearestNode) {
-                 setSelectedAreaId(nearestNode.id);
-             }
-          }
-       } catch (e) {
-          console.error("Place details fetch error:", e);
-       } finally {
-          setSessionToken(uuidv4());
-       }
+    if (item.isGooglePlace && (!lat || !lng)) {
+      try {
+        const loc = await fetchPlaceLocation(item.id, sessionToken);
+        if (loc) { lat = loc.lat; lng = loc.lng; }
+      } catch (e) {} finally { setSessionToken(uuidv4()); }
     }
+    if (lat && lng && !isInsideCity(lat, lng, selectedCity)) {
+      Alert.alert("Outside coverage", `That address is outside ${selectedCity}. Please search within ${selectedCity}.`);
+      return;
+    }
+    if (lat && lng && !areaId) {
+      const nearest = getNearestNode(lat, lng, cityGridItems.length ? cityGridItems : gridItems);
+      if (nearest) areaId = nearest.id;
+    }
+    setSelectedAreaId(areaId);
+    const chosen = { ...item, lat, lng };
+    setSelectedSearchItem(chosen);
+    // Zoom is locked for users, so focus the result at a fixed street-level view; clearing the search returns to the city view
+    if (lat && lng) setMapRegion({ latitude: lat, longitude: lng, latitudeDelta: 0.03, longitudeDelta: 0.03 });
+    setRecentMapSearch(chosen);
+    AsyncStorage.setItem("strompulse_recent_map_search", JSON.stringify(chosen));
+  };
 
-    if (finalLat && finalLng) {
-      setMapRegion({
-        latitude: finalLat,
-        longitude: finalLng,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
+  const resetCityRegion = () => {
+    const c = CITY_DATA[selectedCity] || CITY_DATA.Ibadan;
+    setMapRegion({ latitude: c.lat, longitude: c.lng, latitudeDelta: c.latDelta, longitudeDelta: c.lngDelta });
+  };
+
+  const clearMapSearch = () => {
+    resetCityRegion();
+    setMapSearchQuery("");
+    setSelectedAreaId(null);
+    setSelectedSearchItem(null);
+    setApiSearchResults([]);
+  };
+
+  const combinedSearchResults: any[] = [];
+  if (mapSearchQuery.trim().length > 0 && !selectedSearchItem) {
+    const q = mapSearchQuery.toLowerCase().trim();
+    const seen = new Set<string>();
+    cityGridItems.forEach((item) => {
+      if (item.name.toLowerCase().includes(q) && !seen.has(`a-${item.id}`)) { seen.add(`a-${item.id}`); combinedSearchResults.push({ ...item, displayTitle: item.name, isStreet: false }); }
+      item.roads.forEach((road: string) => {
+        if (road.toLowerCase().includes(q) && !seen.has(`r-${road}`)) { seen.add(`r-${road}`); combinedSearchResults.push({ ...item, displayTitle: road, isStreet: true }); }
       });
-    }
+    });
+    apiSearchResults.forEach((r) => combinedSearchResults.push(r));
+  }
 
-    const searchToSave = { ...item, displayTitle: item.displayTitle, lat: finalLat, lng: finalLng };
-    setRecentMapSearch(searchToSave);
-    AsyncStorage.setItem("strompulse_recent_map_search", JSON.stringify(searchToSave));
-  };
-
-  const onRefresh = async () => { setRefreshing(true); setTimeout(() => setRefreshing(false), 1000); };
-
-  const handleSendReport = () => {
-    if (!reportArea || !reportStatus) return;
-    Linking.openURL(`whatsapp://send?text=${encodeURIComponent(`Hello Strompulse, I want to report a power update:\n*Area:* ${reportArea}\n*Status:*${reportStatus === "stable" ? "Presently Stable" : "Power Outage"}`)}`).catch(() => Alert.alert("WhatsApp not found", "Please install WhatsApp to send this report."));
-    setIsReportModalVisible(false); setReportArea(""); setReportStatus(null);
-  };
+  const onRefresh = async () => { setRefreshing(true); setCurrentTime(Date.now()); setTimeout(() => setRefreshing(false), 1000); };
 
   if (devicesLoading && devices.length === 0) {
     return (
@@ -693,142 +624,10 @@ const ElectricityScreen = ({ navigation }: any) => {
     );
   }
 
-  const filteredCommunities = gridItems.filter((item) => {
-    const matchesSearch = item.name.toLowerCase().includes(communitySearchQuery.toLowerCase());
-    let matchesFilter = true;
-    if (activeCategory === "Stable") matchesFilter = item.isOnline && !item.isPartial;
-    if (activeCategory === "Outage") matchesFilter = (!item.isOnline && !item.isChecking) || item.isPartial;
-    return matchesSearch && matchesFilter;
-  });
+  const selectedAreaData = selectedAreaId ? gridItems.find((i) => i.id === selectedAreaId) : null;
+  const showSearchDropdown = isMapSearchFocused && !selectedSearchItem && (mapSearchQuery.length > 0 || !!recentMapSearch);
 
-  const selectedAreaData = selectedAreaId ? gridItems.find(item => item.id === selectedAreaId) : null;
-  const showSearchDropdown = (mapSearchQuery.length > 0 || (isMapSearchFocused && mapSearchQuery.length === 0 && recentMapSearch)) && !selectedAreaData;
-
-  const renderAccuracyBarChart = () => {
-    const now = currentTime;
-    const nowDate = new Date(now);
-    const currentDay = nowDate.getDay();
-
-    const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
-    const startOfWeek = startOfToday - (currentDay * 24 * 60 * 60 * 1000);
-
-    const labelsToday = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"];
-    const labelsWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-    const averageAcrossGrid = (startMs: number, endMs: number) => {
-      let totalPct = 0;
-      let counted = 0;
-      gridItems.forEach((item) => {
-        const liveDev = devices.find((d) => d.id === item.id || d.id?.toUpperCase() === item.id.toUpperCase());
-        if (liveDev) {
-          const pct = calculateIntervalUptime(liveDev, startMs, endMs, now);
-          if (pct !== null) {
-            totalPct += pct;
-            counted++;
-          }
-        }
-      });
-      return counted > 0 ? Math.round(totalPct / counted) : 0;
-    };
-
-    const intervalData = chartTimeRange === "Today"
-      ? labelsToday.map((label, idx) => {
-          const startMs = startOfToday + (idx * 4 * 3600 * 1000);
-          const endMs = startMs + (4 * 3600 * 1000);
-          if (startMs >= now) return { label, accuracy: 0, isFuture: true };
-          return { label, accuracy: averageAcrossGrid(startMs, endMs), isFuture: false };
-        })
-      : labelsWeek.map((label, idx) => {
-          const startMs = startOfWeek + (idx * 24 * 3600 * 1000);
-          const endMs = startMs + (24 * 3600 * 1000);
-          if (startMs >= now) return { label, accuracy: 0, isFuture: true };
-          return { label, accuracy: averageAcrossGrid(startMs, endMs), isFuture: false };
-        });
-
-    const chartHeight = 190;
-    const chartWidth = 320;
-    const yAxisLabels = [100, 80, 60, 40, 20, 0];
-
-    const barWidth = chartTimeRange === "Today" ? 28 : 22;
-    const gap = chartTimeRange === "Today" ? 18 : 16;
-    const startX = 55;
-    const chartAreaWidth = intervalData.length * (barWidth + gap);
-
-    return (
-      <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} marginBottom={24} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-        <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={20}>
-          <XStack alignItems="center" gap={12} flex={1}>
-            <YStack width={36} height={36} borderRadius={12} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
-              <Feather name="bar-chart-2" size={18} color="#00C48A" />
-            </YStack>
-            <YStack flex={1}>
-              <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>City Analysis</TText>
-            </YStack>
-          </XStack>
-
-          <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} borderRadius={12} padding={4}>
-            <TouchableOpacity onPress={() => setChartTimeRange("Today")} style={{ paddingVertical: 6, paddingHorizontal: 12, backgroundColor: chartTimeRange === "Today" ? (isDarkMode ? "#2D3B34" : "#FFFFFF") : "transparent", borderRadius: 8 }}>
-              <TText fontSize={11} fontFamily="Chirp-Bold" color={chartTimeRange === "Today" ? theme.textPrimary : theme.textSecondary}>Today</TText>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setChartTimeRange("This Week")} style={{ paddingVertical: 6, paddingHorizontal: 12, backgroundColor: chartTimeRange === "This Week" ? (isDarkMode ? "#2D3B34" : "#FFFFFF") : "transparent", borderRadius: 8 }}>
-              <TText fontSize={11} fontFamily="Chirp-Bold" color={chartTimeRange === "This Week" ? theme.textPrimary : theme.textSecondary}>This week</TText>
-            </TouchableOpacity>
-          </XStack>
-        </XStack>
-
-        <YStack height={chartHeight} width="100%">
-          <Svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-            <SvgText x={12} y={chartHeight / 2 - 10} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Bold" transform={`rotate(-90, 12, ${chartHeight / 2 - 10})`} textAnchor="middle">
-              Uptime
-            </SvgText>
-
-            {yAxisLabels.map((val, idx) => {
-              const yPos = 20 + (idx * 22);
-              return (
-                <React.Fragment key={idx}>
-                  <SvgText x={40} y={yPos + 4} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Bold" textAnchor="end">
-                    {val}
-                  </SvgText>
-                  <Line x1={48} y1={yPos} x2={chartWidth - 10} y2={yPos} stroke={isDarkMode ? "#22302A" : "#F1F5F9"} strokeWidth="1" />
-                </React.Fragment>
-              );
-            })}
-
-            {intervalData.map((item, index) => {
-              const xPos = startX + index * (barWidth + gap);
-              const maxBarHeight = 132;
-              const barH = item.isFuture ? 4 : Math.max(6, (item.accuracy / 100) * maxBarHeight);
-              const yPos = 20 + maxBarHeight - barH;
-
-              let barColor = "#EF4444";
-              if (item.accuracy >= 70) {
-                barColor = "#00C48A";
-              } else if (item.accuracy >= 40) {
-                barColor = "#F59E0B";
-              }
-
-              if (item.isFuture) {
-                barColor = isDarkMode ? "#2D3B34" : "#E2E8F0";
-              }
-
-              return (
-                <React.Fragment key={index}>
-                  <Rect x={xPos} y={yPos} width={barWidth} height={barH} rx={6} fill={barColor} />
-                  <SvgText x={xPos + barWidth / 2} y={chartHeight - 20} fill={theme.textSecondary} fontSize={9} fontFamily="Chirp-Bold" textAnchor="middle">
-                    {item.label}
-                  </SvgText>
-                </React.Fragment>
-              );
-            })}
-
-            <SvgText x={startX + (chartAreaWidth / 2) - gap/2} y={chartHeight - 4} fill={theme.textSecondary} fontSize={10} fontFamily="Chirp-Bold" textAnchor="middle">
-              {chartTimeRange === "Today" ? "hours" : "days"}
-            </SvgText>
-          </Svg>
-        </YStack>
-      </YStack>
-    );
-  };
+  const statusColor = (item: any) => item?.isChecking ? "#F59E0B" : item?.outOfCoverage ? theme.textSecondary : item?.isPartial ? "#F59E0B" : item?.isOnline ? "#00C48A" : "#EF4444";
 
   return (
     <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
@@ -836,8 +635,7 @@ const ElectricityScreen = ({ navigation }: any) => {
       <SyncNotice visible={showSyncNotice} isDarkMode={isDarkMode} />
 
       <SafeAreaView style={{ flex: 1 }}>
-        {/* --- HEADER --- */}
-        <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={24} paddingTop={Platform.OS === 'android' ? 20 : 10} paddingBottom={8}>
+        <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={16} borderBottomWidth={1} borderBottomColor={divider}>
           <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
           <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 23 }} color={theme.textPrimary}>Strompulse</TText>
           <TouchableOpacity onPress={() => toggleSidebar(true)}>
@@ -847,342 +645,384 @@ const ElectricityScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </XStack>
 
-        {/* --- LIVE GRID STATUS ONLY --- */}
-        <XStack alignItems="center" justifyContent="center" paddingHorizontal={24} marginBottom={16}>
-          <XStack alignItems="center" gap={6} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} paddingHorizontal={12} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#047857" : "#A7F3D0"}>
-            <YStack width={6} height={6} borderRadius={3} backgroundColor="#00C48A" />
-            <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A" textTransform="uppercase" letterSpacing={0.5}>Live grid status</TText>
-          </XStack>
-        </XStack>
-
-        {/* --- CITY DROPDOWN --- */}
-        <YStack zIndex={10000} marginHorizontal={24} marginBottom={24} position="relative">
-          <YStack position="absolute" top={-8} left={20} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} paddingHorizontal={4} zIndex={10}>
-             <TText fontSize={11} fontFamily="Chirp-Heavy" color={isDarkMode ? "#FFFFFF" : "#000000"} letterSpacing={0.5}>SELECT YOUR CITY</TText>
-          </YStack>
-          <TouchableOpacity activeOpacity={0.8} onPress={() => setIsCityDropdownOpen(!isCityDropdownOpen)}>
-            <XStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={20} paddingHorizontal={16} paddingVertical={12} alignItems="center" justifyContent="space-between" borderWidth={1.5} borderColor="#00C48A">
-              <XStack alignItems="center" gap={10}>
-                <Ionicons name="location-outline" size={18} color="#00C48A" />
-                <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary}>{selectedCity}</TText>
-              </XStack>
-              <YStack width={28} height={28} borderRadius={14} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
-                <Feather name={isCityDropdownOpen ? "chevron-up" : "chevron-down"} size={14} color="#00C48A" />
-              </YStack>
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C48A" />}>
+          <XStack alignItems="center" justifyContent="center" paddingHorizontal={24} marginBottom={16} marginTop={16}>
+            <XStack alignItems="center" gap={6} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} paddingHorizontal={12} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#047857" : "#A7F3D0"}>
+              <YStack width={6} height={6} borderRadius={3} backgroundColor="#00C48A" />
+              <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A" letterSpacing={0.5}>LIVE GRID STATUS</TText>
             </XStack>
-          </TouchableOpacity>
-          {isCityDropdownOpen && (
-            <YStack position="absolute" top={64} left={0} right={0} backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={16} padding={8} shadowColor="#000" shadowOpacity={0.15} shadowRadius={15} shadowOffset={{width:0, height:6}} borderWidth={1} borderColor="#00C48A">
-              {CITIES.map((city, idx) => (
-                <TouchableOpacity key={idx} disabled={!city.available} onPress={() => { if (city.available) { setSelectedCity(city.name); setIsCityDropdownOpen(false); } }}>
-                  <XStack alignItems="center" justifyContent="space-between" padding={12} backgroundColor={selectedCity === city.name ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#F0FDF4") : "transparent"} borderRadius={12}>
-                    <TText fontFamily="Chirp-Bold" fontSize={14} color={city.available ? theme.textPrimary : theme.textSecondary}>
-                      {city.name} {!city.available && "(Coming Soon)"}
-                    </TText>
-                    {selectedCity === city.name && <Feather name="check-circle" size={16} color="#00C48A" />}
-                    {!city.available && <Feather name="lock" size={14} color={theme.textSecondary} />}
-                  </XStack>
-                </TouchableOpacity>
-              ))}
+          </XStack>
+
+          {/* City selector */}
+          <YStack zIndex={10000} marginHorizontal={24} marginBottom={16}>
+            <YStack position="absolute" top={-8} left={20} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} paddingHorizontal={4} zIndex={10}>
+              <TText fontSize={11} fontFamily="Chirp-Heavy" color={theme.textPrimary} letterSpacing={0.5}>SELECT YOUR CITY</TText>
             </YStack>
-          )}
-        </YStack>
-
-        {/* --- TABS --- */}
-        <XStack marginHorizontal={24} marginBottom={24} justifyContent="space-between" gap={8}>
-          {(["map", "communities", "stats"] as const).map((tab) => {
-            const isActive = activeTab === tab;
-            let iconName = "map";
-            let label = "Map";
-            if (tab === "communities") { iconName = "grid"; label = "Communities"; }
-            if (tab === "stats") { iconName = "bar-chart-2"; label = "Analytics"; }
-
-            return (
-              <TouchableOpacity key={tab} activeOpacity={0.8} onPress={() => setActiveTab(tab)} style={{ flex: 1 }}>
-                <XStack paddingVertical={10} alignItems="center" justifyContent="center" borderRadius={24} borderWidth={1} borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")} backgroundColor={isActive ? solidActionBg : "transparent"} gap={6}>
-                  <Feather name={iconName as any} size={14} color={isActive ? solidActionIcon : (isDarkMode ? "#64748B" : "#94A3B8")} />
-                  <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? solidActionIcon : (isDarkMode ? "#64748B" : "#94A3B8")}>
-                    {label}
-                  </TText>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => setIsCityDropdownOpen(!isCityDropdownOpen)}>
+              <XStack backgroundColor={cardBg} borderRadius={20} paddingHorizontal={16} paddingVertical={12} alignItems="center" justifyContent="space-between" borderWidth={1.5} borderColor="#00C48A">
+                <XStack alignItems="center" gap={10}>
+                  <Ionicons name="location-outline" size={18} color="#00C48A" />
+                  <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary}>{selectedCity}</TText>
                 </XStack>
-              </TouchableOpacity>
-            );
-          })}
-        </XStack>
+                <YStack width={28} height={28} borderRadius={14} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+                  <Feather name={isCityDropdownOpen ? "chevron-up" : "chevron-down"} size={14} color="#00C48A" />
+                </YStack>
+              </XStack>
+            </TouchableOpacity>
+            {isCityDropdownOpen && (
+              <YStack position="absolute" top={64} left={0} right={0} backgroundColor={softBg} borderRadius={16} padding={8} borderWidth={1} borderColor="#00C48A">
+                {CITIES.map((city: any, idx: number) => (
+                  <TouchableOpacity key={idx} disabled={!city.available} onPress={() => { setSelectedCity(city.name); setIsCityDropdownOpen(false); }}>
+                    <XStack alignItems="center" justifyContent="space-between" padding={12} backgroundColor={selectedCity === city.name ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#F0FDF4") : "transparent"} borderRadius={12}>
+                      <TText fontFamily="Chirp-Bold" fontSize={14} color={city.available ? theme.textPrimary : theme.textSecondary}>{city.name} {!city.available && "(Coming Soon)"}</TText>
+                      {selectedCity === city.name && <Feather name="check-circle" size={16} color="#00C48A" />}
+                      {!city.available && <Feather name="lock" size={14} color={theme.textSecondary} />}
+                    </XStack>
+                  </TouchableOpacity>
+                ))}
+              </YStack>
+            )}
+          </YStack>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C48A" />}>
+          {/* Main navigation: three distinct containers with selected-state highlighting */}
+          <XStack marginHorizontal={24} marginBottom={20} gap={10}>
+            {(["map", "communities", "stats"] as const).map((tab) => {
+              const isActive = activeTab === tab;
+              const cfg = { map: { icon: "map", label: "Map" }, communities: { icon: "grid", label: "Communities" }, stats: { icon: "bar-chart-2", label: "Analytics" } }[tab];
+              return (
+                <TouchableOpacity key={tab} activeOpacity={0.8} onPress={() => setActiveTab(tab)} style={{ flex: 1 }}>
+                  <YStack paddingVertical={12} alignItems="center" justifyContent="center" borderRadius={16} borderWidth={1.5} borderColor={isActive ? "#00C48A" : divider} backgroundColor={isActive ? "#00C48A" : cardBg} gap={4}>
+                    <Feather name={cfg.icon as any} size={16} color={isActive ? "#FFFFFF" : theme.textSecondary} />
+                    <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? "#FFFFFF" : theme.textSecondary}>{cfg.label}</TText>
+                  </YStack>
+                </TouchableOpacity>
+              );
+            })}
+          </XStack>
 
           {activeTab === "map" && (
-            <>
-              {/* --- SET HOME AREA (PINNED MAP ONLY) --- */}
-              <YStack zIndex={9000} marginHorizontal={24} marginBottom={24} marginTop={12} position="relative">
-                <YStack position="absolute" top={-8} left={20} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} paddingHorizontal={4} zIndex={10}>
-                   <TText fontSize={10} fontFamily="Chirp-Heavy" color={isDarkMode ? "#FFFFFF" : "#000000"} letterSpacing={0.5} numberOfLines={1}>SET YOUR HOME ADDRESS TO LOCK IN ON DASHBOARD</TText>
-                </YStack>
-                {!defaultLocation ? (
-                  <TouchableOpacity activeOpacity={0.8} onPress={() => { setHomeModalTab("update"); setIsLocModalVisible(true); }}>
-                    <XStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={20} paddingHorizontal={16} paddingVertical={14} alignItems="center" justifyContent="space-between" borderWidth={1.5} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
-                      <XStack alignItems="center" gap={12}>
-                        <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "rgba(1A,34,30,1)" : "#F8FAFC"} justifyContent="center" alignItems="center">
-                          <Feather name="home" size={14} color={theme.textSecondary} />
-                        </YStack>
-                        <YStack>
-                          <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary}>Set Home Address</TText>
-                          <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={2}>Quick-view your status</TText>
-                        </YStack>
-                      </XStack>
-                      <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+            <YStack zIndex={9000} marginHorizontal={24} marginBottom={24}>
+              {!defaultLocation ? (
+                <TouchableOpacity onPress={() => { setHomeModalTab("address"); setIsLocModalVisible(true); }}>
+                  <XStack backgroundColor={cardBg} borderRadius={20} paddingHorizontal={16} paddingVertical={14} alignItems="center" justifyContent="space-between" borderWidth={1.5} borderColor="#00C48A">
+                    <XStack alignItems="center" gap={12}>
+                      <Feather name="home" size={16} color="#00C48A" />
+                      <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary}>Set Home Address</TText>
                     </XStack>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity activeOpacity={0.8} onPress={() => { setHomeModalTab("analytics"); setIsLocModalVisible(true); }}>
-                    <XStack 
-                      backgroundColor={defaultLocStatus?.isChecking ? (isDarkMode ? "rgba(245,158,11,0.1)" : "#FEF3C7") : defaultLocStatus?.isOnline ? (isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.05)" : "#FEE2E2")} 
-                      borderRadius={20} paddingHorizontal={16} paddingVertical={14} alignItems="center" justifyContent="space-between" borderWidth={1.5} 
-                      borderColor={defaultLocStatus?.isChecking ? "#F59E0B" : defaultLocStatus?.isOnline ? (isDarkMode ? "#064E3B" : "#A7F3D0") : (isDarkMode ? "#7F1D1D" : "#FECACA")}>
-                      <XStack alignItems="center" gap={12} flex={1}>
-                        <YStack 
-                          width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} justifyContent="center" alignItems="center" borderWidth={1} 
-                          borderColor={defaultLocStatus?.isChecking ? "#F59E0B" : defaultLocStatus?.isOnline ? (isDarkMode ? "#00C48A" : "#D1FAE5") : (isDarkMode ? "#EF4444" : "#FEE2E2")}>
-                           {defaultLocStatus?.isChecking ? <ActivityIndicator size="small" color="#F59E0B" /> : <Feather name={defaultLocStatus?.isOnline ? "zap" : "zap-off"} size={16} color={defaultLocStatus?.isOnline ? "#00C48A" : "#EF4444"} />}
-                        </YStack>
-                        <YStack flex={1} paddingRight={12}>
-                          <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} marginBottom={2}>{defaultLocStatus?.finalStatusText}</TText>
-                          <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{defaultLocation.name || defaultLocation.displayTitle}</TText>
-                        </YStack>
-                      </XStack>
-                      <YStack width={28} height={28} borderRadius={14} backgroundColor={isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} justifyContent="center" alignItems="center">
-                        <Feather name="edit-2" size={12} color={theme.textPrimary} />
+                    <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                      <Feather name="arrow-right" size={14} color="#FFF" />
+                    </YStack>
+                  </XStack>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={() => { setHomeModalTab("analytics"); setIsLocModalVisible(true); }}>
+                  <XStack backgroundColor={cardBg} borderRadius={20} paddingHorizontal={16} paddingVertical={14} alignItems="center" justifyContent="space-between" borderWidth={1.5} borderColor="#00C48A">
+                    <XStack alignItems="center" gap={12} flex={1}>
+                      {defaultLocStatus?.isChecking ? <ActivityIndicator size="small" color="#F59E0B" /> : <Feather name={defaultLocStatus?.isOnline ? "zap" : "zap-off"} size={16} color={statusColor(defaultLocStatus)} />}
+                      <YStack flex={1} paddingRight={12}>
+                        <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} marginBottom={2}>{defaultLocStatus?.finalStatusText || "Checking Status"}</TText>
+                        <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>Home · {defaultLocation.name}</TText>
                       </YStack>
                     </XStack>
-                  </TouchableOpacity>
+                    <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                      <Feather name="arrow-right" size={14} color="#FFF" />
+                    </YStack>
+                  </XStack>
+                </TouchableOpacity>
+              )}
+
+              <YStack height={450} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={divider} marginTop={16}>
+                <CustomMapView
+                  showCoverage={true}
+                  region={mapRegion}
+                  minZoomLevel={10}
+                  zoomEnabled={false}
+                  scrollEnabled={true}
+                
+                  mapBoundaries={CITY_DATA[selectedCity]}
+                  markers={cityGridItems.map((item) => ({ id: item.id, title: item.name, connectionState: item.connectionState, latitude: item.lat, longitude: item.lng }))}
+                  onMarkerPress={(id: string) => {
+                    const tapped = gridItems.find((i) => i.id === id);
+                    if (tapped) navigation.navigate("CommunityZonesScreen", { areaId: tapped.id, areaName: tapped.name, isOnline: tapped.isOnline, uptime: tapped.uptime });
+                  }}
+                />
+
+                <XStack position="absolute" top={16} left={16} right={16} zIndex={100} backgroundColor={softBg} borderRadius={16} paddingHorizontal={16} height={52} alignItems="center" borderWidth={1} borderColor={divider}>
+                  <Feather name="search" size={18} color={theme.textSecondary} />
+                  <TextInput
+                    placeholder={`Search streets in ${selectedCity}...`}
+                    placeholderTextColor={theme.textSecondary}
+                    style={{ flex: 1, marginLeft: 12, fontSize: 14, fontFamily: "Chirp-Medium", color: theme.textPrimary }}
+                    value={mapSearchQuery}
+                    onFocus={() => setIsMapSearchFocused(true)}
+                    onChangeText={(t) => { setMapSearchQuery(t); setSelectedSearchItem(null); setSelectedAreaId(null); setIsMapSearchFocused(true); }}
+                    returnKeyType="search"
+                  />
+                  {isSearchingApi && <ActivityIndicator size="small" color="#00C48A" style={{ marginRight: 8 }} />}
+                  {mapSearchQuery.length > 0 && (
+                    <TouchableOpacity onPress={clearMapSearch} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Feather name="x-circle" size={18} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </XStack>
+
+                {showSearchDropdown && (
+                  <YStack position="absolute" top={76} left={16} right={16} zIndex={101} backgroundColor={softBg} borderRadius={16} borderWidth={1} borderColor={divider} maxHeight={260} overflow="hidden">
+                    <ScrollView keyboardShouldPersistTaps="handled">
+                      {mapSearchQuery.length === 0 && recentMapSearch ? (
+                        <YStack>
+                          <TText paddingHorizontal={16} paddingTop={16} paddingBottom={8} fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5}>RECENT SEARCH</TText>
+                          <XStack padding={16} alignItems="center">
+                            <TouchableOpacity style={{ flex: 1, flexDirection: "row", alignItems: "center" }} onPress={() => handleSelectSearchResult(recentMapSearch)}>
+                              <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={16}>
+                                <Feather name="clock" size={14} color="#00C48A" />
+                              </YStack>
+                              <YStack flex={1}>
+                                <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{recentMapSearch.displayTitle}</TText>
+                                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{recentMapSearch.finalStatusText || "View on map"}</TText>
+                              </YStack>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => { setRecentMapSearch(null); AsyncStorage.removeItem("strompulse_recent_map_search"); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                              <Feather name="trash-2" size={16} color={theme.textSecondary} />
+                            </TouchableOpacity>
+                          </XStack>
+                        </YStack>
+                      ) : isSearchingApi && combinedSearchResults.length === 0 ? (
+                        <YStack padding={24} alignItems="center">
+                          <ActivityIndicator size="small" color="#00C48A" />
+                          <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary} marginTop={12}>Searching {selectedCity}...</TText>
+                        </YStack>
+                      ) : combinedSearchResults.length === 0 ? (
+                        <YStack padding={24} alignItems="center">
+                          <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary} textAlign="center">
+                            {mapSearchQuery.trim().length < 3 ? "Type at least 3 letters" : `No matching address in ${selectedCity}.`}
+                          </TText>
+                        </YStack>
+                      ) : (
+                        combinedSearchResults.map((item, idx) => (
+                          <TouchableOpacity key={`${item.id}-${idx}`} onPress={() => handleSelectSearchResult(item)}>
+                            <XStack padding={16} alignItems="center" borderBottomWidth={idx === combinedSearchResults.length - 1 ? 0 : 1} borderBottomColor={divider}>
+                              <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={16}>
+                                <Feather name={item.isGooglePlace || item.isStreet ? "map-pin" : "grid"} size={14} color="#00C48A" />
+                              </YStack>
+                              <YStack flex={1}>
+                                <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{item.displayTitle}</TText>
+                                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{item.finalStatusText || "View on map"}</TText>
+                              </YStack>
+                            </XStack>
+                          </TouchableOpacity>
+                        ))
+                      )}
+                    </ScrollView>
+                  </YStack>
+                )}
+
+                {selectedSearchItem && selectedAreaData && (
+                  <YStack position="absolute" bottom={16} left={16} right={16} zIndex={100} backgroundColor={cardBg} borderRadius={20} padding={16} borderWidth={1} borderColor="#00C48A">
+                    <XStack alignItems="center">
+                      <YStack width={36} height={36} borderRadius={18} backgroundColor={`${statusColor(selectedAreaData)}22`} justifyContent="center" alignItems="center" marginRight={12}>
+                        <Feather name={selectedAreaData.isOnline ? "zap" : "zap-off"} size={16} color={statusColor(selectedAreaData)} />
+                      </YStack>
+                      <YStack flex={1} paddingRight={8}>
+                        <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{selectedSearchItem.displayTitle}</TText>
+                        <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{selectedAreaData.finalStatusText} · nearest: {selectedAreaData.name}</TText>
+                      </YStack>
+                      <TouchableOpacity onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: selectedAreaData.id, areaName: selectedAreaData.name, isOnline: selectedAreaData.isOnline, uptime: selectedAreaData.uptime })}>
+                        <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                          <Feather name="arrow-right" size={14} color="#FFF" />
+                        </YStack>
+                      </TouchableOpacity>
+                    </XStack>
+                  </YStack>
                 )}
               </YStack>
-
-              {/* --- BIG MAP --- */}
-              <YStack paddingHorizontal={24} paddingBottom={20} zIndex={9000}>
-                <YStack position="relative" height={450} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                  <YStack flex={1} backgroundColor={isDarkMode ? "#121A16" : "#F8FAFC"}>
-                    <CustomMapView
-                      showCoverage={true}
-                      region={mapRegion}
-                      minZoomLevel={10} 
-                      zoomEnabled={false} 
-                      scrollEnabled={true} 
-                      mapBoundaries={CITY_DATA[selectedCity]} 
-                      onMarkerPress={(id) => {
-                        setSelectedAreaId(id);
-                        setSelectedStreetName(null);
-                        setIsMapSearchFocused(false);
-                      }}
-                      markers={gridItems.map((item) => ({ id: item.id, title: item.name, description: item.finalStatusText, isOnline: item.isOnline, isChecking: item.isChecking, connectionState: item.connectionState, latitude: item.lat, longitude: item.lng }))}
-                    />
-                  </YStack>
-
-                  <XStack position="absolute" top={16} left={16} right={16} zIndex={100} backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={16} paddingHorizontal={16} height={52} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                    <Feather name="search" size={18} color={theme.textSecondary} />
-                    <TextInput
-                      placeholder={`Search here for ${selectedCity} power status...`}
-                      placeholderTextColor={theme.textSecondary}
-                      style={{ flex: 1, marginLeft: 12, fontSize: 14, fontFamily: "Chirp-Medium", color: theme.textPrimary }}
-                      value={mapSearchQuery}
-                      onChangeText={(t) => {
-                        setMapSearchQuery(t);
-                        if(selectedAreaId) { setSelectedAreaId(null); setSelectedStreetName(null); }
-                      }}
-                      onFocus={() => {
-                        setIsMapSearchFocused(true);
-                        if (selectedAreaId) { setSelectedAreaId(null); setMapSearchQuery(""); }
-                      }}
-                    />
-                    {(mapSearchQuery.length > 0 || isMapSearchFocused) && (
-                      <TouchableOpacity onPress={() => { setMapSearchQuery(""); setIsMapSearchFocused(false); setSelectedAreaId(null); }}>
-                        <Feather name="x-circle" size={18} color={theme.textSecondary} />
-                      </TouchableOpacity>
-                    )}
-                  </XStack>
-
-                  {showSearchDropdown && (
-                    <YStack position="absolute" top={76} left={16} right={16} zIndex={101} backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} maxHeight={250} overflow="hidden">
-                      <ScrollView keyboardShouldPersistTaps="handled">
-                        {mapSearchQuery.length === 0 && recentMapSearch ? (
-                          <YStack>
-                            <TText paddingHorizontal={16} paddingTop={16} paddingBottom={8} fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5}>RECENT SEARCH</TText>
-                            <TouchableOpacity activeOpacity={0.7} onPress={() => handleSelectSearchResult(recentMapSearch)}>
-                              <XStack padding={16} alignItems="center">
-                                <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={16}>
-                                  <Feather name="clock" size={14} color="#00C48A" />
-                                </YStack>
-                                <YStack flex={1}>
-                                  <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} marginBottom={2} numberOfLines={1}>{recentMapSearch.displayTitle}</TText>
-                                  <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{recentMapSearch.finalStatusText || 'View Map Area'}</TText>
-                                </YStack>
-                                <TouchableOpacity onPress={() => { setRecentMapSearch(null); AsyncStorage.removeItem("strompulse_recent_map_search"); }} hitSlop={{top:10, bottom:10, left:10, right:10}}>
-                                  <Feather name="trash-2" size={16} color={theme.textSecondary} />
-                                </TouchableOpacity>
-                              </XStack>
-                            </TouchableOpacity>
-                          </YStack>
-                        ) : isSearchingApi && combinedSearchResults.length === 0 ? (
-                          <YStack padding={24} alignItems="center">
-                              <ActivityIndicator size="small" color="#00C48A" />
-                              <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary} marginTop={12}>Searching streets...</TText>
-                          </YStack>
-                        ) : combinedSearchResults.length === 0 ? (
-                          <YStack padding={24} alignItems="center">
-                              <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>No exact street found.</TText>
-                          </YStack>
-                        ) : (
-                          combinedSearchResults.map((item, idx) => (
-                            <TouchableOpacity key={`${item.id}-${idx}`} onPress={() => handleSelectSearchResult(item)}>
-                              <XStack padding={16} alignItems="center" borderBottomWidth={idx === combinedSearchResults.length - 1 ? 0 : 1} borderBottomColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                                <YStack width={32} height={32} borderRadius={16} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={16}>
-                                  <Feather name={item.isStreet ? "map-pin" : "grid"} size={14} color="#00C48A" />
-                                </YStack>
-                                <YStack flex={1}>
-                                  <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} marginBottom={2} numberOfLines={1}>{item.displayTitle}</TText>
-                                  <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{item.finalStatusText || 'View Map Area'}</TText>
-                                </YStack>
-                              </XStack>
-                            </TouchableOpacity>
-                          ))
-                        )}
-                      </ScrollView>
-                    </YStack>
-                  )}
-
-                  {selectedAreaData && (
-                    <YStack position="absolute" bottom={16} left={16} right={16} zIndex={101} backgroundColor={isDarkMode ? "rgba(18,26,22,0.95)" : "rgba(255,255,255,0.95)"} borderRadius={20} padding={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                      <XStack alignItems="center" justifyContent="space-between">
-                        <XStack alignItems="center" flex={1} marginRight={12}>
-                          <YStack width={44} height={44} borderRadius={22} backgroundColor={selectedAreaData.isChecking ? (isDarkMode ? "rgba(245,158,11,0.1)" : "#FEF3C7") : selectedAreaData.isOnline ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#D1FAE5") : (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2")} justifyContent="center" alignItems="center" marginRight={12}>
-                            {selectedAreaData.isChecking ? <ActivityIndicator size="small" color={CHECKING_COLOR} /> : <Feather name={selectedAreaData.isOnline ? "zap" : "zap-off"} size={18} color={selectedAreaData.isOnline ? "#00C48A" : "#EF4444"} />}
-                          </YStack>
-                          <YStack flex={1}>
-                            <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary} marginBottom={2} numberOfLines={1}>{selectedStreetName || selectedAreaData.name}</TText>
-                            <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{selectedAreaData.finalStatusText}</TText>
-                          </YStack>
-                        </XStack>
-                        <TouchableOpacity onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: selectedAreaData.id, areaName: selectedStreetName || selectedAreaData.name, isOnline: selectedAreaData.isOnline, uptime: selectedAreaData.uptime })}>
-                          <YStack width={40} height={40} borderRadius={20} backgroundColor={solidActionBg} justifyContent="center" alignItems="center">
-                            <Feather name="arrow-right" size={18} color={solidActionIcon} />
-                          </YStack>
-                        </TouchableOpacity>
-                      </XStack>
-                    </YStack>
-                  )}
-                </YStack>
-              </YStack>
-            </>
+            </YStack>
           )}
 
           {activeTab === "communities" && (
-            <YStack paddingBottom={20} paddingHorizontal={24}>
-              <XStack marginBottom={20} gap={10}>
-                {["All", "Stable", "Outage"].map(cat => {
-                  const isActive = activeCategory === cat;
-                  return (
-                    <TouchableOpacity key={cat} activeOpacity={0.8} onPress={() => setActiveCategory(cat as any)}>
-                      <XStack backgroundColor={isActive ? solidActionBg : (isDarkMode ? "#1A221E" : "#FFFFFF")} paddingHorizontal={16} paddingVertical={8} borderRadius={16} alignItems="center" borderWidth={1} borderColor={isActive ? "transparent" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}>
-                        <TText fontFamily="Chirp-Bold" fontSize={12} color={isActive ? solidActionIcon : theme.textSecondary}>{cat}</TText>
-                      </XStack>
-                    </TouchableOpacity>
-                  );
-                })}
+            <YStack paddingHorizontal={24}>
+              <XStack backgroundColor={cardBg} borderRadius={16} paddingHorizontal={16} height={50} alignItems="center" borderWidth={1} borderColor={divider}>
+                <Feather name="search" size={16} color={theme.textSecondary} />
+                <TextInput placeholder={`Search communities in ${selectedCity}...`} placeholderTextColor={theme.textSecondary} style={{ flex: 1, marginLeft: 12, color: theme.textPrimary, fontFamily: "Chirp-Medium" }} value={communitySearchQuery} onChangeText={setCommunitySearchQuery} />
               </XStack>
-
-              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} marginBottom={24}>
-                <XStack padding={18} alignItems="center">
-                  <Feather name="search" size={18} color={theme.textSecondary} />
-                  <TextInput placeholder={`Search ${selectedCity} communities...`} placeholderTextColor={theme.textSecondary} style={{ flex: 1, marginLeft: 16, fontSize: 15, fontFamily: "Chirp-Medium", color: theme.textPrimary }} value={communitySearchQuery} onChangeText={setCommunitySearchQuery} />
-                </XStack>
-              </YStack>
-
-              <XStack justifyContent="space-between" alignItems="center" marginBottom={12} paddingHorizontal={4}>
-                <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5}>GRID REGIONS</TText>
-              </XStack>
-
-              <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                {filteredCommunities.map((item, index) => {
-                  let color = item.isChecking ? "#F59E0B" : item.isOnline ? "#00C48A" : "#EF4444";
-                  let bg = item.isChecking ? (isDarkMode ? "rgba(245,158,11,0.1)" : "#FEF3C7") : item.isOnline ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5") : (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2");
-                  let icon = item.isChecking ? null : item.isOnline ? "zap" : "zap-off";
-                  if (item.isPartial) { color = "#F59E0B"; bg = isDarkMode ? "rgba(245,158,11,0.1)" : "#FEF3C7"; }
-                  if (item.outOfCoverage) { color = theme.textSecondary; bg = isDarkMode ? "#1A221E" : "#F8FAFC"; icon = "help-circle"; }
-
-                  let communityStatusText = item.finalStatusText;
-                  if (!item.isChecking && !item.outOfCoverage && !item.isPartial) {
-                    communityStatusText = item.isOnline ? "Power is presently available" : "Power outage presently";
-                  }
-
-                  return (
-                    <TouchableOpacity key={item.id} onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: item.id, areaName: item.name, isOnline: item.isOnline, uptime: item.uptime })}>
-                      <XStack padding={16} alignItems="center" borderBottomWidth={index === filteredCommunities.length - 1 ? 0 : 1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                        <YStack width={40} height={40} borderRadius={20} backgroundColor={bg} justifyContent="center" alignItems="center" marginRight={16}>
-                          {item.isChecking ? <ActivityIndicator size="small" color={color} /> : <Feather name={icon as any} size={18} color={color} />}
-                        </YStack>
-                        <YStack flex={1}>
-                          <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={4}>{item.name}</TText>
-                          <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{communityStatusText}</TText>
-                        </YStack>
-                        <YStack width={32} height={32} borderRadius={16} backgroundColor={solidActionBg} justifyContent="center" alignItems="center">
-                          <Feather name="arrow-right" size={14} color={solidActionIcon} />
-                        </YStack>
-                      </XStack>
-                    </TouchableOpacity>
-                  );
-                })}
-                {filteredCommunities.length === 0 && (
-                  <YStack padding={24} alignItems="center">
-                    <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary}>No communities match your search.</TText>
-                  </YStack>
-                )}
+              <YStack marginTop={16} backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor={divider} overflow="hidden">
+                {(() => {
+                  const list = cityGridItems.filter((i) => i.name.toLowerCase().includes(communitySearchQuery.toLowerCase()));
+                  if (list.length === 0) return <TText padding={20} fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} textAlign="center">No communities found in {selectedCity}.</TText>;
+                  return list.map((item, index) => {
+                    const color = statusColor(item);
+                    let icon: any = item.isOnline ? "zap" : "zap-off";
+                    if (item.outOfCoverage) icon = "help-circle";
+                    let text = item.finalStatusText;
+                    if (!item.isChecking && !item.outOfCoverage && !item.isPartial) text = item.isOnline ? "Power is presently available" : "Power outage presently";
+                    return (
+                      <TouchableOpacity key={item.id} onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: item.id, areaName: item.name, isOnline: item.isOnline, uptime: item.uptime })}>
+                        <XStack padding={16} alignItems="center" borderBottomWidth={index === list.length - 1 ? 0 : 1} borderColor={divider}>
+                          <YStack width={40} height={40} borderRadius={20} backgroundColor={`${color}22`} justifyContent="center" alignItems="center" marginRight={16}>
+                            {item.isChecking ? <ActivityIndicator size="small" color={color} /> : <Feather name={icon} size={18} color={color} />}
+                          </YStack>
+                          <YStack flex={1}>
+                            <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={4}>{item.name}</TText>
+                            <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{text}</TText>
+                          </YStack>
+                          <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                            <Feather name="arrow-right" size={14} color="#FFF" />
+                          </YStack>
+                        </XStack>
+                      </TouchableOpacity>
+                    );
+                  });
+                })()}
               </YStack>
             </YStack>
           )}
 
           {activeTab === "stats" && (
-            <YStack paddingBottom={20}>
-              {renderAccuracyBarChart()}
+            <YStack paddingHorizontal={24}>
+              {renderAnalyticsCard(`${selectedCity} Analytics`, "Average electricity uptime across the city", chartTimeRange, setChartTimeRange, "city")}
+              {renderPredictionCard("city")}
+
+              <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4} marginTop={8}>HARDWARE</TText>
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("RequestDeviceScreen")}>
+                <XStack backgroundColor={cardBg} borderRadius={24} padding={18} alignItems="center" borderWidth={1} borderColor={divider}>
+                  <Image source={require("../../assets/images/stromdevice.png")} style={{ width: 44, height: 44, resizeMode: "contain", marginRight: 16 }} />
+                  <YStack flex={1}>
+                    <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={2}>Get Personal Hardware</TText>
+                    <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Track home power flow privately</TText>
+                  </YStack>
+                  <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                    <Feather name="arrow-right" size={14} color="#FFF" />
+                  </YStack>
+                </XStack>
+              </TouchableOpacity>
             </YStack>
           )}
-
-          <YStack paddingHorizontal={24}>
-            <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>HARDWARE</TText>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("RequestDeviceScreen")}>
-              <XStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={18} alignItems="center" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                <Image source={require("../../assets/images/stromdevice.png")} style={{ width: 44, height: 44, resizeMode: 'contain', marginRight: 16 }} />
-                <YStack flex={1}>
-                  <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={2}>Get Personal Hardware</TText>
-                  <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Track home power flow privately</TText>
-                </YStack>
-                <YStack width={32} height={32} borderRadius={16} backgroundColor={solidActionBg} justifyContent="center" alignItems="center">
-                  <Feather name="arrow-right" size={14} color={solidActionIcon} />
-                </YStack>
-              </XStack>
-            </TouchableOpacity>
-          </YStack>
-
         </ScrollView>
       </SafeAreaView>
 
-      {/* --- SIDEBAR DRAWER --- */}
+      {/* ---------- HOME MODAL ---------- */}
+      <Modal visible={isLocModalVisible} animationType="slide" transparent onRequestClose={() => setIsLocModalVisible(false)}>
+        <YStack flex={1} backgroundColor="rgba(0,0,0,0.6)" justifyContent="flex-end">
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setIsLocModalVisible(false)} />
+          <YStack backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} borderTopLeftRadius={32} borderTopRightRadius={32} paddingHorizontal={24} paddingTop={16} height={height * 0.88}>
+            <XStack alignItems="center" justifyContent="center" marginBottom={16}>
+              <YStack width={40} height={4} borderRadius={2} backgroundColor={divider} />
+              <TouchableOpacity onPress={() => setIsLocModalVisible(false)} style={{ position: "absolute", right: 0 }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Feather name="x" size={20} color={theme.textSecondary} />
+              </TouchableOpacity>
+            </XStack>
+
+            {/* Two distinct, highlighted containers instead of the old "Home Dashboard" label */}
+            <XStack gap={10} marginBottom={20}>
+              {([{ key: "analytics", icon: "bar-chart-2", label: "Analytics" }, { key: "address", icon: "home", label: "Change Home Address" }] as const).map((t) => {
+                const active = homeModalTab === t.key;
+                const disabled = t.key === "analytics" && !defaultLocation;
+                return (
+                  <TouchableOpacity key={t.key} style={{ flex: 1 }} disabled={disabled} onPress={() => setHomeModalTab(t.key)}>
+                    <XStack paddingVertical={12} borderRadius={16} borderWidth={1.5} borderColor={active ? "#00C48A" : divider} backgroundColor={active ? "#00C48A" : cardBg} alignItems="center" justifyContent="center" gap={6} opacity={disabled ? 0.5 : 1}>
+                      <Feather name={t.icon as any} size={14} color={active ? "#FFF" : theme.textSecondary} />
+                      <TText fontFamily="Chirp-Bold" fontSize={12} color={active ? "#FFF" : theme.textSecondary}>{t.label}</TText>
+                    </XStack>
+                  </TouchableOpacity>
+                );
+              })}
+            </XStack>
+
+            {homeModalTab === "analytics" && defaultLocation ? (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+                <XStack backgroundColor={cardBg} borderRadius={20} padding={16} alignItems="center" borderWidth={1} borderColor="#00C48A" marginBottom={16}>
+                  <YStack width={40} height={40} borderRadius={20} backgroundColor={`${statusColor(defaultLocStatus)}22`} justifyContent="center" alignItems="center" marginRight={12}>
+                    <Feather name="home" size={18} color={statusColor(defaultLocStatus)} />
+                  </YStack>
+                  <YStack flex={1}>
+                    <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{defaultLocation.name}</TText>
+                    <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{defaultLocStatus?.finalStatusText || "Checking Status"}{defaultLocStatus && defaultLocation.isCustom ? ` · via ${defaultLocStatus.name}` : ""}</TText>
+                  </YStack>
+                </XStack>
+
+                {renderAnalyticsCard("Electricity Analytics", "How much electricity your home area has had", homeChartTimeRange, setHomeChartTimeRange, "home")}
+                {renderPredictionCard("home")}
+              </ScrollView>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+                <XStack backgroundColor={cardBg} borderRadius={16} paddingHorizontal={16} height={56} alignItems="center" borderWidth={1} borderColor={divider}>
+                  <Feather name="search" size={16} color={theme.textSecondary} />
+                  <TextInput style={{ flex: 1, marginLeft: 12, color: theme.textPrimary, fontFamily: "Chirp-Medium", fontSize: 15 }} placeholder={`Search your address in ${selectedCity}...`} placeholderTextColor={theme.textSecondary} value={locSearchQuery} onChangeText={(t) => { setLocSearchQuery(t); setSelectedLocResult(null); }} />
+                  {isLocSearching && <ActivityIndicator size="small" color="#00C48A" />}
+                  {locSearchQuery.length > 0 && !isLocSearching && (
+                    <TouchableOpacity onPress={() => { setLocSearchQuery(""); setSelectedLocResult(null); }}>
+                      <Feather name="x-circle" size={16} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </XStack>
+
+                {locSearchResults.length > 0 && (
+                  <YStack marginTop={20}>
+                    <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} marginBottom={12} letterSpacing={1.5}>ADDRESSES IN {selectedCity.toUpperCase()}</TText>
+                    <YStack backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor={divider} overflow="hidden">
+                      {locSearchResults.map((item, idx) => {
+                        const sel = selectedLocResult?.id === item.id;
+                        return (
+                          <TouchableOpacity key={item.id} onPress={() => setSelectedLocResult(item)}>
+                            <XStack padding={16} alignItems="center" borderBottomWidth={idx === locSearchResults.length - 1 ? 0 : 1} borderColor={divider} backgroundColor={sel ? (isDarkMode ? "rgba(0,196,138,0.08)" : "#F0FDF4") : "transparent"}>
+                              <Feather name="map-pin" size={14} color="#00C48A" style={{ marginRight: 12 }} />
+                              <YStack flex={1}>
+                                <TText fontFamily="Chirp-Bold" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{item.title}</TText>
+                                {!!item.subtitle && <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{item.subtitle}</TText>}
+                              </YStack>
+                              {sel && <Feather name="check-circle" size={18} color="#00C48A" />}
+                            </XStack>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </YStack>
+                  </YStack>
+                )}
+
+                <YStack marginTop={20}>
+                  <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} marginBottom={12} letterSpacing={1.5}>STROMPULSE COVERAGE AREAS</TText>
+                  <YStack backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor={divider} overflow="hidden">
+                    {(() => {
+                      const list = cityGridItems.filter((i) => i.name.toLowerCase().includes(locSearchQuery.toLowerCase()));
+                      if (list.length === 0) return <TText padding={16} fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>No coverage areas match.</TText>;
+                      return list.map((item, idx) => {
+                        const sel = selectedLocResult?.id === item.id;
+                        return (
+                          <TouchableOpacity key={item.id} onPress={() => setSelectedLocResult({ id: item.id, name: item.name, lat: item.lat, lng: item.lng, isCustom: false })}>
+                            <XStack padding={16} alignItems="center" borderBottomWidth={idx === list.length - 1 ? 0 : 1} borderColor={divider} backgroundColor={sel ? (isDarkMode ? "rgba(0,196,138,0.08)" : "#F0FDF4") : "transparent"}>
+                              <Feather name="grid" size={14} color="#00C48A" style={{ marginRight: 12 }} />
+                              <TText flex={1} fontFamily="Chirp-Bold" fontSize={14} color={theme.textPrimary}>{item.name}</TText>
+                              {sel && <Feather name="check-circle" size={18} color="#00C48A" />}
+                            </XStack>
+                          </TouchableOpacity>
+                        );
+                      });
+                    })()}
+                  </YStack>
+                </YStack>
+
+                <TouchableOpacity onPress={saveDefaultLocation} disabled={!selectedLocResult || isSavingLoc}>
+                  <YStack backgroundColor={selectedLocResult ? "#00C48A" : (isDarkMode ? "#1A221E" : "#E2E8F0")} height={56} borderRadius={16} justifyContent="center" alignItems="center" marginTop={24}>
+                    {isSavingLoc ? <ActivityIndicator color="#FFF" /> : (
+                      <TText fontFamily="Chirp-Bold" fontSize={15} color={selectedLocResult ? "#FFF" : theme.textSecondary}>{defaultLocation ? "Confirm New Home Address" : "Save Home Address"}</TText>
+                    )}
+                  </YStack>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </YStack>
+        </YStack>
+      </Modal>
+
+      {/* ---------- SIDEBAR ---------- */}
       {isSidebarOpen && (
         <YStack position="absolute" top={0} left={0} right={0} bottom={0} zIndex={99999}>
           <TouchableOpacity style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} activeOpacity={1} onPress={() => toggleSidebar(false)} />
-          <Animated.View style={{
-            position: "absolute", top: 0, bottom: 0, right: 0, width: width * 0.78,
-            backgroundColor: isDarkMode ? "#121A16" : "#FFFFFF",
-            transform: [{ translateX: sidebarAnim }],
-            paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 50,
-            paddingHorizontal: 20, borderLeftWidth: 1, borderLeftColor: isDarkMode ? "#2D3B34" : "#E2E8F0",
-            elevation: 20, shadowColor: "#000", shadowOffset: { width: -5, height: 0 }, shadowOpacity: 0.3, shadowRadius: 15,
-          }}>
+          <Animated.View style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: width * 0.78, backgroundColor: cardBg, transform: [{ translateX: sidebarAnim }], paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 24 : 50, paddingHorizontal: 20, borderLeftWidth: 1, borderLeftColor: divider }}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
               <TouchableOpacity onPress={() => toggleSidebar(false)} style={{ alignSelf: "flex-end", padding: 8, marginBottom: 12 }}>
                 <Feather name="x" size={24} color={theme.textPrimary} />
               </TouchableOpacity>
-
               <TouchableOpacity activeOpacity={0.8} onPress={() => { toggleSidebar(false); navigation.navigate("Profile"); }} style={{ flexDirection: "row", alignItems: "center", marginBottom: 28, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: isDarkMode ? "#1F2E27" : "#F1F5F9" }}>
                 {displayAvatar ? (
                   <Image source={{ uri: displayAvatar }} style={{ width: 56, height: 56, borderRadius: 28, borderWidth: 2, borderColor: "#00C48A", marginRight: 14 }} />
@@ -1245,188 +1085,6 @@ const ElectricityScreen = ({ navigation }: any) => {
           </Animated.View>
         </YStack>
       )}
-
-      {/* HOME AREA MODAL */}
-      <Modal visible={isLocModalVisible} animationType="slide" transparent={true}>
-        <YStack flex={1} backgroundColor="rgba(0,0,0,0.6)" justifyContent="flex-end">
-          <TouchableOpacity style={{ flex: 1 }} onPress={() => setIsLocModalVisible(false)} />
-          <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderTopLeftRadius={32} borderTopRightRadius={32} paddingHorizontal={24} paddingTop={24} height={height * 0.85}>
-            <YStack width={40} height={4} borderRadius={2} backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} alignSelf="center" marginBottom={24} />
-            <TText fontFamily="Chirp-Heavy" fontSize={22} color={theme.textPrimary} marginBottom={8}>Home Dashboard</TText>
-
-            {!defaultLocation ? (
-              <>
-                <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} marginBottom={24}>Enter your street or estate to lock in your live dashboard.</TText>
-                <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={16} paddingHorizontal={20} height={56} alignItems="center" marginBottom={16} borderWidth={1} borderColor={selectedLocResult ? "#00C48A" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}>
-                  <TextInput style={{ flex: 1, fontFamily: "Chirp-Medium", fontSize: 15, color: theme.textPrimary }} placeholder={`e.g. Oyo Road, ${selectedCity}`} placeholderTextColor={theme.textSecondary} value={selectedLocResult ? selectedLocResult.name : locSearchQuery} onChangeText={(text) => { if(selectedLocResult) setSelectedLocResult(null); setLocSearchQuery(text); }} />
-                  {selectedLocResult && (
-                    <TouchableOpacity onPress={() => { setSelectedLocResult(null); setLocSearchQuery(""); }}>
-                      <Feather name="x-circle" size={18} color="#00C48A" />
-                    </TouchableOpacity>
-                  )}
-                </XStack>
-
-                <TouchableOpacity onPress={saveDefaultLocation} disabled={!selectedLocResult}>
-                  <YStack backgroundColor={selectedLocResult ? solidActionBg : (isDarkMode ? "#1A221E" : "#E2E8F0")} height={56} borderRadius={16} justifyContent="center" alignItems="center" marginBottom={24}>
-                    <TText fontFamily="Chirp-Bold" fontSize={15} color={selectedLocResult ? solidActionIcon : theme.textSecondary}>Confirm Location</TText>
-                  </YStack>
-                </TouchableOpacity>
-
-                <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} marginBottom={12} textTransform="uppercase" letterSpacing={1.5}>OR SELECT FROM GRID</TText>
-
-                <YStack backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} flex={1} marginBottom={40}>
-                  <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                    {locSearchQuery.length > 2 && !selectedLocResult ? (
-                      isLocSearching ? (
-                        <ActivityIndicator size="small" color="#00C48A" style={{ marginTop: 24 }} />
-                      ) : locSearchResults.length > 0 ? (
-                        locSearchResults.map((loc, idx) => (
-                          <TouchableOpacity key={`search-${idx}`} onPress={() => setSelectedLocResult(loc)}>
-                            <XStack alignItems="center" padding={16} borderBottomWidth={idx === locSearchResults.length - 1 ? 0 : 1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                              <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={12}>
-                                <Feather name="map-pin" size={16} color="#00C48A" />
-                              </YStack>
-                              <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary} flex={1}>{loc.name}</TText>
-                            </XStack>
-                          </TouchableOpacity>
-                        ))
-                      ) : (
-                        <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} textAlign="center" marginTop={24}>No exact areas found.</TText>
-                      )
-                    ) : (
-                      gridItems.map((item, index) => (
-                        <TouchableOpacity key={item.id} onPress={() => setSelectedLocResult({ ...item, isCustom: false })}>
-                          <XStack backgroundColor={selectedLocResult?.id === item.id ? (isDarkMode ? "rgba(0,196,138,0.05)" : "#F0FDF4") : "transparent"} padding={16} alignItems="center" borderBottomWidth={index === gridItems.length - 1 ? 0 : 1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                            <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} justifyContent="center" alignItems="center" marginRight={16}>
-                              <Feather name="target" size={16} color={theme.textSecondary} />
-                            </YStack>
-                            <YStack flex={1}>
-                              <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary} marginBottom={2}>{item.name}</TText>
-                              <TText fontFamily="Chirp-Medium" fontSize={12} color={item.isOnline ? "#00C48A" : (item.isChecking ? CHECKING_COLOR : "#EF4444")}>{item.finalStatusText}</TText>
-                            </YStack>
-                            {selectedLocResult?.id === item.id && <Feather name="check" size={18} color="#00C48A" />}
-                          </XStack>
-                        </TouchableOpacity>
-                      ))
-                    )}
-                  </ScrollView>
-                </YStack>
-              </>
-            ) : (
-              <>
-                <XStack marginBottom={20} borderBottomWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
-                  <TouchableOpacity style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: homeModalTab === 'analytics' ? "#00C48A" : "transparent" }} onPress={() => setHomeModalTab('analytics')}>
-                    <TText fontFamily="Chirp-Bold" fontSize={13} color={homeModalTab === 'analytics' ? theme.textPrimary : theme.textSecondary}>Monthly Analytics</TText>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: homeModalTab === 'update' ? "#00C48A" : "transparent" }} onPress={() => setHomeModalTab('update')}>
-                    <TText fontFamily="Chirp-Bold" fontSize={13} color={homeModalTab === 'update' ? theme.textPrimary : theme.textSecondary}>Update Location</TText>
-                  </TouchableOpacity>
-                </XStack>
-
-                {homeModalTab === 'analytics' && (
-                  <ScrollView showsVerticalScrollIndicator={false}>
-                    {renderMonthlyAccuracyChart()}
-                  </ScrollView>
-                )}
-
-                {homeModalTab === 'update' && (
-                  <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                    <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={16} paddingHorizontal={20} height={56} alignItems="center" marginBottom={16} borderWidth={1} borderColor={selectedLocResult ? "#00C48A" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}>
-                      <TextInput style={{ flex: 1, fontFamily: "Chirp-Medium", fontSize: 15, color: theme.textPrimary }} placeholder="Change address..." placeholderTextColor={theme.textSecondary} value={selectedLocResult ? selectedLocResult.name : locSearchQuery} onChangeText={(text) => { if(selectedLocResult) setSelectedLocResult(null); setLocSearchQuery(text); }} />
-                      {selectedLocResult && (
-                        <TouchableOpacity onPress={() => { setSelectedLocResult(null); setLocSearchQuery(""); }}>
-                          <Feather name="x-circle" size={18} color="#00C48A" />
-                        </TouchableOpacity>
-                      )}
-                    </XStack>
-
-                    <TouchableOpacity onPress={saveDefaultLocation} disabled={!selectedLocResult}>
-                      <YStack backgroundColor={selectedLocResult ? solidActionBg : (isDarkMode ? "#1A221E" : "#E2E8F0")} height={56} borderRadius={16} justifyContent="center" alignItems="center" marginBottom={24}>
-                        <TText fontFamily="Chirp-Bold" fontSize={15} color={selectedLocResult ? solidActionIcon : theme.textSecondary}>Confirm New Location</TText>
-                      </YStack>
-                    </TouchableOpacity>
-
-                    <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} marginBottom={12} textTransform="uppercase" letterSpacing={1.5}>OR SELECT FROM GRID</TText>
-
-                    <YStack backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} flex={1} marginBottom={40}>
-                      {locSearchQuery.length > 2 && !selectedLocResult ? (
-                        isLocSearching ? (
-                          <ActivityIndicator size="small" color="#00C48A" style={{ marginTop: 24 }} />
-                        ) : locSearchResults.length > 0 ? (
-                          locSearchResults.map((loc, idx) => (
-                            <TouchableOpacity key={`search-${idx}`} onPress={() => setSelectedLocResult(loc)}>
-                              <XStack alignItems="center" padding={16} borderBottomWidth={idx === locSearchResults.length - 1 ? 0 : 1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                                <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={12}>
-                                  <Feather name="map-pin" size={16} color="#00C48A" />
-                                </YStack>
-                                <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary} flex={1}>{loc.name}</TText>
-                              </XStack>
-                            </TouchableOpacity>
-                          ))
-                        ) : (
-                          <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} textAlign="center" marginTop={24}>No exact areas found.</TText>
-                        )
-                      ) : (
-                        gridItems.map((item, index) => (
-                          <TouchableOpacity key={item.id} onPress={() => setSelectedLocResult({ ...item, isCustom: false })}>
-                            <XStack backgroundColor={selectedLocResult?.id === item.id ? (isDarkMode ? "rgba(0,196,138,0.05)" : "#F0FDF4") : "transparent"} padding={16} alignItems="center" borderBottomWidth={index === gridItems.length - 1 ? 0 : 1} borderColor={isDarkMode ? "#2D3B34" : "#F1F5F9"}>
-                              <YStack width={36} height={36} borderRadius={18} backgroundColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} justifyContent="center" alignItems="center" marginRight={16}>
-                                <Feather name="target" size={16} color={theme.textSecondary} />
-                              </YStack>
-                              <YStack flex={1}>
-                                <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary} marginBottom={2}>{item.name}</TText>
-                                <TText fontFamily="Chirp-Medium" fontSize={12} color={item.isOnline ? "#00C48A" : (item.isChecking ? CHECKING_COLOR : "#EF4444")}>{item.finalStatusText}</TText>
-                              </YStack>
-                              {selectedLocResult?.id === item.id && <Feather name="check" size={18} color="#00C48A" />}
-                            </XStack>
-                          </TouchableOpacity>
-                        ))
-                      )}
-                    </YStack>
-                  </ScrollView>
-                )}
-              </>
-            )}
-          </YStack>
-        </YStack>
-      </Modal>
-
-      {/* REPORT MODAL */}
-      <Modal visible={isReportModalVisible} animationType="slide" transparent={true}>
-        <YStack flex={1} backgroundColor="rgba(0,0,0,0.6)" justifyContent="flex-end">
-          <TouchableOpacity style={{ flex: 1 }} onPress={() => setIsReportModalVisible(false)} />
-          <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderTopLeftRadius={32} borderTopRightRadius={32} padding={24}>
-            <YStack width={40} height={4} borderRadius={2} backgroundColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} alignSelf="center" marginBottom={24} />
-            <TText fontFamily="Chirp-Heavy" fontSize={22} color={theme.textPrimary} marginBottom={8}>Report Power Status</TText>
-            <TText fontFamily="Chirp-Medium" fontSize={14} color={theme.textSecondary} marginBottom={24}>Your report helps other Stromers see what's happening.</TText>
-
-            <XStack backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={16} paddingHorizontal={20} height={56} alignItems="center" marginBottom={16} borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
-              <TextInput style={{ flex: 1, fontFamily: "Chirp-Medium", fontSize: 15, color: theme.textPrimary }} placeholder="e.g. UI / Abadina" placeholderTextColor={theme.textSecondary} value={reportArea} onChangeText={setReportArea} />
-            </XStack>
-
-            <XStack gap={12} marginBottom={24}>
-              <TouchableOpacity style={{ flex: 1 }} onPress={() => setReportStatus("stable")}>
-                <XStack height={56} borderRadius={16} alignItems="center" justifyContent="center" backgroundColor={reportStatus === "stable" ? (isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5") : (isDarkMode ? "#1A221E" : "#FFF")} borderWidth={1} borderColor={reportStatus === "stable" ? "#00C48A" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}>
-                  <TText fontFamily="Chirp-Bold" fontSize={14} color={reportStatus === "stable" ? "#00C48A" : theme.textSecondary}>Stable</TText>
-                </XStack>
-              </TouchableOpacity>
-              <TouchableOpacity style={{ flex: 1 }} onPress={() => setReportStatus("outage")}>
-                <XStack height={56} borderRadius={16} alignItems="center" justifyContent="center" backgroundColor={reportStatus === "outage" ? (isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2") : (isDarkMode ? "#1A221E" : "#FFF")} borderWidth={1} borderColor={reportStatus === "outage" ? "#EF4444" : (isDarkMode ? "#2D3B34" : "#E2E8F0")}>
-                  <TText fontFamily="Chirp-Bold" fontSize={14} color={reportStatus === "outage" ? "#EF4444" : theme.textSecondary}>Outage</TText>
-                </XStack>
-              </TouchableOpacity>
-            </XStack>
-
-            <TouchableOpacity onPress={handleSendReport} disabled={!reportArea || !reportStatus}>
-              <XStack backgroundColor={(!reportArea || !reportStatus) ? (isDarkMode ? "#1A221E" : "#E2E8F0") : solidActionBg} height={56} borderRadius={16} justifyContent="center" alignItems="center" marginBottom={Platform.OS === 'ios' ? 20 : 0}>
-                <Feather name="send" size={18} color={(!reportArea || !reportStatus) ? theme.textSecondary : solidActionIcon} style={{ marginRight: 8 }} />
-                <TText fontFamily="Chirp-Bold" fontSize={15} color={(!reportArea || !reportStatus) ? theme.textSecondary : solidActionIcon}>Send via WhatsApp</TText>
-              </XStack>
-            </TouchableOpacity>
-          </YStack>
-        </YStack>
-      </Modal>
-
     </YStack>
   );
 };

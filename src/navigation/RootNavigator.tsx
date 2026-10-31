@@ -34,6 +34,7 @@ import PrivateDashboardInternalScreen from "../screens/PrivateDashboardInternalS
 import LinkPhoneScreen from "../screens/LinkPhoneScreen";
 import LiveTrackingScreen from "../screens/LiveTrackingScreen";
 import EmergencyMapScreen from "../screens/EmergencyMapScreen";
+import EmergencyDirectionScreen from "../screens/EmergencyDirectionScreen";
 
 // --- NEW SAFETY SUB-SCREENS ---
 import SafetyToolsScreen from "../screens/SafetyToolsScreen";
@@ -308,6 +309,9 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
       <Stack.Screen name="CommunityZonesScreen" component={CommunityZonesScreen} />
       <Stack.Screen name="LiveTrackingScreen" component={LiveTrackingScreen} />
       <Stack.Screen name="EmergencyMapScreen" component={EmergencyMapScreen} />
+      <Stack.Screen name="EmergencyDirectionScreen" component={EmergencyDirectionScreen} />
+      {/* Alias so any older "EmergencyDirectionsScreen" link still works */}
+      <Stack.Screen name="EmergencyDirectionsScreen" component={EmergencyDirectionScreen} />
       
       {/* --- NEW PROFILE SUB-SCREENS --- */}
       <Stack.Screen name="MyActivityScreen" component={MyActivityScreen} />

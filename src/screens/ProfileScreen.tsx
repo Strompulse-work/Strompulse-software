@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import AuthService from "../services/authService";
 import { useTheme } from "../theme/ThemeContext";
 import { User } from "../types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import { loadSecuritySettings } from "../utils/securityConfig";
 
 const ProfileScreen = ({ navigation, route }: any) => {
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
@@ -28,7 +30,10 @@ const ProfileScreen = ({ navigation, route }: any) => {
   const [loading, setLoading] = useState(true);
   const [currentLocation, setCurrentLocation] = useState<string>("Locating...");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
-  const [fullName, setFullName] = useState<string>("Explorer");
+  const [fullName, setFullName] = useState<string>("Stromer");
+  const [contactCount, setContactCount] = useState<number>(0);
+  const [deviceCount, setDeviceCount] = useState<number>(0);
+  const [favoriteName, setFavoriteName] = useState<string>("");
 
   // Real-time updates from Settings Screen
   useEffect(() => {
@@ -47,7 +52,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
         const session = await AuthService.getCurrentSession();
         if (session) {
           setUser(session.user);
-          setFullName(session.user.full_name || "Afolabi Taiwo Glory"); // Default fallback
+          setFullName(session.user.full_name || (session.user as any).user_metadata?.full_name || "Stromer");
           if (!avatarUri && session.user.avatar_url) {
             setAvatarUri(session.user.avatar_url);
           }
@@ -93,6 +98,31 @@ const ProfileScreen = ({ navigation, route }: any) => {
     initializeProfile();
   }, []);
 
+  // Refresh name/avatar + safety/device summaries every time the tab is opened
+  // (e.g. after Edit Profile, adding emergency contacts or linking a device)
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const [localName, localAvatar, contactsRaw, devicesRaw, settings] = await Promise.all([
+            AsyncStorage.getItem("global_name"),
+            AsyncStorage.getItem("global_avatar"),
+            AsyncStorage.getItem("strompulse_emergency_contacts"),
+            AsyncStorage.getItem("strompulse_linked_devices"),
+            loadSecuritySettings(),
+          ]);
+          if (localName) setFullName(localName);
+          if (localAvatar) setAvatarUri(localAvatar);
+          const contacts = contactsRaw ? JSON.parse(contactsRaw) : [];
+          setContactCount(Array.isArray(contacts) ? contacts.length : 0);
+          const devices = devicesRaw ? JSON.parse(devicesRaw) : [];
+          setDeviceCount(Array.isArray(devices) ? devices.length : 0);
+          setFavoriteName(settings?.favoriteContactName || "");
+        } catch (e) {}
+      })();
+    }, [])
+  );
+
   const handleLogoutPress = () => {
     Alert.alert(
       "Log Out",
@@ -123,7 +153,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
     );
   }
 
-  const MenuCard = ({ icon, title, rightElement, onPress, isLast = false, isDestructive = false }: any) => (
+  const MenuCard = ({ icon, title, subtitle, rightElement, onPress, isLast = false, isDestructive = false }: any) => (
     <TouchableOpacity
       style={[styles.menuItem, !isLast && styles.menuItemBorder]}
       onPress={onPress}
@@ -132,7 +162,10 @@ const ProfileScreen = ({ navigation, route }: any) => {
     >
       <View style={styles.menuItemLeft}>
         <MaterialCommunityIcons name={icon} size={22} color={isDestructive ? "#EF4444" : theme.textPrimary} style={{ marginRight: 16 }} />
-        <Text style={[styles.menuTitle, isDestructive && { color: "#EF4444" }]}>{title}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.menuTitle, isDestructive && { color: "#EF4444" }]}>{title}</Text>
+          {subtitle ? <Text style={styles.menuSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+        </View>
       </View>
       {rightElement ? (
         rightElement
@@ -154,9 +187,8 @@ const ProfileScreen = ({ navigation, route }: any) => {
 
       {/* Clean Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textPrimary} />
-        </TouchableOpacity>
+        {/* Profile is a tab, so there is nothing to go "back" to — keep the title centred */}
+        <View style={styles.iconBtn} />
         <Text style={styles.headerTitle}>Profile</Text>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate("Notifications")}>
           <MaterialCommunityIcons name="bell" size={22} color={theme.textPrimary} />
@@ -186,12 +218,33 @@ const ProfileScreen = ({ navigation, route }: any) => {
           <Text style={styles.userLocation}>{currentLocation}</Text>
         </View>
 
+        {/* Safety & devices */}
+        <Text style={styles.groupLabel}>SAFETY & DEVICES</Text>
+        <MenuGroup>
+          <MenuCard
+            icon="account-group"
+            title="Emergency Contacts"
+            subtitle={contactCount > 0 ? `${contactCount} contact${contactCount === 1 ? "" : "s"}${favoriteName ? ` · Favorite: ${favoriteName}` : ""}` : "Add people to alert in an emergency"}
+            onPress={() => navigation.navigate("ContactsScreen")}
+          />
+          <MenuCard icon="shield-lock" title="Security Preferences" subtitle="SOS delivery, emergency numbers, auto-sharing" onPress={() => navigation.navigate("SafetySettingsScreen")} />
+          <MenuCard
+            icon="chip"
+            title="My Devices"
+            subtitle={deviceCount > 0 ? `${deviceCount} linked device${deviceCount === 1 ? "" : "s"}` : "Link your StromPulse device with its access code"}
+            isLast={true}
+            onPress={() => navigation.navigate("Stromer")}
+          />
+        </MenuGroup>
+
         {/* Menu Groups */}
+        <Text style={styles.groupLabel}>ACCOUNT</Text>
         <MenuGroup>
           <MenuCard icon="clock-time-four" title="My Activity" onPress={() => navigation.navigate("MyActivityScreen")} />
           <MenuCard icon="bookmark" title="My Subscriptions" isLast={true} onPress={() => navigation.navigate("MySubscriptionsScreen")} />
         </MenuGroup>
 
+        <Text style={styles.groupLabel}>SETTINGS</Text>
         <MenuGroup>
           <MenuCard icon="cog" title="Edit Profile" onPress={() => navigation.navigate("SettingsScreen", { currentName: fullName, currentImage: avatarUri })} />
           <MenuCard icon="shield-check" title="Privacy & Security" onPress={() => navigation.navigate("PrivacySecurityScreen")} />
@@ -210,6 +263,7 @@ const ProfileScreen = ({ navigation, route }: any) => {
           />
         </MenuGroup>
 
+        <Text style={styles.groupLabel}>SUPPORT</Text>
         <MenuGroup>
           <MenuCard icon="information" title="About Strompulse" onPress={() => navigation.navigate("AboutScreen")} />
           <MenuCard icon="help-circle" title="Help & Support" isLast={true} onPress={() => navigation.navigate("HelpSupportScreen")} />
@@ -301,8 +355,11 @@ const getStyles = (theme: any, isDarkMode: boolean) => StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: isDarkMode ? "#1F2E27" : "#F1F5F9",
   },
-  menuItemLeft: { flexDirection: "row", alignItems: "center" },
+  menuItemLeft: { flexDirection: "row", alignItems: "center", flex: 1, paddingRight: 10 },
   menuTitle: { fontSize: 14, fontFamily: "Chirp-Bold", color: theme.textPrimary },
+
+  menuSubtitle: { fontSize: 11, fontFamily: "Chirp-Medium", color: theme.textSecondary, marginTop: 2 },
+  groupLabel: { fontSize: 11, fontFamily: "Chirp-Bold", color: theme.textSecondary, letterSpacing: 1.5, marginHorizontal: 24, marginBottom: 10 },
 
   versionText: {
     textAlign: "center",

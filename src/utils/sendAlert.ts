@@ -1,50 +1,88 @@
-import { supabase } from '../config/supabase';
+// src/utils/sendAlert.ts
+import { supabase } from "../config/supabase";
+import { normalizePhone } from "./securityConfig";
+
+export type AlertType = "emergency" | "journey_start" | "journey_end" | "location_share";
+
+/** Optional structured info saved with the alert (only if your `alerts` table has a `data` jsonb column). */
+export interface AlertExtra {
+  lat?: number;
+  lng?: number;
+  senderName?: string;
+  [key: string]: any;
+}
+
+// Cleans, converts to +234 format and removes duplicates/invalid numbers
+const prepareRecipients = (recipients: string | string[]) => {
+  const list = Array.isArray(recipients) ? recipients : [recipients];
+  const cleaned = list
+    .filter((p) => typeof p === "string" && p.replace(/[^0-9]/g, "").length >= 7)
+    .map((p) => normalizePhone(p));
+  return Array.from(new Set(cleaned));
+};
+
+// getSession reads the saved login instantly (no network round-trip) — important for time-sensitive SOS.
+const getSenderId = async (): Promise<string | null> => {
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData?.session?.user?.id) return sessionData.session.user.id;
+  const { data: userData } = await supabase.auth.getUser();
+  return userData?.user?.id ?? null;
+};
 
 /**
- * Triggers an alert which automatically fires the Supabase Push Notification Webhook.
- * 
- * @param type 'emergency' | 'journey_start'
- * @param title The title of the notification (e.g., "SOS from Taiwo")
- * @param message The body text of the notification
- * @param recipientPhones Array of phone numbers to notify
+ * Inserts ONE row into `alerts`; your Supabase webhook then pushes it to `recipient_phones`.
+ *
+ * @param type        'emergency' | 'journey_start' | 'journey_end' | 'location_share'
+ * @param title       Notification title, e.g. "SOS alert from Taiwo"
+ * @param message     Notification body
+ * @param recipients  One phone number or an array of them (any format — normalized to +234…)
+ * @param extra       Optional structured data (coordinates, sender name)
+ * @returns true if the alert was saved
  */
 export async function sendPushAlert(
-  type: 'emergency' | 'journey_start', 
-  title: string, 
-  message: string, 
-  recipientPhones: string[]
-) {
+  type: AlertType,
+  title: string,
+  message: string,
+  recipients: string | string[],
+  extra?: AlertExtra
+): Promise<boolean> {
   try {
-    // 1. Get the SENDER'S user_id to satisfy Row-Level Security
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      console.error("No user logged in to send alert.");
+    const recipientPhones = prepareRecipients(recipients);
+    if (recipientPhones.length === 0) {
+      console.warn("[sendPushAlert] No valid recipient phone numbers — alert not sent.");
       return false;
     }
 
-    // 2. Insert ONE row with the sender's ID and the recipients' phone numbers
-    const { error } = await supabase
-      .from('alerts')
-      .insert([
-        {
-          type: type,
-          title: title,
-          message: message,
-          user_id: user.id, // SENDER'S ID stops the UUID and RLS crashes
-          recipient_phones: recipientPhones 
-        }
-      ]);
+    const userId = await getSenderId();
+    if (!userId) {
+      console.error("[sendPushAlert] No user logged in to send alert.");
+      return false;
+    }
+
+    const row: Record<string, any> = {
+      type,
+      title,
+      message,
+      user_id: userId, // sender's id — satisfies RLS and lets recipients open "Follow Their Journey"
+      recipient_phones: recipientPhones,
+    };
+    if (extra && Object.keys(extra).length > 0) row.data = extra;
+
+    let { error } = await supabase.from("alerts").insert([row]);
+
+    // If the table has no `data` column, retry without it so the alert is never lost
+    if (error && row.data && /data|column|schema cache/i.test(error.message)) {
+      delete row.data;
+      ({ error } = await supabase.from("alerts").insert([row]));
+    }
 
     if (error) {
-      console.error('Failed to trigger alert:', error.message);
+      console.error("[sendPushAlert] Failed to save alert:", error.message);
       return false;
     }
-    
-    console.log('Alert saved to database. Webhook must now process recipient_phones.');
     return true;
   } catch (err) {
-    console.error('Unexpected error sending alert:', err);
+    console.error("[sendPushAlert] Unexpected error:", err);
     return false;
   }
 }
