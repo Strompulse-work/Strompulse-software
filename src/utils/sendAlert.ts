@@ -1,6 +1,7 @@
 // src/utils/sendAlert.ts
 import { supabase } from "../config/supabase";
 import { normalizePhone } from "./securityConfig";
+import { getMyIdentity, phoneKey } from "./myIdentity";
 
 export type AlertType = "emergency" | "journey_start" | "journey_end" | "location_share";
 
@@ -12,13 +13,20 @@ export interface AlertExtra {
   [key: string]: any;
 }
 
-// Cleans, converts to +234 format and removes duplicates/invalid numbers
-const prepareRecipients = (recipients: string | string[]) => {
+// Cleans, converts to +234 format, removes duplicates/invalid numbers and the sender's own number
+const prepareRecipients = (recipients: string | string[], myKey = "") => {
   const list = Array.isArray(recipients) ? recipients : [recipients];
-  const cleaned = list
-    .filter((p) => typeof p === "string" && p.replace(/[^0-9]/g, "").length >= 7)
-    .map((p) => normalizePhone(p));
-  return Array.from(new Set(cleaned));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of list) {
+    if (typeof p !== "string" || p.replace(/[^0-9]/g, "").length < 7) continue;
+    const n = normalizePhone(p);
+    const k = phoneKey(n) || n;
+    if (seen.has(k) || (myKey && k === myKey)) continue; // never alert yourself, never twice
+    seen.add(k);
+    out.push(n);
+  }
+  return out;
 };
 
 // getSession reads the saved login instantly (no network round-trip) — important for time-sensitive SOS.
@@ -47,7 +55,9 @@ export async function sendPushAlert(
   extra?: AlertExtra
 ): Promise<boolean> {
   try {
-    const recipientPhones = prepareRecipients(recipients);
+    let myKey = "";
+    try { myKey = (await getMyIdentity()).phoneKey; } catch {}
+    const recipientPhones = prepareRecipients(recipients, myKey);
     if (recipientPhones.length === 0) {
       console.warn("[sendPushAlert] No valid recipient phone numbers — alert not sent.");
       return false;

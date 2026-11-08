@@ -33,27 +33,52 @@ export const formatHourLabel = (h: number) => `${h % 12 || 12}${h < 12 ? "am" : 
 export const xTitleFor = (r: Range) => (r === "Today" ? "Hour of day" : r === "This Week" ? "Day of week" : "Week of month");
 
 // ---------------- uptime maths ----------------
-export const buildUpIntervalsFromHistory = (historyNode: any, isOnline: boolean, nowMs: number) => {
+// Each history entry = one "power ON" session. The KEY is when power was restored.
+// Fields inside the entry (last_seen / timestamp / durationSeconds) describe when that session ENDED
+// and are updated by the device while it runs — they must never be used as the session start.
+// (Using entry.timestamp as the start is what made 12am–noon drop to 0% later in the day.)
+const SESSION_FALLBACK_MAX_MS = 24 * 60 * 60 * 1000;
+const toMs = (v: any): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return v < 1e12 ? v * 1000 : v; // seconds or ms
+  const d = parseStromTimestamp(String(v));
+  return d ? d.getTime() : null;
+};
+export const buildUpIntervalsFromHistory = (historyNode: any, isOnline: boolean, nowMs: number, lastSeenMs: number | null = null) => {
   if (!historyNode) return [];
-  const events = Object.keys(historyNode)
+  const sessions = Object.keys(historyNode)
     .map((key) => {
       const entry = historyNode[key];
-      const tsSource = entry && typeof entry === "object" && entry.timestamp ? entry.timestamp : key;
-      const parsed = parseStromTimestamp(String(tsSource));
-      return parsed ? parsed.getTime() : null;
+      const obj = entry && typeof entry === "object" ? entry : {};
+      const start = toMs(key) ?? toMs(obj.start) ?? toMs(obj.started_at) ?? toMs(obj.restored_at);
+      if (start === null) return null;
+      let end = toMs(obj.last_seen) ?? toMs(obj.ended_at) ?? toMs(obj.end);
+      if (end === null && typeof obj.durationSeconds === "number") end = start + obj.durationSeconds * 1000;
+      if (end === null) {
+        const ts = toMs(obj.timestamp);
+        if (ts !== null && ts > start) end = ts;
+      }
+      return { start, end: end !== null && end > start ? end : null };
     })
-    .filter((ts): ts is number => typeof ts === "number" && !Number.isNaN(ts))
-    .sort((a, b) => a - b);
+    .filter((s): s is { start: number; end: number | null } => !!s && !Number.isNaN(s.start))
+    .sort((a, b) => a.start - b.start);
+
   const intervals: Array<{ start: number; end: number }> = [];
-  for (let i = 0; i < events.length; i++) {
-    const start = events[i];
-    if (i === events.length - 1) {
-      const end = isOnline ? nowMs : start;
-      if (end > start) intervals.push({ start, end });
-      continue;
+  for (let i = 0; i < sessions.length; i++) {
+    const { start, end: recordedEnd } = sessions[i];
+    const nextStart = i < sessions.length - 1 ? sessions[i + 1].start : null;
+    let end: number;
+    if (nextStart === null) {
+      // Latest session: still running if the device is online right now
+      // Offline: it ended at the recorded end, or at the device's last heartbeat
+      end = isOnline ? nowMs : recordedEnd ?? (lastSeenMs !== null && lastSeenMs > start ? lastSeenMs : start);
+    } else if (recordedEnd !== null) {
+      end = Math.min(recordedEnd, nextStart);
+    } else {
+      // No end recorded: assume power stayed on until the next restore (capped so one bad gap can't fill a whole day)
+      end = Math.min(nextStart, start + SESSION_FALLBACK_MAX_MS);
     }
-    const gap = events[i + 1] - start;
-    const end = gap <= MAX_TRUSTED_GAP_MS ? events[i + 1] : start;
+    end = Math.min(end, nowMs);
     if (end > start) intervals.push({ start, end });
   }
   return intervals;
@@ -77,7 +102,10 @@ export const calculateIntervalUptime = (device: any, startMs: number, endMs: num
   if (durationMs <= 0) return null;
   const hasHistory = device?.history && Object.keys(device.history).length > 0;
   if (!hasHistory) return device?.isOnline ? 100 : 0;
-  const intervals = buildUpIntervalsFromHistory(device.history, !!device.isOnline, nowMs);
+  const intervals = buildUpIntervalsFromHistory(
+    device.history, !!device.isOnline, nowMs,
+    toMs(device.updated_at ?? device.lastSeen ?? device.realtime?.serverReceivedAt ?? device.realtime?.timestamp ?? null)
+  );
   return Math.max(0, Math.min(100, Math.round((sumOverlapMs(intervals, startMs, clampedEnd) / durationMs) * 100)));
 };
 

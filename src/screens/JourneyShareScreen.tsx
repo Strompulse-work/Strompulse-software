@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   StatusBar, TouchableOpacity, Platform, TextInput,
-  ScrollView, Alert, SafeAreaView, StyleSheet, ActivityIndicator, Switch
+  ScrollView, Alert, SafeAreaView, StyleSheet, ActivityIndicator, Switch, Keyboard
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather } from "@expo/vector-icons";
@@ -31,6 +31,8 @@ const ROUTE_REFRESH_MS = 60 * 1000;   // re-query directions at most once a minu
 const UPLOAD_INTERVAL_MS = 15 * 1000; // push live position to followers every 15s max
 
 const GOOGLE_API_KEY = Platform.OS === "ios" ? "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA" : "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo";
+
+let journeyPhonesColumn = true; // false until journey_recipients SQL has been run
 
 const delayToMs = (d: string) => ({ "15 min": 15, "30 min": 30, "1 hr": 60, "2 hr": 120, "5 hr": 300 } as Record<string, number>)[d] * 60000 || 30 * 60000;
 
@@ -85,11 +87,11 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
   const uploadLiveLocation = async (lat: number, lng: number, active = true, force = false) => {
     if (!force && Date.now() - lastUploadRef.current < UPLOAD_INTERVAL_MS) return;
     lastUploadRef.current = Date.now();
+    const meta = metaRef.current || {}; // read before any await — the journey may be ending
     try {
       const { id, name } = await getUserInfo();
       if (!id) return;
-      const meta = metaRef.current || {};
-      await supabase.from("journey_locations").upsert({
+      const row: any = {
         user_id: id,
         sender_name: name,
         lat, lng,
@@ -103,7 +105,15 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
         started_at: meta.startedAt ? new Date(meta.startedAt).toISOString() : null,
         is_active: active,
         updated_at: new Date().toISOString(),
-      });
+      };
+      // Only the contacts selected for THIS journey may follow it
+      if (journeyPhonesColumn && meta.recipientPhones) row.journey_phones = meta.recipientPhones;
+      let { error } = await supabase.from("journey_locations").upsert(row);
+      if (error && /journey_phones/.test(error.message || "")) {
+        journeyPhonesColumn = false;
+        delete row.journey_phones;
+        ({ error } = await supabase.from("journey_locations").upsert(row));
+      }
     } catch (e) {
       // table missing or offline — journey still works locally
     }
@@ -222,20 +232,59 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
       const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, { headers });
       const data = await res.json();
       if (data.location) {
-        const dest = { lat: data.location.latitude, lng: data.location.longitude };
-        setDestinationCoords(dest);
-        destRef.current = dest;
-        let start = currentCoords;
-        if (!start) {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          start = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-          setCurrentCoords(start);
-        }
-        const km = await fetchRouteData(start.lat, start.lng, dest.lat, dest.lng);
-        if (km) setTotalKm(km);
+        await routeToDestination({ lat: data.location.latitude, lng: data.location.longitude });
       }
     } catch (e) {
       Alert.alert("Error", "Could not fetch location details.");
+      setCalculatedEtaText("ETA Unavailable");
+    } finally {
+      setIsSearchingRoute(false);
+    }
+  };
+
+  // Shared by search, map tap, POI tap and pin drag: sets the destination, fills the search bar and calculates the ETA
+  const routeToDestination = async (dest: { lat: number; lng: number }) => {
+    setDestinationCoords(dest);
+    destRef.current = dest;
+    let start = currentCoords;
+    if (!start) {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      start = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+      setCurrentCoords(start);
+    }
+    const km = await fetchRouteData(start.lat, start.lng, dest.lat, dest.lng);
+    if (km) setTotalKm(km);
+  };
+
+  const describeCoordinate = async (lat: number, lng: number) => {
+    try {
+      const res = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      const a = res?.[0];
+      if (a) {
+        const street = [a.streetNumber, a.street].filter(Boolean).join(" ") || a.name;
+        const area = a.district || a.subregion || a.city;
+        const label = [street, area].filter(Boolean).join(", ");
+        if (label) return label;
+      }
+    } catch {}
+    return `Dropped pin (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+  };
+
+  const pickDestinationOnMap = async (lat: number, lng: number, knownName?: string) => {
+    if (isActive) return; // destination is locked once the journey starts
+    Keyboard.dismiss();
+    setSearchResults([]);
+    setIsSearchingRoute(true);
+    const dest = { lat, lng };
+    setDestinationCoords(dest); // set first so the search box doesn't start an autocomplete
+    destRef.current = dest;
+    setSearchQuery(knownName || "Finding address...");
+    try {
+      const name = knownName || (await describeCoordinate(lat, lng));
+      setSearchQuery(name);
+      setDestinationName(name);
+      await routeToDestination(dest);
+    } catch (e) {
       setCalculatedEtaText("ETA Unavailable");
     } finally {
       setIsSearchingRoute(false);
@@ -290,8 +339,8 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
   const recipients = () => allContacts.filter((c) => selectedContacts.has(c.id));
 
   // Same recipient format as SOS (normalized phone numbers), sent in one call so alerts arrive together
-  const pushToAll = (type: string, title: string, body: string, list: any[]) =>
-    Promise.resolve(sendPushAlert(type as any, title, body, list.map((c) => normalizePhone(c.phone)) as any)).catch(() => {});
+  const pushToAll = (type: string, title: string, body: string, list: any[], extra?: any) =>
+    Promise.resolve(sendPushAlert(type as any, title, body, list.map((c) => normalizePhone(c.phone)) as any, extra)).catch(() => {});
 
   const startSharing = async () => {
     if (selectedContacts.size === 0) {
@@ -304,7 +353,8 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     }
     const startedAt = Date.now();
     const endTime = startedAt + calculatedEtaMs;
-    const meta = { destinationName, destinationCoords, startCoords: currentCoords, totalKm: totalKm ?? remainingKm, startedAt, endTime, etaText: calculatedEtaText };
+    const recipientPhones = recipients().map((c) => normalizePhone(c.phone));
+    const meta = { destinationName, destinationCoords, startCoords: currentCoords, totalKm: totalKm ?? remainingKm, startedAt, endTime, etaText: calculatedEtaText, recipientPhones };
     metaRef.current = meta;
 
     setIsActive(true);
@@ -326,7 +376,11 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     // Notifications are fired in parallel and not awaited, so the UI never waits on them
     const { name } = await getUserInfo();
     const body = `Heading to ${destinationName}. Estimated arrival in ${calculatedEtaText}.${currentCoords ? ` Start: ${googleMapsLink(currentCoords.lat, currentCoords.lng)}` : ""}`;
-    pushToAll("journey_start", `${name} started a journey`, body, recipients());
+    pushToAll("journey_start", `${name} started a journey`, body, recipients(), {
+      kind: "journey", senderName: name,
+      ...(currentCoords ? { lat: currentCoords.lat, lng: currentCoords.lng } : {}),
+      destName: destinationName,
+    });
   };
 
   const sendDelaySms = async (message: string, phones: string[]) => {
@@ -421,6 +475,16 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                 provider={PROVIDER_GOOGLE}
                 initialRegion={{ latitude: currentCoords.lat, longitude: currentCoords.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
                 userInterfaceStyle={isDarkMode ? "dark" : "light"}
+                onPress={(e) => {
+                  // Taps on markers/POIs are handled by their own handlers
+                  if ((e.nativeEvent as any).action === "marker-press") return;
+                  const { latitude, longitude } = e.nativeEvent.coordinate;
+                  pickDestinationOnMap(latitude, longitude);
+                }}
+                onPoiClick={(e) => {
+                  const { coordinate, name } = e.nativeEvent;
+                  pickDestinationOnMap(coordinate.latitude, coordinate.longitude, name?.replace(/\n/g, " "));
+                }}
               >
                 <Marker coordinate={{ latitude: currentCoords.lat, longitude: currentCoords.lng }}>
                   <YStack width={20} height={20} borderRadius={10} backgroundColor="rgba(0,196,138,0.3)" justifyContent="center" alignItems="center">
@@ -428,7 +492,11 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                   </YStack>
                 </Marker>
                 {destinationCoords && (
-                  <Marker coordinate={{ latitude: destinationCoords.lat, longitude: destinationCoords.lng }}>
+                  <Marker
+                    coordinate={{ latitude: destinationCoords.lat, longitude: destinationCoords.lng }}
+                    draggable={!isActive}
+                    onDragEnd={(e) => pickDestinationOnMap(e.nativeEvent.coordinate.latitude, e.nativeEvent.coordinate.longitude)}
+                  >
                     <YStack width={24} height={24} borderRadius={12} backgroundColor="#EF4444" justifyContent="center" alignItems="center" borderWidth={2} borderColor="#FFF">
                       <Feather name="map-pin" size={12} color="#FFF" />
                     </YStack>
@@ -474,6 +542,15 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                     </ScrollView>
                   </YStack>
                 )}
+              </YStack>
+            )}
+
+            {!isActive && !destinationCoords && searchResults.length === 0 && currentCoords && (
+              <YStack position="absolute" bottom={12} alignSelf="center" backgroundColor={isDarkMode ? "rgba(26,34,30,0.92)" : "rgba(255,255,255,0.95)"} borderRadius={14} paddingHorizontal={12} paddingVertical={6} borderWidth={1} borderColor={divider} pointerEvents="none">
+                <XStack alignItems="center" gap={6}>
+                  <Feather name="map-pin" size={11} color="#00C48A" />
+                  <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textPrimary}>Or tap the map to set your destination</TText>
+                </XStack>
               </YStack>
             )}
           </YStack>

@@ -8,6 +8,12 @@ import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 
 const GOOGLE_API_KEY = Platform.OS === "ios" ? "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA" : "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo";
 const RANK_LABELS = ["Closest", "Second closest", "Third closest"];
+type PlaceType = "hospital" | "pharmacy" | "police";
+const TYPE_STYLE: Record<PlaceType, { color: string; icon: any; title: string; chip: string }> = {
+  hospital: { color: "#EF4444", icon: "plus", title: "HOSPITALS", chip: "Hospitals" },
+  pharmacy: { color: "#8B5CF6", icon: "package", title: "PHARMACIES", chip: "Pharmacies" },
+  police: { color: "#3B82F6", icon: "shield", title: "POLICE STATIONS", chip: "Police" },
+};
 
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371;
@@ -30,6 +36,9 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
   const [error, setError] = useState<string | null>(null);
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [police, setPolice] = useState<any[]>([]);
+  const [pharmacies, setPharmacies] = useState<any[]>([]);
+  // "focus" comes from the Safety screen row that was tapped (hospital / pharmacy / police)
+  const [filter, setFilter] = useState<"all" | PlaceType>(route.params?.focus || "all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Get location here if it wasn't passed in
@@ -56,7 +65,7 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
         if (Platform.OS === "ios") headers["X-Ios-Bundle-Identifier"] = "com.strompulse.app";
         if (Platform.OS === "android") headers["X-Android-Package"] = "com.strompulse.app";
 
-        const fetchTop3 = async (type: "hospital" | "police", fallback: string) => {
+        const fetchTop3 = async (type: PlaceType, fallback: string) => {
           const res = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
             method: "POST",
             headers,
@@ -83,8 +92,13 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
             .slice(0, 3);
         };
 
-        const [h, p] = await Promise.all([fetchTop3("hospital", "Hospital"), fetchTop3("police", "Police Station")]);
+        const [h, ph, p] = await Promise.all([
+          fetchTop3("hospital", "Hospital"),
+          fetchTop3("pharmacy", "Pharmacy"),
+          fetchTop3("police", "Police Station"),
+        ]);
         setHospitals(h);
+        setPharmacies(ph);
         setPolice(p);
       } catch (err) {
         setError("Couldn't load nearby facilities. Check your connection and try again.");
@@ -102,11 +116,23 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
 
   const getDirections = (p: any) => {
     if (!coords) return;
-    navigation.navigate("EmergencyDirectionsScreen", {
+    navigation.navigate("EmergencyDirectionScreen", {
       userLat: coords.lat, userLng: coords.lng, destLat: p.lat, destLng: p.lng,
       destName: p.name, destAddress: p.address, destinationName: p.name, address: p.address,
     });
   };
+
+  const listFor = (t: PlaceType) => (t === "hospital" ? hospitals : t === "pharmacy" ? pharmacies : police);
+  const visibleTypes: PlaceType[] = filter === "all" ? ["hospital", "pharmacy", "police"] : [filter];
+  const visiblePlaces = visibleTypes.flatMap(listFor);
+
+  // Fit the map to whatever is currently shown
+  useEffect(() => {
+    if (!coords || !mapRef.current || visiblePlaces.length === 0) return;
+    const pts = [{ latitude: coords.lat, longitude: coords.lng }, ...visiblePlaces.map((p) => ({ latitude: p.lat, longitude: p.lng }))];
+    const t = setTimeout(() => mapRef.current?.fitToCoordinates(pts, { edgePadding: { top: 40, right: 40, bottom: 40, left: 40 }, animated: true }), 300);
+    return () => clearTimeout(t);
+  }, [filter, hospitals, pharmacies, police, coords]);
 
   const renderSection = (title: string, icon: any, color: string, list: any[]) => (
     <YStack marginBottom={20}>
@@ -151,11 +177,26 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
           </TouchableOpacity>
           <YStack marginLeft={16}>
             <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>Nearby Help</TText>
-            <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary} marginTop={2} letterSpacing={1}>HOSPITALS & POLICE STATIONS</TText>
+            <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary} marginTop={2} letterSpacing={1}>HOSPITALS, PHARMACIES & POLICE</TText>
           </YStack>
         </XStack>
 
-        <YStack height={260} marginHorizontal={24} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} marginBottom={20}>
+        <XStack marginHorizontal={24} marginBottom={12} gap={8}>
+          {(["all", "hospital", "pharmacy", "police"] as const).map((f) => {
+            const active = filter === f;
+            const color = f === "all" ? "#00C48A" : TYPE_STYLE[f].color;
+            return (
+              <TouchableOpacity key={f} style={{ flex: 1 }} onPress={() => setFilter(f)}>
+                <XStack paddingVertical={8} borderRadius={14} borderWidth={1} borderColor={active ? color : (isDarkMode ? "#2D3B34" : "#E2E8F0")} backgroundColor={active ? `${color}1A` : cardBg} justifyContent="center" alignItems="center" gap={4}>
+                  {f !== "all" && <Feather name={TYPE_STYLE[f].icon} size={11} color={active ? color : theme.textSecondary} />}
+                  <TText fontFamily="Chirp-Bold" fontSize={11} color={active ? color : theme.textSecondary} numberOfLines={1}>{f === "all" ? "All" : TYPE_STYLE[f].chip}</TText>
+                </XStack>
+              </TouchableOpacity>
+            );
+          })}
+        </XStack>
+
+        <YStack height={240} marginHorizontal={24} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={isDarkMode ? "#2D3B34" : "#E2E8F0"} marginBottom={20}>
           {!coords ? (
             <YStack flex={1} justifyContent="center" alignItems="center"><ActivityIndicator color="#00C48A" /></YStack>
           ) : (
@@ -168,10 +209,10 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
               showsMyLocationButton={false}
               userInterfaceStyle={isDarkMode ? "dark" : "light"}
             >
-              {[...hospitals, ...police].map((p) => (
+              {visiblePlaces.map((p) => (
                 <Marker key={p.id} coordinate={{ latitude: p.lat, longitude: p.lng }} onPress={() => setSelectedId(p.id)} title={p.name}>
-                  <YStack width={selectedId === p.id ? 40 : 32} height={selectedId === p.id ? 40 : 32} borderRadius={20} backgroundColor={p.type === "hospital" ? "#EF4444" : "#3B82F6"} justifyContent="center" alignItems="center" borderWidth={3} borderColor="#FFF">
-                    <Feather name={p.type === "hospital" ? "plus" : "shield"} size={14} color="#FFF" />
+                  <YStack width={selectedId === p.id ? 40 : 32} height={selectedId === p.id ? 40 : 32} borderRadius={20} backgroundColor={TYPE_STYLE[p.type as PlaceType].color} justifyContent="center" alignItems="center" borderWidth={3} borderColor="#FFF">
+                    <Feather name={TYPE_STYLE[p.type as PlaceType].icon} size={14} color="#FFF" />
                   </YStack>
                 </Marker>
               ))}
@@ -189,8 +230,9 @@ const EmergencyMapScreen = ({ navigation, route }: any) => {
             <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} textAlign="center" marginTop={24}>{error}</TText>
           ) : (
             <>
-              {renderSection("HOSPITALS", "plus", "#EF4444", hospitals)}
-              {renderSection("POLICE STATIONS", "shield", "#3B82F6", police)}
+              {visibleTypes.map((t) => (
+                <React.Fragment key={t}>{renderSection(TYPE_STYLE[t].title, TYPE_STYLE[t].icon, TYPE_STYLE[t].color, listFor(t))}</React.Fragment>
+              ))}
               <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} textAlign="center">Travel times are estimates. Directions shows live routing.</TText>
             </>
           )}

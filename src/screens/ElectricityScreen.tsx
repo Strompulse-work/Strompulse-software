@@ -105,24 +105,52 @@ const getIsoWeek = (date: Date) => {
 };
 const formatHourLabel = (h: number) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
 
-const buildUpIntervalsFromHistory = (historyNode: any, isOnline: boolean, nowMs: number) => {
+// Each history entry = one "power ON" session. The KEY is when power was restored.
+// Fields inside the entry (last_seen / timestamp / durationSeconds) describe when that session ENDED
+// and are updated by the device while it runs — they must never be used as the session start.
+// (Using entry.timestamp as the start is what made 12am–noon drop to 0% later in the day.)
+const SESSION_FALLBACK_MAX_MS = 24 * 60 * 60 * 1000;
+const toMs = (v: any): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return v < 1e12 ? v * 1000 : v; // seconds or ms
+  const d = parseStromTimestamp(String(v));
+  return d ? d.getTime() : null;
+};
+const buildUpIntervalsFromHistory = (historyNode: any, isOnline: boolean, nowMs: number, lastSeenMs: number | null = null) => {
   if (!historyNode) return [];
-  const events = Object.keys(historyNode).map((key) => {
-    const entry = historyNode[key];
-    const tsSource = entry && typeof entry === "object" && entry.timestamp ? entry.timestamp : key;
-    const parsed = parseStromTimestamp(String(tsSource));
-    return parsed ? parsed.getTime() : null;
-  }).filter((ts): ts is number => typeof ts === "number" && !Number.isNaN(ts)).sort((a, b) => a - b);
+  const sessions = Object.keys(historyNode)
+    .map((key) => {
+      const entry = historyNode[key];
+      const obj = entry && typeof entry === "object" ? entry : {};
+      const start = toMs(key) ?? toMs(obj.start) ?? toMs(obj.started_at) ?? toMs(obj.restored_at);
+      if (start === null) return null;
+      let end = toMs(obj.last_seen) ?? toMs(obj.ended_at) ?? toMs(obj.end);
+      if (end === null && typeof obj.durationSeconds === "number") end = start + obj.durationSeconds * 1000;
+      if (end === null) {
+        const ts = toMs(obj.timestamp);
+        if (ts !== null && ts > start) end = ts;
+      }
+      return { start, end: end !== null && end > start ? end : null };
+    })
+    .filter((s): s is { start: number; end: number | null } => !!s && !Number.isNaN(s.start))
+    .sort((a, b) => a.start - b.start);
+
   const intervals: Array<{ start: number; end: number }> = [];
-  for (let i = 0; i < events.length; i++) {
-    const start = events[i];
-    if (i === events.length - 1) {
-      const end = isOnline ? nowMs : start;
-      if (end > start) intervals.push({ start, end });
-      continue;
+  for (let i = 0; i < sessions.length; i++) {
+    const { start, end: recordedEnd } = sessions[i];
+    const nextStart = i < sessions.length - 1 ? sessions[i + 1].start : null;
+    let end: number;
+    if (nextStart === null) {
+      // Latest session: still running if the device is online right now
+      // Offline: it ended at the recorded end, or at the device's last heartbeat
+      end = isOnline ? nowMs : recordedEnd ?? (lastSeenMs !== null && lastSeenMs > start ? lastSeenMs : start);
+    } else if (recordedEnd !== null) {
+      end = Math.min(recordedEnd, nextStart);
+    } else {
+      // No end recorded: assume power stayed on until the next restore (capped so one bad gap can't fill a whole day)
+      end = Math.min(nextStart, start + SESSION_FALLBACK_MAX_MS);
     }
-    const gap = events[i + 1] - start;
-    const end = gap <= MAX_TRUSTED_GAP_MS ? events[i + 1] : start;
+    end = Math.min(end, nowMs);
     if (end > start) intervals.push({ start, end });
   }
   return intervals;
@@ -145,7 +173,10 @@ const calculateIntervalUptime = (device: any, startMs: number, endMs: number, no
   if (durationMs <= 0) return null;
   const hasHistory = device?.history && Object.keys(device.history).length > 0;
   if (!hasHistory) return device?.isOnline ? 100 : 0;
-  const intervals = buildUpIntervalsFromHistory(device.history, !!device.isOnline, nowMs);
+  const intervals = buildUpIntervalsFromHistory(
+    device.history, !!device.isOnline, nowMs,
+    toMs(device.updated_at ?? device.lastSeen ?? device.realtime?.serverReceivedAt ?? device.realtime?.timestamp ?? null)
+  );
   return Math.max(0, Math.min(100, Math.round((sumOverlapMs(intervals, startMs, clampedEnd) / durationMs) * 100)));
 };
 
@@ -454,7 +485,32 @@ const ElectricityScreen = ({ navigation }: any) => {
     </XStack>
   );
 
-  const renderAnalyticsCard = (title: string, subtitle: string, range: Range, setRange: (r: Range) => void, source: "city" | "home") => (
+  const renderRangeSummary = (bars: ChartBar[], range: Range) => {
+    const withData = bars.filter((b) => !b.isFuture && b.value !== null && b.value !== undefined);
+    const avg = withData.length ? Math.round(withData.reduce((a, b) => a + (b.value as number), 0) / withData.length) : null;
+    const best = withData.length ? withData.reduce((a, b) => ((b.value as number) > (a.value as number) ? b : a)) : null;
+    const worst = withData.length ? withData.reduce((a, b) => ((b.value as number) < (a.value as number) ? b : a)) : null;
+    const word = range === "Today" ? "HOUR" : range === "This Week" ? "DAY" : "WEEK";
+    const pc = (v: number | null) => (v === null ? theme.textSecondary : v >= 70 ? "#00C48A" : v >= 40 ? "#F59E0B" : "#EF4444");
+    return (
+      <XStack gap={10} marginTop={16} paddingTop={16} borderTopWidth={1} borderTopColor={divider}>
+        {[
+          { label: "AVERAGE", value: avg !== null ? `${avg}%` : "—", color: pc(avg) },
+          { label: `BEST ${word}`, value: best ? `${best.label} · ${best.value}%` : "—", color: "#00C48A" },
+          { label: `WORST ${word}`, value: worst ? `${worst.label} · ${worst.value}%` : "—", color: "#EF4444" },
+        ].map((x) => (
+          <YStack key={x.label} flex={1} alignItems="center">
+            <TText fontFamily="Chirp-Bold" fontSize={9} color={theme.textSecondary} letterSpacing={0.8} marginBottom={4}>{x.label}</TText>
+            <TText fontFamily="Chirp-Heavy" fontSize={12} color={x.color} textAlign="center" numberOfLines={1}>{x.value}</TText>
+          </YStack>
+        ))}
+      </XStack>
+    );
+  };
+
+  const renderAnalyticsCard = (title: string, subtitle: string, range: Range, setRange: (r: Range) => void, source: "city" | "home") => {
+    const bars = buildRangeBars(range, source);
+    return (
     <YStack backgroundColor={cardBg} borderRadius={24} padding={20} borderWidth={1} borderColor={divider} marginBottom={16}>
       <XStack alignItems="center" gap={12} marginBottom={16}>
         <YStack width={36} height={36} borderRadius={12} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center">
@@ -466,7 +522,7 @@ const ElectricityScreen = ({ navigation }: any) => {
         </YStack>
       </XStack>
       <YStack marginBottom={16}>{renderRangeSelector(range, setRange)}</YStack>
-      <UptimeBarChart bars={buildRangeBars(range, source)} yTitle="Uptime (%)" xTitle={xTitleFor(range)} isDarkMode={isDarkMode} textColor={theme.textSecondary} minSlotWidth={range === "Today" ? 20 : 0} />
+      <UptimeBarChart bars={bars} yTitle="Uptime (%)" xTitle={xTitleFor(range)} isDarkMode={isDarkMode} textColor={theme.textSecondary} minSlotWidth={range === "Today" ? 20 : 0} />
       <XStack gap={14} marginTop={12} flexWrap="wrap">
         {[{ c: "#00C48A", l: "70%+" }, { c: "#F59E0B", l: "40–69%" }, { c: "#EF4444", l: "<40%" }, { c: divider, l: "No data" }].map((x) => (
           <XStack key={x.l} alignItems="center" gap={6}>
@@ -475,8 +531,10 @@ const ElectricityScreen = ({ navigation }: any) => {
           </XStack>
         ))}
       </XStack>
+      {source === "home" && renderRangeSummary(bars, range)}
     </YStack>
-  );
+    );
+  };
 
   const renderPredictionCard = (source: "city" | "home") => {
     const { bars, week, year } = buildPrediction(source);
@@ -688,13 +746,13 @@ const ElectricityScreen = ({ navigation }: any) => {
           <XStack marginHorizontal={24} marginBottom={20} gap={10}>
             {(["map", "communities", "stats"] as const).map((tab) => {
               const isActive = activeTab === tab;
-              const cfg = { map: { icon: "map", label: "Map" }, communities: { icon: "grid", label: "Communities" }, stats: { icon: "bar-chart-2", label: "Analytics" } }[tab];
+              const cfg = { map: { icon: "home", label: "Home" }, communities: { icon: "grid", label: "Communities" }, stats: { icon: "bar-chart-2", label: "Analytics" } }[tab];
               return (
                 <TouchableOpacity key={tab} activeOpacity={0.8} onPress={() => setActiveTab(tab)} style={{ flex: 1 }}>
-                  <YStack paddingVertical={12} alignItems="center" justifyContent="center" borderRadius={16} borderWidth={1.5} borderColor={isActive ? "#00C48A" : divider} backgroundColor={isActive ? "#00C48A" : cardBg} gap={4}>
-                    <Feather name={cfg.icon as any} size={16} color={isActive ? "#FFFFFF" : theme.textSecondary} />
-                    <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? "#FFFFFF" : theme.textSecondary}>{cfg.label}</TText>
-                  </YStack>
+                  <XStack paddingVertical={12} paddingHorizontal={6} alignItems="center" justifyContent="center" borderRadius={16} borderWidth={1.5} borderColor={isActive ? "#00C48A" : divider} backgroundColor={isActive ? "#00C48A" : cardBg} gap={6}>
+                    <Feather name={cfg.icon as any} size={14} color={isActive ? "#FFFFFF" : theme.textSecondary} />
+                    <TText fontFamily={isActive ? "Chirp-Heavy" : "Chirp-Bold"} fontSize={12} color={isActive ? "#FFFFFF" : theme.textSecondary} numberOfLines={1}>{cfg.label}</TText>
+                  </XStack>
                 </TouchableOpacity>
               );
             })}
@@ -702,6 +760,11 @@ const ElectricityScreen = ({ navigation }: any) => {
 
           {activeTab === "map" && (
             <YStack zIndex={9000} marginHorizontal={24} marginBottom={24}>
+              {/* Same floating label style as "SELECT YOUR CITY" */}
+              <YStack marginTop={8}>
+              <YStack position="absolute" top={-8} left={20} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} paddingHorizontal={4} zIndex={10}>
+                <TText fontSize={11} fontFamily="Chirp-Heavy" color={theme.textPrimary} letterSpacing={0.5}>SELECT YOUR HOME ADDRESS</TText>
+              </YStack>
               {!defaultLocation ? (
                 <TouchableOpacity onPress={() => { setHomeModalTab("address"); setIsLocModalVisible(true); }}>
                   <XStack backgroundColor={cardBg} borderRadius={20} paddingHorizontal={16} paddingVertical={14} alignItems="center" justifyContent="space-between" borderWidth={1.5} borderColor="#00C48A">
@@ -730,6 +793,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                   </XStack>
                 </TouchableOpacity>
               )}
+              </YStack>
 
               <YStack height={450} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={divider} marginTop={16}>
                 <CustomMapView
@@ -738,7 +802,6 @@ const ElectricityScreen = ({ navigation }: any) => {
                   minZoomLevel={10}
                   zoomEnabled={false}
                   scrollEnabled={true}
-                
                   mapBoundaries={CITY_DATA[selectedCity]}
                   markers={cityGridItems.map((item) => ({ id: item.id, title: item.name, connectionState: item.connectionState, latitude: item.lat, longitude: item.lng }))}
                   onMarkerPress={(id: string) => {
@@ -836,6 +899,20 @@ const ElectricityScreen = ({ navigation }: any) => {
                   </YStack>
                 )}
               </YStack>
+
+              {/* Get your hardware — below the map */}
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("RequestDeviceScreen")} style={{ marginTop: 16 }}>
+                <XStack backgroundColor={cardBg} borderRadius={24} padding={18} alignItems="center" borderWidth={1} borderColor={divider}>
+                  <Image source={require("../../assets/images/stromdevice.png")} style={{ width: 44, height: 44, resizeMode: "contain", marginRight: 16 }} />
+                  <YStack flex={1}>
+                    <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={2}>Get Personal Hardware</TText>
+                    <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Track your home power with 100% accuracy</TText>
+                  </YStack>
+                  <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                    <Feather name="arrow-right" size={14} color="#FFF" />
+                  </YStack>
+                </XStack>
+              </TouchableOpacity>
             </YStack>
           )}
 
@@ -944,7 +1021,8 @@ const ElectricityScreen = ({ navigation }: any) => {
                 {renderPredictionCard("home")}
               </ScrollView>
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+              <YStack flex={1}>
+                {/* Search + confirm stay pinned at the top so users never scroll to save */}
                 <XStack backgroundColor={cardBg} borderRadius={16} paddingHorizontal={16} height={56} alignItems="center" borderWidth={1} borderColor={divider}>
                   <Feather name="search" size={16} color={theme.textSecondary} />
                   <TextInput style={{ flex: 1, marginLeft: 12, color: theme.textPrimary, fontFamily: "Chirp-Medium", fontSize: 15 }} placeholder={`Search your address in ${selectedCity}...`} placeholderTextColor={theme.textSecondary} value={locSearchQuery} onChangeText={(t) => { setLocSearchQuery(t); setSelectedLocResult(null); }} />
@@ -956,6 +1034,23 @@ const ElectricityScreen = ({ navigation }: any) => {
                   )}
                 </XStack>
 
+                <XStack marginTop={12} alignItems="center" gap={10}>
+                  <XStack flex={1} alignItems="center" gap={8} backgroundColor={selectedLocResult ? (isDarkMode ? "rgba(0,196,138,0.08)" : "#F0FDF4") : "transparent"} borderRadius={14} paddingHorizontal={selectedLocResult ? 12 : 0} height={52}>
+                    <Feather name={selectedLocResult ? "check-circle" : "info"} size={14} color={selectedLocResult ? "#00C48A" : theme.textSecondary} />
+                    <TText flex={1} fontFamily={selectedLocResult ? "Chirp-Bold" : "Chirp-Medium"} fontSize={12} color={selectedLocResult ? theme.textPrimary : theme.textSecondary} numberOfLines={2}>
+                      {selectedLocResult ? (selectedLocResult.name || selectedLocResult.title) : "Search or pick an address below"}
+                    </TText>
+                  </XStack>
+                  <TouchableOpacity onPress={saveDefaultLocation} disabled={!selectedLocResult || isSavingLoc}>
+                    <YStack backgroundColor={selectedLocResult ? "#00C48A" : (isDarkMode ? "#1A221E" : "#E2E8F0")} height={52} paddingHorizontal={18} borderRadius={14} justifyContent="center" alignItems="center">
+                      {isSavingLoc ? <ActivityIndicator color="#FFF" /> : (
+                        <TText fontFamily="Chirp-Bold" fontSize={14} color={selectedLocResult ? "#FFF" : theme.textSecondary}>{defaultLocation ? "Confirm" : "Save"}</TText>
+                      )}
+                    </YStack>
+                  </TouchableOpacity>
+                </XStack>
+
+                <ScrollView style={{ flex: 1, marginTop: 4 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
                 {locSearchResults.length > 0 && (
                   <YStack marginTop={20}>
                     <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} marginBottom={12} letterSpacing={1.5}>ADDRESSES IN {selectedCity.toUpperCase()}</TText>
@@ -1001,14 +1096,8 @@ const ElectricityScreen = ({ navigation }: any) => {
                   </YStack>
                 </YStack>
 
-                <TouchableOpacity onPress={saveDefaultLocation} disabled={!selectedLocResult || isSavingLoc}>
-                  <YStack backgroundColor={selectedLocResult ? "#00C48A" : (isDarkMode ? "#1A221E" : "#E2E8F0")} height={56} borderRadius={16} justifyContent="center" alignItems="center" marginTop={24}>
-                    {isSavingLoc ? <ActivityIndicator color="#FFF" /> : (
-                      <TText fontFamily="Chirp-Bold" fontSize={15} color={selectedLocResult ? "#FFF" : theme.textSecondary}>{defaultLocation ? "Confirm New Home Address" : "Save Home Address"}</TText>
-                    )}
-                  </YStack>
-                </TouchableOpacity>
-              </ScrollView>
+                </ScrollView>
+              </YStack>
             )}
           </YStack>
         </YStack>

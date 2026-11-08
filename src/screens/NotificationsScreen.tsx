@@ -8,6 +8,7 @@ import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
 import { DEVICE_LOCATIONS } from "../constants/gridLocations";
 import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getMyIdentity, isAlertForMe } from "../utils/myIdentity";
 
 const getRelativeTime = (date: Date) => {
   const diff = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -79,7 +80,8 @@ const parseDbAlert = (dbAlert: any, isDarkMode: boolean) => {
     userBg: bg,
     icon,
     rawDate: createdAt,
-    senderId: dbAlert.sender_id || dbAlert.user_id || meta.senderId || null,
+    // Always the real sender's account id (never matched by name, so two people called "Tunde" can't get mixed up)
+    senderId: dbAlert.user_id || dbAlert.sender_id || meta.senderId || null,
     senderName: senderName || "Contact",
     coords: extractCoords(dbAlert, message),
   };
@@ -96,6 +98,7 @@ const NotificationsScreen = ({ navigation }: any) => {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [isStorageLoaded, setIsStorageLoaded] = useState(false);
+  const [missingPhone, setMissingPhone] = useState(false);
 
   const { devices, loading: devicesLoading } = useAllGridDevices();
 
@@ -118,31 +121,40 @@ const NotificationsScreen = ({ navigation }: any) => {
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
+      let alertSubscription: any = null;
 
-      // Subscribe FIRST so no time-sensitive SOS insert is missed while the initial fetch runs
-      const alertSubscription = supabase
-        .channel("public:alerts")
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "alerts" }, (payload) => {
-          if (!isMounted) return;
-          const parsed = parseDbAlert(payload.new, isDarkMode);
-          setSupabaseAlerts((prev) => (prev.some((a) => a.id === parsed.id) ? prev : [parsed, ...prev]));
-        })
-        .subscribe();
+      // Only alerts addressed to MY phone number (and not sent by me) are shown.
+      // The database enforces the same rule (see alerts_recipients_only.sql); this is a second safety net.
+      const start = async () => {
+        const me = await getMyIdentity();
+        if (!isMounted) return;
+        setMissingPhone(!!me.userId && !me.phoneKey);
 
-      const fetchSupabase = async () => {
+        // Subscribe FIRST so no time-sensitive SOS insert is missed while the initial fetch runs
+        alertSubscription = supabase
+          .channel(`alerts-${me.userId || "anon"}`)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "alerts" }, (payload) => {
+            if (!isMounted || !isAlertForMe(payload.new, me)) return;
+            const parsed = parseDbAlert(payload.new, isDarkMode);
+            setSupabaseAlerts((prev) => (prev.some((a) => a.id === parsed.id) ? prev : [parsed, ...prev]));
+          })
+          .subscribe();
+
         const { data, error } = await supabase
           .from("alerts")
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(30);
-        if (!error && data && isMounted) setSupabaseAlerts(data.map((a) => parseDbAlert(a, isDarkMode)));
+          .limit(100);
+        if (!error && data && isMounted) {
+          setSupabaseAlerts(data.filter((a) => isAlertForMe(a, me)).slice(0, 40).map((a) => parseDbAlert(a, isDarkMode)));
+        }
         if (isMounted) setLoading(false);
       };
-      fetchSupabase();
+      start().catch(() => { if (isMounted) setLoading(false); });
 
       return () => {
         isMounted = false;
-        supabase.removeChannel(alertSubscription);
+        if (alertSubscription) supabase.removeChannel(alertSubscription);
       };
     }, [isDarkMode])
   );
@@ -291,17 +303,31 @@ const NotificationsScreen = ({ navigation }: any) => {
     await AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...newRead]));
   };
 
+  // "Track Journey" → live journey map · "View Location" on SOS → emergency live-location map
   const openTracking = (item: any, mode: "journey" | "sos" | "location") => {
+    if (mode === "journey" && !item.senderId) {
+      Alert.alert("Journey unavailable", `We couldn't find ${item.senderName}'s live journey.`);
+      return;
+    }
     if (mode !== "journey" && !item.coords && !item.senderId) {
       Alert.alert("Location not shared", `${item.senderName} didn't include a location with this alert. Try calling them directly.`);
       return;
     }
+    // Opening it counts as reading it
+    setReadIds((prev) => {
+      if (prev.has(item.id)) return prev;
+      const next = new Set(prev); next.add(item.id);
+      AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...next]));
+      return next;
+    });
     navigation.navigate("LiveTrackingScreen", {
       mode,
       senderName: item.senderName,
       senderId: item.senderId,
       initialLat: item.coords?.lat,
       initialLng: item.coords?.lng,
+      alertTime: item.rawDate ? new Date(item.rawDate).toISOString() : undefined,
+      alertMessage: item.body,
     });
   };
 
@@ -348,10 +374,11 @@ const NotificationsScreen = ({ navigation }: any) => {
     );
   };
 
-  const ActionPill = ({ label, color, onPress }: any) => (
+  const ActionPill = ({ label, color, onPress, icon, solid }: any) => (
     <TouchableOpacity onPress={onPress}>
-      <XStack paddingHorizontal={14} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={color} alignSelf="flex-start" marginTop={12}>
-        <TText fontFamily="Chirp-Bold" fontSize={11} color={color}>{label}</TText>
+      <XStack paddingHorizontal={14} paddingVertical={7} borderRadius={16} borderWidth={1} borderColor={color} backgroundColor={solid ? color : "transparent"} alignSelf="flex-start" marginTop={12} alignItems="center" gap={6}>
+        {icon && <Feather name={icon} size={12} color={solid ? "#FFFFFF" : color} />}
+        <TText fontFamily="Chirp-Bold" fontSize={11} color={solid ? "#FFFFFF" : color}>{label}</TText>
       </XStack>
     </TouchableOpacity>
   );
@@ -367,6 +394,15 @@ const NotificationsScreen = ({ navigation }: any) => {
         </XStack>
 
         {renderSegmentedControl()}
+
+        {missingPhone && (
+          <TouchableOpacity onPress={() => navigation.navigate("LinkPhone")} style={{ marginHorizontal: 24, marginBottom: 16 }}>
+            <XStack backgroundColor={isDarkMode ? "rgba(245,158,11,0.12)" : "#FEF3C7"} borderRadius={16} padding={12} alignItems="center" gap={10}>
+              <Feather name="alert-circle" size={16} color="#F59E0B" />
+              <TText flex={1} fontFamily="Chirp-Bold" fontSize={12} color={theme.textPrimary}>Verify your phone number so your contacts' SOS and journey alerts can reach you. Tap to add it.</TText>
+            </XStack>
+          </TouchableOpacity>
+        )}
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}>
           {activeSosAlert && (activeTab === "All" || activeTab === "Security") && (
@@ -387,7 +423,11 @@ const NotificationsScreen = ({ navigation }: any) => {
                 </XStack>
                 <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{activeSosAlert.time}</TText>
               </XStack>
-              <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={20} marginBottom={20}>{activeSosAlert.body}</TText>
+              <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={20} marginBottom={12}>{activeSosAlert.body}</TText>
+              <XStack alignItems="center" gap={6} marginBottom={16}>
+                <Feather name="radio" size={12} color="#EF4444" />
+                <TText fontSize={11} fontFamily="Chirp-Bold" color="#EF4444">Tap View Location to see where {activeSosAlert.senderName.split(" ")[0]} is right now</TText>
+              </XStack>
               <XStack gap={12}>
                 <TouchableOpacity style={{ flex: 2 }} onPress={() => openTracking(activeSosAlert, "sos")}>
                   <XStack backgroundColor="#EF4444" borderRadius={16} paddingVertical={14} justifyContent="center" alignItems="center">
@@ -432,9 +472,10 @@ const NotificationsScreen = ({ navigation }: any) => {
                       </XStack>
                       <TText fontSize={13} fontFamily="Chirp-Regular" color={theme.textSecondary} lineHeight={20} paddingRight={4}>{item.body}</TText>
 
-                      {item.type === "journey" && <ActionPill label="Follow Their Journey" color="#00C48A" onPress={() => openTracking(item, "journey")} />}
-                      {item.type === "location" && <ActionPill label="View Location" color="#3B82F6" onPress={() => openTracking(item, "location")} />}
-                      {item.type === "sos" && <ActionPill label="View Location" color="#EF4444" onPress={() => openTracking(item, "sos")} />}
+                      {item.type === "journey" && <ActionPill label="Track Journey" icon="navigation" color="#00C48A" solid onPress={() => openTracking(item, "journey")} />}
+                      {item.type === "journey_end" && <ActionPill label="View Journey" icon="flag" color="#00C48A" onPress={() => openTracking(item, "journey")} />}
+                      {item.type === "location" && <ActionPill label="View Location" icon="map-pin" color="#3B82F6" onPress={() => openTracking(item, "location")} />}
+                      {item.type === "sos" && <ActionPill label="View Location" icon="alert-triangle" color="#EF4444" solid onPress={() => openTracking(item, "sos")} />}
                       {(item.type === "outage" || item.type === "restored") && (
                         <ActionPill label="View Status" color={item.userColor} onPress={() => navigation.navigate("CommunityZonesScreen", { areaId: item.deviceId, areaName: item.areaName })} />
                       )}
