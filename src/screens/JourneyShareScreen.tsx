@@ -17,6 +17,9 @@ import { supabase } from "../config/supabase";
 import { sendPushAlert } from "../utils/sendAlert";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { getDrivingRoute } from "../utils/routing";
+import { loadGroups, buildRecipients, SafetyGroup, GroupMember } from "../utils/safetyGroups";
+import { getMyIdentity } from "../utils/myIdentity";
+import { logSafetyEvent, updateSafetyEvent } from "../utils/safetyHistory";
 import {
   CONTACTS_KEY, DEFAULT_SECURITY_SETTINGS, SecuritySettings,
   loadSecuritySettings, saveSecuritySettings, getSmsSosQuota, consumeSmsSosQuota, normalizePhone, googleMapsLink,
@@ -33,6 +36,8 @@ const UPLOAD_INTERVAL_MS = 15 * 1000; // push live position to followers every 1
 const GOOGLE_API_KEY = Platform.OS === "ios" ? "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA" : "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo";
 
 let journeyPhonesColumn = true; // false until journey_recipients SQL has been run
+
+const PURPOSES = ["Going home", "Going to work", "Going to school", "Visiting", "Night out"];
 
 const delayToMs = (d: string) => ({ "15 min": 15, "30 min": 30, "1 hr": 60, "2 hr": 120, "5 hr": 300 } as Record<string, number>)[d] * 60000 || 30 * 60000;
 
@@ -75,6 +80,13 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
   const [journeyEndTime, setJourneyEndTime] = useState<number | null>(null);
   const [timeLeftString, setTimeLeftString] = useState("--:--");
   const [hasAutoAlertFired, setHasAutoAlertFired] = useState(false);
+
+  // Optional purpose + communities
+  const [purpose, setPurpose] = useState("");
+  const [myGroups, setMyGroups] = useState<SafetyGroup[]>([]);
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [journeyStartedAt, setJourneyStartedAt] = useState<number | null>(null);
+  const [elapsedString, setElapsedString] = useState("00:00");
 
   const delayOptions = ["15 min", "30 min", "1 hr", "2 hr", "5 hr"];
 
@@ -162,6 +174,8 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
         setAutoAlertEnabled(s.autoAlertEnabled);
         setAutoAlertDelay(s.autoAlertDelay);
 
+        loadGroups().then(({ mine }) => setMyGroups(mine.filter((g) => g.members.length > 0))).catch(() => {});
+
         const saved = await AsyncStorage.getItem(CONTACTS_KEY);
         let contacts: any[] = [];
         if (saved) {
@@ -192,6 +206,9 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
             if (meta.destinationCoords) { setDestinationCoords(meta.destinationCoords); destRef.current = meta.destinationCoords; }
             if (meta.totalKm) setTotalKm(meta.totalKm);
             if (meta.etaText) setCalculatedEtaText(meta.etaText);
+            if (meta.purpose) setPurpose(meta.purpose);
+            if (meta.startedAt) setJourneyStartedAt(meta.startedAt);
+            if (Array.isArray(meta.groupIds)) setSelectedGroups(new Set(meta.groupIds));
           }
           startLiveTracking();
         }
@@ -330,56 +347,114 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     return () => clearInterval(interval);
   }, [isActive, journeyEndTime, autoAlertEnabled, autoAlertDelay, hasAutoAlertFired]);
 
+  // Elapsed time (always shown; the only timer when no destination was set)
+  useEffect(() => {
+    if (!isActive || !journeyStartedAt) return;
+    const tick = () => {
+      const d = Math.max(0, Date.now() - journeyStartedAt);
+      const h = Math.floor(d / 3600000), m = Math.floor((d % 3600000) / 60000), sec = Math.floor((d % 60000) / 1000);
+      setElapsedString(h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`);
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [isActive, journeyStartedAt]);
+
+  const toggleGroupSelection = (id: string) => {
+    const next = new Set(selectedGroups);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedGroups(next);
+  };
+
   const toggleContactSelection = (id: string) => {
     const next = new Set(selectedContacts);
     next.has(id) ? next.delete(id) : next.add(id);
     setSelectedContacts(next);
   };
 
-  const recipients = () => allContacts.filter((c) => selectedContacts.has(c.id));
+  const chosenGroups = () => myGroups.filter((g) => selectedGroups.has(g.id));
+
+  // Everyone this journey goes to: selected contacts + members of selected communities (no duplicates)
+  const recipients = (): GroupMember[] => {
+    const meta = metaRef.current;
+    if (isActive && meta?.recipients?.length) return meta.recipients;
+    return buildRecipients(allContacts.filter((c) => selectedContacts.has(c.id)).map((c) => ({ name: c.name, phone: c.phone })), chosenGroups());
+  };
 
   // Same recipient format as SOS (normalized phone numbers), sent in one call so alerts arrive together
-  const pushToAll = (type: string, title: string, body: string, list: any[], extra?: any) =>
-    Promise.resolve(sendPushAlert(type as any, title, body, list.map((c) => normalizePhone(c.phone)) as any, extra)).catch(() => {});
+  const pushToAll = (type: string, title: string, body: string, list: GroupMember[], extra?: any) => {
+    const meta = metaRef.current || {};
+    return Promise.resolve(sendPushAlert(type as any, title, body, list.map((c) => normalizePhone(c.phone)) as any, {
+      kind: "journey",
+      recipientNames: list.map((c) => c.name),
+      ...(meta.groupNames?.length ? { groupName: meta.groupNames.join(", ") } : {}),
+      ...(meta.purpose ? { purpose: meta.purpose } : {}),
+      ...(extra || {}),
+    })).catch(() => {});
+  };
 
   const startSharing = async () => {
-    if (selectedContacts.size === 0) {
-      Alert.alert("No Contacts Selected", "Please select at least one contact to share your journey with.");
+    const me = await getMyIdentity().catch(() => ({ phoneKey: "" } as any));
+    const list = buildRecipients(
+      allContacts.filter((c) => selectedContacts.has(c.id)).map((c) => ({ name: c.name, phone: c.phone })),
+      chosenGroups(),
+      me.phoneKey,
+    );
+    if (list.length === 0) {
+      Alert.alert("No one selected", "Choose at least one contact or community to share your journey with.");
       return;
     }
-    if (!destinationCoords || calculatedEtaMs === 0) {
-      Alert.alert("Destination Required", "Please select a destination to calculate your ETA.");
-      return;
-    }
+    if (isSearchingRoute) return;
+    const hasDestination = !!destinationCoords && calculatedEtaMs > 0;
     const startedAt = Date.now();
-    const endTime = startedAt + calculatedEtaMs;
-    const recipientPhones = recipients().map((c) => normalizePhone(c.phone));
-    const meta = { destinationName, destinationCoords, startCoords: currentCoords, totalKm: totalKm ?? remainingKm, startedAt, endTime, etaText: calculatedEtaText, recipientPhones };
+    const endTime = hasDestination ? startedAt + calculatedEtaMs : null;
+    const groups = chosenGroups();
+    const meta = {
+      destinationName: hasDestination ? destinationName : "",
+      destinationCoords: hasDestination ? destinationCoords : null,
+      startCoords: currentCoords,
+      totalKm: hasDestination ? totalKm ?? remainingKm : null,
+      startedAt, endTime,
+      etaText: hasDestination ? calculatedEtaText : "",
+      purpose: purpose.trim(),
+      recipients: list,
+      recipientPhones: list.map((c) => c.phone),
+      groupIds: groups.map((g) => g.id),
+      groupNames: groups.map((g) => g.name),
+      historyId: `journey-${startedAt}`,
+    };
     metaRef.current = meta;
 
     setIsActive(true);
+    setJourneyStartedAt(startedAt);
     setJourneyEndTime(endTime);
     setIsEtaExpired(false);
     setHasAutoAlertFired(false);
 
     await AsyncStorage.multiSet([
       [JOURNEY_KEY, "true"],
-      [JOURNEY_END_TIME_KEY, endTime.toString()],
+      [JOURNEY_END_TIME_KEY, endTime ? endTime.toString() : ""],
       [JOURNEY_CONTACTS_KEY, JSON.stringify(Array.from(selectedContacts))],
       [JOURNEY_META_KEY, JSON.stringify(meta)],
     ]);
     saveSecuritySettings({ autoAlertEnabled, autoAlertDelay });
+    logSafetyEvent({ id: meta.historyId, type: "journey", at: startedAt, purpose: meta.purpose, destination: meta.destinationName, recipients: list, groupNames: meta.groupNames });
 
     if (currentCoords) uploadLiveLocation(currentCoords.lat, currentCoords.lng, true, true);
     startLiveTracking();
 
     // Notifications are fired in parallel and not awaited, so the UI never waits on them
     const { name } = await getUserInfo();
-    const body = `Heading to ${destinationName}. Estimated arrival in ${calculatedEtaText}.${currentCoords ? ` Start: ${googleMapsLink(currentCoords.lat, currentCoords.lng)}` : ""}`;
-    pushToAll("journey_start", `${name} started a journey`, body, recipients(), {
-      kind: "journey", senderName: name,
+    const parts: string[] = [];
+    if (meta.purpose) parts.push(`${meta.purpose}.`);
+    if (hasDestination) parts.push(`Heading to ${destinationName}. Estimated arrival in ${calculatedEtaText}.`);
+    else parts.push("Follow their live location until they check in.");
+    if (groups.length) parts.push(`Shared with ${groups.map((g) => g.name).join(", ")}.`);
+    const body = `${parts.join(" ")}${currentCoords ? ` Start: ${googleMapsLink(currentCoords.lat, currentCoords.lng)}` : ""}`;
+    pushToAll("journey_start", `${name} started a journey`, body, list, {
+      senderName: name,
       ...(currentCoords ? { lat: currentCoords.lat, lng: currentCoords.lng } : {}),
-      destName: destinationName,
+      ...(hasDestination ? { destName: destinationName } : {}),
     });
   };
 
@@ -407,7 +482,10 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
     const online = !!net.isConnected && net.isInternetReachable !== false;
 
     if (online) {
-      if (settings.notifyInApp) pushToAll("emergency", isAuto ? `🚨 ${name} hasn't arrived` : `🚨 ${name}'s journey is delayed`, message, list);
+      if (settings.notifyInApp) pushToAll("emergency", isAuto ? `🚨 ${name} hasn't arrived` : `🚨 ${name}'s journey is delayed`, message, list, {
+        kind: "delay", senderName: name,
+        ...(currentCoords ? { lat: currentCoords.lat, lng: currentCoords.lng } : {}),
+      });
       if (!isAuto && settings.notifyWhatsApp) {
         const url = `whatsapp://send?phone=${normalizePhone(list[0].phone, false)}&text=${encodeURIComponent(message)}`;
         const can = await Linking.canOpenURL(url).catch(() => false);
@@ -416,15 +494,20 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
       if (settings.notifyInApp) return;
     }
     if (settings.notifySms) await sendDelaySms(message, list.map((c) => c.phone));
+    logSafetyEvent({ type: "delay_alert", at: Date.now(), recipients: list });
   };
 
-  const stopJourneyCleanup = async (navigateBack = true) => {
+  const stopJourneyCleanup = async (navigateBack = true, arrived = false) => {
     stopLiveTracking();
+    if (metaRef.current?.historyId) updateSafetyEvent(metaRef.current.historyId, { endedAt: Date.now(), arrived });
     if (currentCoords) uploadLiveLocation(currentCoords.lat, currentCoords.lng, false, true);
     metaRef.current = null;
     setIsActive(false);
     setJourneyEndTime(null);
+    setJourneyStartedAt(null);
     setIsEtaExpired(false);
+    setPurpose("");
+    setSelectedGroups(new Set());
     clearDestination();
     await AsyncStorage.multiRemove([JOURNEY_KEY, JOURNEY_END_TIME_KEY, JOURNEY_CONTACTS_KEY, JOURNEY_META_KEY]);
     if (navigateBack) navigation.navigate("MainTabs", { screen: "Safety", params: { isJourneyActive: false, timestamp: Date.now() } });
@@ -432,8 +515,8 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
 
   const confirmArrival = async () => {
     const { name } = await getUserInfo();
-    pushToAll("journey_end", `✅ ${name} arrived safely`, `${name} has confirmed they arrived${destinationName ? ` at ${destinationName}` : ""}.`, recipients());
-    await stopJourneyCleanup();
+    pushToAll("journey_end", `✅ ${name} arrived safely`, `${name} has confirmed they arrived${destinationName ? ` at ${destinationName}` : " safely"}.`, recipients(), { senderName: name });
+    await stopJourneyCleanup(true, true);
   };
 
   const endEarly = () => {
@@ -441,16 +524,18 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
       { text: "Keep Sharing", style: "cancel" },
       { text: "End Journey", style: "destructive", onPress: async () => {
         const { name } = await getUserInfo();
-        pushToAll("journey_end", `${name} ended their journey`, `${name} stopped sharing their journey.`, recipients());
+        pushToAll("journey_end", `${name} ended their journey`, `${name} stopped sharing their journey.`, recipients(), { senderName: name });
         stopJourneyCleanup();
       } },
     ]);
   };
 
-  const contactNames = recipients().map((c) => c.name.split(" ")[0]).join(", ");
+  const recipientList = recipients();
+  const contactNames = recipientList.map((c) => c.name.split(" ")[0]).join(", ");
   const alertText = contactNames.length > 0 ? contactNames.replace(/,([^,]*)$/, " and$1") : "your trusted contacts";
   const progress = totalKm && remainingKm !== null ? Math.max(0, Math.min(1, 1 - remainingKm / totalKm)) : 0;
-  const canStart = !!destinationCoords && calculatedEtaMs > 0;
+  const canStart = recipientList.length > 0 && !isSearchingRoute;
+  const hasDestination = !!destinationCoords && calculatedEtaMs > 0;
 
   return (
     <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
@@ -557,11 +642,39 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
 
           {!isActive ? (
             <>
+              <TText fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>PURPOSE (OPTIONAL)</TText>
+              <XStack backgroundColor={cardBg} borderRadius={16} paddingHorizontal={16} height={50} alignItems="center" borderWidth={1} borderColor={divider} marginBottom={10}>
+                <Feather name="edit-3" size={15} color={theme.textSecondary} style={{ marginRight: 10 }} />
+                <TextInput
+                  style={{ flex: 1, fontFamily: "Chirp-Medium", fontSize: 14, color: theme.textPrimary }}
+                  placeholder="e.g. Going home, going to work"
+                  placeholderTextColor={theme.textSecondary}
+                  value={purpose}
+                  onChangeText={setPurpose}
+                  maxLength={60}
+                />
+                {purpose.length > 0 && (
+                  <TouchableOpacity onPress={() => setPurpose("")} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Feather name="x-circle" size={15} color={theme.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </XStack>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+                {PURPOSES.map((p) => (
+                  <TouchableOpacity key={p} onPress={() => setPurpose(p)}>
+                    <YStack paddingHorizontal={12} paddingVertical={7} borderRadius={14} borderWidth={1} borderColor={purpose === p ? "#00C48A" : divider} backgroundColor={purpose === p ? "rgba(0,196,138,0.1)" : cardBg}>
+                      <TText fontFamily="Chirp-Bold" fontSize={12} color={purpose === p ? "#00C48A" : theme.textSecondary}>{p}</TText>
+                    </YStack>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
               <TText fontSize={11} fontFamily="Chirp-Bold" color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>EXPECTED ARRIVAL TIME</TText>
               <YStack backgroundColor={cardBg} borderRadius={16} borderWidth={1} borderColor={divider} paddingVertical={16} alignItems="center" marginBottom={24}>
                 {isSearchingRoute ? <ActivityIndicator size="small" color="#00C48A" /> : (
                   <>
-                    <TText fontSize={18} fontFamily="Chirp-Heavy" color={calculatedEtaMs > 0 ? "#00C48A" : theme.textSecondary}>{calculatedEtaText}</TText>
+                    <TText fontSize={calculatedEtaMs > 0 ? 18 : 14} fontFamily="Chirp-Heavy" color={calculatedEtaMs > 0 ? "#00C48A" : theme.textSecondary}>{calculatedEtaMs > 0 ? calculatedEtaText : destinationCoords ? calculatedEtaText : "No destination — that's okay"}</TText>
+                    {!destinationCoords && <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary} marginTop={4} textAlign="center" paddingHorizontal={16}>Destination is optional. Add one to get an ETA and arrival check-in.</TText>}
                     {remainingKm !== null && <TText fontSize={12} fontFamily="Chirp-Medium" color={theme.textSecondary} marginTop={4}>{calculatedEtaText.startsWith("~") ? `Estimated · about ${remainingKm.toFixed(1)} km` : `${remainingKm.toFixed(1)} km by road`}</TText>}
                   </>
                 )}
@@ -593,6 +706,52 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                 </ScrollView>
               )}
 
+              {/* Share with a community — always available; prompts to create one if none exist yet */}
+              <XStack alignItems="center" justifyContent="space-between" marginLeft={4} marginBottom={12} marginTop={4}>
+                <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5}>SHARE WITH A COMMUNITY</TText>
+                <TouchableOpacity onPress={() => navigation.navigate("CommunitiesScreen")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <TText fontFamily="Chirp-Bold" fontSize={12} color="#00C48A">{myGroups.length > 0 ? "Manage" : "Create"}</TText>
+                </TouchableOpacity>
+              </XStack>
+              {myGroups.length === 0 ? (
+                <TouchableOpacity onPress={() => navigation.navigate("CommunitiesScreen")}>
+                  <XStack backgroundColor={cardBg} borderRadius={16} borderWidth={1} borderColor={divider} borderStyle="dashed" padding={14} alignItems="center" gap={10} marginBottom={20}>
+                    <YStack width={34} height={34} borderRadius={17} backgroundColor={isDarkMode ? "rgba(0,196,138,0.12)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+                      <Feather name="users" size={15} color="#00C48A" />
+                    </YStack>
+                    <YStack flex={1}>
+                      <TText fontFamily="Chirp-Bold" fontSize={13} color={theme.textPrimary}>Create a community</TText>
+                      <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>e.g. Family or Work — share your journey with the whole group at once</TText>
+                    </YStack>
+                    <Feather name="chevron-right" size={16} color={theme.textSecondary} />
+                  </XStack>
+                </TouchableOpacity>
+              ) : (
+                <XStack flexWrap="wrap" gap={8} marginBottom={20}>
+                  {myGroups.map((g) => {
+                    const on = selectedGroups.has(g.id);
+                    return (
+                      <TouchableOpacity key={g.id} onPress={() => toggleGroupSelection(g.id)}>
+                        <XStack paddingHorizontal={12} paddingVertical={9} borderRadius={16} borderWidth={1.5} borderColor={on ? "#00C48A" : divider} backgroundColor={on ? "rgba(0,196,138,0.1)" : cardBg} alignItems="center" gap={6}>
+                          <TText fontSize={14}>{g.emoji || "👥"}</TText>
+                          <TText fontFamily="Chirp-Bold" fontSize={12} color={on ? "#00C48A" : theme.textPrimary}>{g.name}</TText>
+                          <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>· {g.members.length}</TText>
+                          {on && <Feather name="check" size={13} color="#00C48A" />}
+                        </XStack>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </XStack>
+              )}
+
+              {recipientList.length > 0 && (
+                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginLeft={4} marginBottom={20} marginTop={-6}>
+                  {recipientList.length} {recipientList.length === 1 ? "person" : "people"} will follow your journey
+                </TText>
+              )}
+
+              {hasDestination && (
+              <>
               <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginLeft={4} marginBottom={12}>ARRIVAL CHECK-IN</TText>
               <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor="#00C48A" padding={20} marginBottom={32}>
                 <XStack justifyContent="space-between" alignItems="center" marginBottom={autoAlertEnabled ? 16 : 0}>
@@ -624,6 +783,8 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
                   </YStack>
                 )}
               </YStack>
+              </>
+              )}
 
               <TouchableOpacity activeOpacity={0.8} onPress={startSharing} disabled={!canStart}>
                 <YStack backgroundColor={canStart ? "#00C48A" : (isDarkMode ? "#1A221E" : "#E2E8F0")} borderRadius={20} paddingVertical={18} alignItems="center">
@@ -635,26 +796,43 @@ const JourneyShareScreen = ({ navigation, route }: any) => {
             <YStack>
               {/* Journey progress */}
               <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor="#00C48A" padding={20} marginBottom={16}>
-                <XStack alignItems="center" marginBottom={16}>
+                {!!purpose && (
+                  <XStack alignItems="center" marginBottom={12} gap={8}>
+                    <Feather name="edit-3" size={13} color={theme.textSecondary} />
+                    <TText fontFamily="Chirp-Bold" fontSize={13} color={theme.textPrimary}>{purpose}</TText>
+                  </XStack>
+                )}
+                <XStack alignItems="center" marginBottom={journeyEndTime ? 16 : 4}>
                   <YStack width={36} height={36} borderRadius={18} backgroundColor="rgba(239,68,68,0.1)" justifyContent="center" alignItems="center" marginRight={12}>
-                    <Feather name="flag" size={16} color="#EF4444" />
+                    <Feather name={journeyEndTime ? "flag" : "radio"} size={16} color="#EF4444" />
                   </YStack>
                   <YStack flex={1}>
-                    <TText fontFamily="Chirp-Bold" fontSize={10} color={theme.textSecondary} letterSpacing={1}>DESTINATION</TText>
-                    <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{destinationName || "—"}</TText>
+                    <TText fontFamily="Chirp-Bold" fontSize={10} color={theme.textSecondary} letterSpacing={1}>{journeyEndTime ? "DESTINATION" : "LIVE LOCATION"}</TText>
+                    <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{journeyEndTime ? destinationName || "—" : "Sharing until you check in"}</TText>
                   </YStack>
                 </XStack>
-                <YStack height={8} borderRadius={4} backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} overflow="hidden" marginBottom={8}>
-                  <YStack height={8} width={`${Math.round(progress * 100)}%`} backgroundColor="#00C48A" borderRadius={4} />
-                </YStack>
-                <XStack justifyContent="space-between">
-                  <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{Math.round(progress * 100)}% of the way</TText>
-                  <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{remainingKm !== null ? `${remainingKm.toFixed(1)} km left` : "Calculating..."}</TText>
-                </XStack>
-                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={12}>Shared with {alertText}</TText>
+                {!!journeyEndTime && (
+                  <>
+                    <YStack height={8} borderRadius={4} backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} overflow="hidden" marginBottom={8}>
+                      <YStack height={8} width={`${Math.round(progress * 100)}%`} backgroundColor="#00C48A" borderRadius={4} />
+                    </YStack>
+                    <XStack justifyContent="space-between">
+                      <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{Math.round(progress * 100)}% of the way</TText>
+                      <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{remainingKm !== null ? `${remainingKm.toFixed(1)} km left` : "Calculating..."}</TText>
+                    </XStack>
+                  </>
+                )}
+                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} marginTop={12}>
+                  Shared with {metaRef.current?.groupNames?.length ? `${metaRef.current.groupNames.join(", ")} · ` : ""}{alertText}
+                </TText>
               </YStack>
 
-              {!isEtaExpired ? (
+              {!journeyEndTime ? (
+                <YStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "rgba(0,196,138,0.2)" : "#D1FAE5"} paddingVertical={28} alignItems="center" marginBottom={16}>
+                  <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A" letterSpacing={1.5} marginBottom={8}>SHARING FOR</TText>
+                  <TText fontSize={44} fontFamily="Chirp-Heavy" color={theme.textPrimary} fontVariant={["tabular-nums"]}>{elapsedString}</TText>
+                </YStack>
+              ) : !isEtaExpired ? (
                 <YStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.05)" : "#ECFDF5"} borderRadius={24} borderWidth={1} borderColor={isDarkMode ? "rgba(0,196,138,0.2)" : "#D1FAE5"} paddingVertical={28} alignItems="center" marginBottom={16}>
                   <TText fontSize={11} fontFamily="Chirp-Bold" color="#00C48A" letterSpacing={1.5} marginBottom={8}>TIME TO EXPECTED ARRIVAL</TText>
                   <TText fontSize={44} fontFamily="Chirp-Heavy" color={theme.textPrimary} fontVariant={["tabular-nums"]}>{timeLeftString}</TText>

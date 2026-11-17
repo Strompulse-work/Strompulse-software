@@ -19,6 +19,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 
 const { height, width } = Dimensions.get("window");
+// Map height chosen so the whole Home tab (city, tabs, home address, map, hardware card) fits on one screen
+const HOME_MAP_HEIGHT = Math.max(230, Math.min(480, height - 535));
 const MAX_TRUSTED_GAP_MS = 4 * 60 * 60 * 1000;
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -693,26 +695,26 @@ const ElectricityScreen = ({ navigation }: any) => {
       <SyncNotice visible={showSyncNotice} isDarkMode={isDarkMode} />
 
       <SafeAreaView style={{ flex: 1 }}>
-        <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={16} borderBottomWidth={1} borderBottomColor={divider}>
-          <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
-          <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 23 }} color={theme.textPrimary}>Strompulse</TText>
-          <TouchableOpacity onPress={() => toggleSidebar(true)}>
-            <YStack width={42} height={42} justifyContent="center" alignItems="flex-end">
-              <Feather name="menu" size={24} color={theme.textPrimary} />
-            </YStack>
-          </TouchableOpacity>
-        </XStack>
+        {/* Header — "LIVE GRID STATUS" sits above the line */}
+        <YStack paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={12} borderBottomWidth={1} borderBottomColor={divider}>
+          <XStack alignItems="center" justifyContent="space-between">
+            <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
+            <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 23 }} color={theme.textPrimary}>Strompulse</TText>
+            <TouchableOpacity onPress={() => toggleSidebar(true)}>
+              <YStack width={42} height={42} justifyContent="center" alignItems="flex-end">
+                <Feather name="menu" size={24} color={theme.textPrimary} />
+              </YStack>
+            </TouchableOpacity>
+          </XStack>
+          <XStack alignSelf="center" alignItems="center" gap={6} marginTop={8} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} paddingHorizontal={12} paddingVertical={5} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#047857" : "#A7F3D0"}>
+            <YStack width={6} height={6} borderRadius={3} backgroundColor="#00C48A" />
+            <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A" letterSpacing={0.5}>LIVE GRID STATUS</TText>
+          </XStack>
+        </YStack>
 
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C48A" />}>
-          <XStack alignItems="center" justifyContent="center" paddingHorizontal={24} marginBottom={16} marginTop={16}>
-            <XStack alignItems="center" gap={6} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} paddingHorizontal={12} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#047857" : "#A7F3D0"}>
-              <YStack width={6} height={6} borderRadius={3} backgroundColor="#00C48A" />
-              <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A" letterSpacing={0.5}>LIVE GRID STATUS</TText>
-            </XStack>
-          </XStack>
-
-          {/* City selector */}
-          <YStack zIndex={10000} marginHorizontal={24} marginBottom={16}>
+          {/* City selector (below the line) */}
+          <YStack zIndex={10000} marginHorizontal={24} marginBottom={14} marginTop={18}>
             <YStack position="absolute" top={-8} left={20} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} paddingHorizontal={4} zIndex={10}>
               <TText fontSize={11} fontFamily="Chirp-Heavy" color={theme.textPrimary} letterSpacing={0.5}>SELECT YOUR CITY</TText>
             </YStack>
@@ -743,7 +745,7 @@ const ElectricityScreen = ({ navigation }: any) => {
           </YStack>
 
           {/* Main navigation: three distinct containers with selected-state highlighting */}
-          <XStack marginHorizontal={24} marginBottom={20} gap={10}>
+          <XStack marginHorizontal={24} marginBottom={16} gap={10}>
             {(["map", "communities", "stats"] as const).map((tab) => {
               const isActive = activeTab === tab;
               const cfg = { map: { icon: "home", label: "Home" }, communities: { icon: "grid", label: "Communities" }, stats: { icon: "bar-chart-2", label: "Analytics" } }[tab];
@@ -759,7 +761,7 @@ const ElectricityScreen = ({ navigation }: any) => {
           </XStack>
 
           {activeTab === "map" && (
-            <YStack zIndex={9000} marginHorizontal={24} marginBottom={24}>
+            <YStack zIndex={9000} marginHorizontal={24} marginBottom={12}>
               {/* Same floating label style as "SELECT YOUR CITY" */}
               <YStack marginTop={8}>
               <YStack position="absolute" top={-8} left={20} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"} paddingHorizontal={4} zIndex={10}>
@@ -795,7 +797,7 @@ const ElectricityScreen = ({ navigation }: any) => {
               )}
               </YStack>
 
-              <YStack height={450} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={divider} marginTop={16}>
+              <YStack height={HOME_MAP_HEIGHT} borderRadius={24} overflow="hidden" borderWidth={1} borderColor={divider} marginTop={12}>
                 <CustomMapView
                   showCoverage={true}
                   region={mapRegion}
@@ -830,7 +832,7 @@ const ElectricityScreen = ({ navigation }: any) => {
                 </XStack>
 
                 {showSearchDropdown && (
-                  <YStack position="absolute" top={76} left={16} right={16} zIndex={101} backgroundColor={softBg} borderRadius={16} borderWidth={1} borderColor={divider} maxHeight={260} overflow="hidden">
+                  <YStack position="absolute" top={76} left={16} right={16} zIndex={101} backgroundColor={softBg} borderRadius={16} borderWidth={1} borderColor={divider} maxHeight={Math.max(110, HOME_MAP_HEIGHT - 88)} overflow="hidden">
                     <ScrollView keyboardShouldPersistTaps="handled">
                       {mapSearchQuery.length === 0 && recentMapSearch ? (
                         <YStack>
@@ -901,9 +903,9 @@ const ElectricityScreen = ({ navigation }: any) => {
               </YStack>
 
               {/* Get your hardware — below the map */}
-              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("RequestDeviceScreen")} style={{ marginTop: 16 }}>
-                <XStack backgroundColor={cardBg} borderRadius={24} padding={18} alignItems="center" borderWidth={1} borderColor={divider}>
-                  <Image source={require("../../assets/images/stromdevice.png")} style={{ width: 44, height: 44, resizeMode: "contain", marginRight: 16 }} />
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("RequestDeviceScreen")} style={{ marginTop: 12 }}>
+                <XStack backgroundColor={cardBg} borderRadius={20} paddingVertical={12} paddingHorizontal={14} alignItems="center" borderWidth={1} borderColor={divider}>
+                  <Image source={require("../../assets/images/stromdevice.png")} style={{ width: 36, height: 36, resizeMode: "contain", marginRight: 12 }} />
                   <YStack flex={1}>
                     <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary} marginBottom={2}>Get Personal Hardware</TText>
                     <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Track your home power with 100% accuracy</TText>

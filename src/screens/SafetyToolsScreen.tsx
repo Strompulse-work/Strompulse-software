@@ -6,7 +6,11 @@ import { useTheme } from "../theme/ThemeContext";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { AppState } from "react-native";
-import { DEFAULT_SECURITY_SETTINGS, SecuritySettings, loadSecuritySettings } from "../utils/securityConfig";
+import * as Location from "expo-location";
+import * as Clipboard from "expo-clipboard";
+import {
+  DEFAULT_SECURITY_SETTINGS, SecuritySettings, loadSecuritySettings, getSmsSosQuota, SmsQuota, SMS_SOS_MONTHLY_LIMIT, googleMapsLink,
+} from "../utils/securityConfig";
 
 const SafetyToolsScreen = ({ navigation }: any) => {
   const { theme, isDarkMode } = useTheme();
@@ -21,6 +25,8 @@ const SafetyToolsScreen = ({ navigation }: any) => {
   const isFocused = useIsFocused();
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
   const [settings, setSettings] = useState<SecuritySettings>(DEFAULT_SECURITY_SETTINGS);
+  const [quota, setQuota] = useState<SmsQuota>({ used: 0, remaining: SMS_SOS_MONTHLY_LIMIT, limit: SMS_SOS_MONTHLY_LIMIT });
+  const [copying, setCopying] = useState(false);
 
   const [isFakeCallVisible, setIsFakeCallVisible] = useState(false);
   const [isFakeCallPending, setIsFakeCallPending] = useState(false);
@@ -32,6 +38,7 @@ const SafetyToolsScreen = ({ navigation }: any) => {
   useFocusEffect(
     useCallback(() => {
       loadSecuritySettings().then(setSettings);
+      getSmsSosQuota().then(setQuota);
     }, [])
   );
 
@@ -113,6 +120,56 @@ const SafetyToolsScreen = ({ navigation }: any) => {
     setIsFakeCallVisible(false);
   };
 
+  const copyLiveLocation = async () => {
+    if (copying) return;
+    setCopying(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Location needed", "Allow location access to copy your live location.");
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      await Clipboard.setStringAsync(googleMapsLink(loc.coords.latitude, loc.coords.longitude));
+      Alert.alert("Link Copied", "Your current location link was copied. Paste it in any chat to share where you are.");
+    } catch {
+      Alert.alert("Couldn't get location", "Please make sure location services are turned on and try again.");
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const tipSections = [
+    {
+      title: "HOW SOS IS DELIVERED",
+      tips: [
+        { title: "Tap SOS once — 5 seconds to cancel", desc: "Tap the SOS button and a 5-second countdown starts. Tap Cancel if it was a mistake; otherwise your alert is sent automatically.", icon: "alert-triangle", color: "#EF4444" },
+        { title: "Online SOS — in-app & WhatsApp", desc: "With internet, your emergency contacts (and any community set to receive SOS) get an instant StromPulse alert with your live location, and WhatsApp opens with your message ready.", icon: "wifi", color: "#00C48A" },
+        { title: "Offline SOS — SMS", desc: "With no internet, SOS is sent by SMS. You need mobile network signal, but not data.", icon: "wifi-off", color: "#3B82F6" },
+        { title: `SMS limit: ${SMS_SOS_MONTHLY_LIMIT} per month`, desc: `You can send up to ${SMS_SOS_MONTHLY_LIMIT} SMS SOS alerts each month. It resets on the 1st. You have ${quota.remaining} of ${quota.limit} left this month.`, icon: "message-square", color: "#F59E0B" },
+      ],
+    },
+    {
+      title: "WHICH FEATURE TO USE",
+      tips: [
+        { title: "SOS — you need help now", desc: "A one-time emergency alert with your location goes to your emergency contacts.", icon: "alert-octagon", color: "#EF4444" },
+        { title: "Share My Journey — you're travelling", desc: "Contacts or a whole community follow your trip live until you check in. Purpose and destination are optional.", icon: "navigation", color: "#00C48A" },
+        { title: "Communities — your circles", desc: "Create groups like Family or Work and share a journey or SOS with everyone in the group at once. Members can see who else is in the group.", icon: "users", color: "#8B5CF6" },
+        { title: "Automatic Location Sharing — daily check-ins", desc: "Sends your location to your contacts 1, 2 or 3 times a day. Set it in Security Preferences.", icon: "map-pin", color: "#3B82F6" },
+      ],
+    },
+    {
+      title: "GENERAL SAFETY",
+      tips: [
+        { title: "In immediate danger, don't hesitate", desc: "If you feel unsafe right now, tap SOS immediately — you can always explain later.", icon: "zap", color: "#EF4444" },
+        { title: "Fire emergency", desc: "Get yourself and others out first. Alert people nearby, then use SOS once you're safely away from the building.", icon: "alert-circle", color: "#F59E0B" },
+        { title: "Travelling at night", desc: "Start Share My Journey before you set off so your contacts can follow your route in real time.", icon: "moon", color: "#F59E0B" },
+        { title: "Keep contacts current", desc: "Review your Emergency Contacts and Communities every few months — numbers and relationships change.", icon: "users", color: "#3B82F6" },
+        { title: "Know what's nearby", desc: "Check the closest hospitals, pharmacies and police stations on routes you travel often.", icon: "map", color: "#00C48A" },
+      ],
+    },
+  ];
+
   const formatTimer = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
 
   const CallBadge = ({ color }: { color: string }) => (
@@ -189,25 +246,12 @@ const SafetyToolsScreen = ({ navigation }: any) => {
           </TouchableOpacity>
           <YStack marginLeft={16}>
             <TText fontFamily="Chirp-Heavy" fontSize={18} color={theme.textPrimary}>Safety Tools</TText>
-            <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary} marginTop={2} letterSpacing={1}>QUICK ACCESS</TText>
+            <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary} marginTop={2} letterSpacing={1}>TOOLS, EMERGENCY CALLS & TIPS</TText>
           </YStack>
         </XStack>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}>
-          <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>EMERGENCY CALLS</TText>
-          <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor={divider} overflow="hidden" marginBottom={32}>
-            <ToolRow
-              icon="star" iconColor="#00C48A"
-              title={settings.favoriteContactName ? `Call ${settings.favoriteContactName}` : "Call Favorite Contact"}
-              subtitle={settings.favoriteContactPhone || "Not set — tap to add in Security Preferences"}
-              onPress={callFavorite}
-              trailing={<CallBadge color="#00C48A" />}
-            />
-            <ToolRow icon="shield" iconColor="#3B82F6" title="Call Police" subtitle={`Call ${settings.policeNumber}`} onPress={() => handleCall(settings.policeNumber)} trailing={<CallBadge color="#3B82F6" />} />
-            <ToolRow isLast icon="plus-circle" iconColor="#EF4444" title="Call Ambulance" subtitle={`Call ${settings.ambulanceNumber}`} onPress={() => handleCall(settings.ambulanceNumber)} trailing={<CallBadge color="#EF4444" />} />
-          </YStack>
-
-          <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>DEVICE TOOLS</TText>
+          <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>QUICK TOOLS</TText>
           <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor={divider} overflow="hidden">
             <ToolRow
               icon="phone-incoming" iconColor="#F59E0B"
@@ -217,6 +261,17 @@ const SafetyToolsScreen = ({ navigation }: any) => {
               trailing={
                 <YStack paddingHorizontal={12} paddingVertical={8} borderRadius={14} backgroundColor={isFakeCallPending ? (isDarkMode ? "#2D3B34" : "#E2E8F0") : "#F59E0B"}>
                   <TText fontFamily="Chirp-Bold" fontSize={11} color={isFakeCallPending ? theme.textSecondary : "#FFF"}>{isFakeCallPending ? "Ringing..." : "Start"}</TText>
+                </YStack>
+              }
+            />
+            <ToolRow
+              icon="copy" iconColor="#3B82F6"
+              title="Copy Live Location"
+              subtitle={copying ? "Getting your location..." : "Copy a map link of where you are right now"}
+              onPress={copyLiveLocation}
+              trailing={
+                <YStack paddingHorizontal={12} paddingVertical={8} borderRadius={14} backgroundColor="#3B82F6">
+                  <TText fontFamily="Chirp-Bold" fontSize={11} color="#FFF">{copying ? "..." : "Copy"}</TText>
                 </YStack>
               }
             />
@@ -232,7 +287,7 @@ const SafetyToolsScreen = ({ navigation }: any) => {
           {/* The camera must be a real, visible view for the torch to stay on (iOS and Android
               pause hidden 1x1 / transparent cameras, which switches the torch off). */}
           {torchMounted && (
-            <XStack marginTop={16} backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor="#00C48A" padding={14} alignItems="center">
+            <XStack marginTop={12} backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor="#00C48A" padding={14} alignItems="center">
               <View style={{ width: 56, height: 56, borderRadius: 14, overflow: "hidden", backgroundColor: "#000", marginRight: 14 }}>
                 <CameraView
                   style={{ width: 56, height: 56 }}
@@ -256,6 +311,40 @@ const SafetyToolsScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             </XStack>
           )}
+
+          <YStack height={28} />
+          <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>EMERGENCY CALLS</TText>
+          <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor={divider} overflow="hidden" marginBottom={32}>
+            <ToolRow
+              icon="star" iconColor="#00C48A"
+              title={settings.favoriteContactName ? `Call ${settings.favoriteContactName}` : "Call Favorite Contact"}
+              subtitle={settings.favoriteContactPhone || "Not set — tap to add in Security Preferences"}
+              onPress={callFavorite}
+              trailing={<CallBadge color="#00C48A" />}
+            />
+            <ToolRow icon="shield" iconColor="#3B82F6" title="Call Police" subtitle={`Call ${settings.policeNumber}`} onPress={() => handleCall(settings.policeNumber)} trailing={<CallBadge color="#3B82F6" />} />
+            <ToolRow isLast icon="plus-circle" iconColor="#EF4444" title="Call Ambulance" subtitle={`Call ${settings.ambulanceNumber}`} onPress={() => handleCall(settings.ambulanceNumber)} trailing={<CallBadge color="#EF4444" />} />
+          </YStack>
+
+
+          {tipSections.map((section) => (
+            <YStack key={section.title} marginBottom={28}>
+              <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1.5} marginBottom={12} marginLeft={4}>{section.title}</TText>
+              <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor={divider} overflow="hidden">
+                {section.tips.map((tip, idx) => (
+                  <XStack key={tip.title} padding={18} alignItems="flex-start" borderBottomWidth={idx === section.tips.length - 1 ? 0 : 1} borderColor={divider}>
+                    <YStack width={40} height={40} borderRadius={20} backgroundColor={`${tip.color}1A`} justifyContent="center" alignItems="center" marginRight={14}>
+                      <Feather name={tip.icon as any} size={18} color={tip.color} />
+                    </YStack>
+                    <YStack flex={1}>
+                      <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary} marginBottom={4}>{tip.title}</TText>
+                      <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary} lineHeight={18}>{tip.desc}</TText>
+                    </YStack>
+                  </XStack>
+                ))}
+              </YStack>
+            </YStack>
+          ))}
         </ScrollView>
       </SafeAreaView>
     </YStack>

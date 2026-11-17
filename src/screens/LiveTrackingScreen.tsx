@@ -53,7 +53,13 @@ const LiveTrackingScreen = ({ navigation, route }: any) => {
   const {
     senderName = "Contact", senderId, initialLat, initialLng,
     mode: rawMode = "journey", alertTime, alertMessage,
+    groupName, recipientNames = [], purpose,
   } = route.params || {};
+  // Everyone who received this share can see who else got it (like a group chat)
+  const othersCount = Math.max(0, (Array.isArray(recipientNames) ? recipientNames.length : 0) - 1);
+  const sharedWith = groupName
+    ? `Shared with ${groupName}${recipientNames.length ? ` · ${recipientNames.length} people` : ""}`
+    : othersCount > 0 ? `Also shared with ${recipientNames.slice(0, 3).join(", ")}${recipientNames.length > 3 ? ` +${recipientNames.length - 3}` : ""}` : null;
   const mode: Mode = rawMode === "sos" || rawMode === "location" ? rawMode : "journey";
   const t = THEMES[mode];
   const firstName = String(senderName).split(" ")[0];
@@ -344,6 +350,23 @@ const LiveTrackingScreen = ({ navigation, route }: any) => {
                 </XStack>
               ) : null}
 
+              {(!!purpose || !!sharedWith) && (
+                <YStack marginBottom={12} gap={4}>
+                  {!!purpose && (
+                    <XStack alignItems="center" gap={6}>
+                      <Feather name="edit-3" size={12} color={theme.textSecondary} />
+                      <TText fontFamily="Chirp-Bold" fontSize={13} color={theme.textPrimary}>{purpose}</TText>
+                    </XStack>
+                  )}
+                  {!!sharedWith && (
+                    <XStack alignItems="center" gap={6}>
+                      <Feather name="users" size={12} color={theme.textSecondary} />
+                      <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{sharedWith}</TText>
+                    </XStack>
+                  )}
+                </YStack>
+              )}
+
               {hasDest && (
                 <XStack alignItems="center" marginBottom={12}>
                   <YStack width={28} height={28} borderRadius={14} backgroundColor={softBg} justifyContent="center" alignItems="center" marginRight={10}>
@@ -367,8 +390,15 @@ const LiveTrackingScreen = ({ navigation, route }: any) => {
 
               <XStack backgroundColor={softBg} borderRadius={16} paddingVertical={12} marginBottom={12}>
                 {[
-                  { label: "DISTANCE LEFT", value: remainingKm !== null ? `${remainingKm.toFixed(1)} km` : "—", color: theme.textPrimary },
-                  { label: "EXPECTED", value: etaAt ? clock(etaAt) : "—", color: etaLate ? "#F59E0B" : t.color },
+                  ...(hasDest
+                    ? [
+                        { label: "DISTANCE LEFT", value: remainingKm !== null ? `${remainingKm.toFixed(1)} km` : "—", color: theme.textPrimary },
+                        { label: "EXPECTED", value: etaAt ? clock(etaAt) : "—", color: etaLate ? "#F59E0B" : t.color },
+                      ]
+                    : [
+                        { label: "STARTED", value: row?.started_at ? clock(row.started_at) : "—", color: theme.textPrimary },
+                        { label: "DESTINATION", value: "Not set", color: theme.textSecondary },
+                      ]),
                   { label: "UPDATED", value: timeAgo(row?.updated_at) || "—", color: theme.textPrimary },
                 ].map((x, i) => (
                   <YStack key={x.label} flex={1} alignItems="center" borderLeftWidth={i === 0 ? 0 : 1} borderLeftColor={isDarkMode ? "#2D3B34" : "#E2E8F0"}>
@@ -410,6 +440,13 @@ const LiveTrackingScreen = ({ navigation, route }: any) => {
                     </TText>
                   </YStack>
                 </XStack>
+
+                {!!sharedWith && (
+                  <XStack alignItems="center" gap={6} marginBottom={10}>
+                    <Feather name="users" size={12} color={theme.textSecondary} />
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{sharedWith}</TText>
+                  </XStack>
+                )}
 
                 {!!alertMessage && (
                   <YStack backgroundColor={isDarkMode ? t.softDark : t.soft} borderRadius={14} padding={12} marginBottom={14}>

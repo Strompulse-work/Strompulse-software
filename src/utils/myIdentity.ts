@@ -4,6 +4,7 @@
 // sends an alert uses this to make sure the right person gets it — and nobody else.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
+import { ensureSupabaseSession } from "./sessionGuard";
 
 // Change these if your users' phone numbers live somewhere else
 const PROFILE_TABLE = "profiles";
@@ -37,8 +38,8 @@ export const clearMyIdentityCache = async () => {
 };
 
 export async function getMyIdentity(force = false): Promise<{ userId: string | null; phoneKey: string }> {
-  const { data } = await supabase.auth.getSession();
-  const user = data?.session?.user;
+  const session = await ensureSupabaseSession();
+  const user = session?.user;
   const userId = user?.id ?? null;
   if (!userId) return { userId: null, phoneKey: "" };
   if (!force && memo && memo.userId === userId && memo.phoneKey) return memo;

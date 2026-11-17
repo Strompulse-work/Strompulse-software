@@ -9,6 +9,9 @@ import { DEVICE_LOCATIONS } from "../constants/gridLocations";
 import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getMyIdentity, isAlertForMe } from "../utils/myIdentity";
+import { markNotificationsSeen, notifyNotificationsChanged, READ_KEY, DISMISSED_KEY } from "../utils/notificationCenter";
+
+
 
 const getRelativeTime = (date: Date) => {
   const diff = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -54,7 +57,11 @@ const parseDbAlert = (dbAlert: any, isDarkMode: boolean) => {
   let icon = "bell";
   let senderName = meta.senderName || meta.sender_name || "";
 
-  if (type.includes("emergency") || title.toLowerCase().includes("sos")) {
+  const isDelay = meta.kind === "delay" || (type.includes("emergency") && !title.toLowerCase().includes("sos"));
+  if (isDelay) {
+    uiType = "delay"; bg = isDarkMode ? "rgba(245,158,11,0.12)" : "#FEF3C7"; color = "#F59E0B"; icon = "clock";
+    if (!senderName) senderName = title.replace(/^🚨\s*/, "").replace(/('s journey is delayed| hasn't arrived)$/i, "").trim();
+  } else if (type.includes("emergency") || title.toLowerCase().includes("sos")) {
     uiType = "sos"; bg = isDarkMode ? "rgba(239,68,68,0.1)" : "#FEE2E2"; color = "#EF4444"; icon = "alert-circle";
     if (!senderName) senderName = title.replace(/^.*?(SOS alert from|SOS from)\s*/i, "").replace(/^🚨\s*/, "").trim();
   } else if (type.includes("journey_end")) {
@@ -84,6 +91,9 @@ const parseDbAlert = (dbAlert: any, isDarkMode: boolean) => {
     senderId: dbAlert.user_id || dbAlert.sender_id || meta.senderId || null,
     senderName: senderName || "Contact",
     coords: extractCoords(dbAlert, message),
+    groupName: meta.groupName || null,
+    recipientNames: Array.isArray(meta.recipientNames) ? meta.recipientNames : [],
+    purpose: meta.purpose || null,
   };
 };
 
@@ -152,8 +162,12 @@ const NotificationsScreen = ({ navigation }: any) => {
       };
       start().catch(() => { if (isMounted) setLoading(false); });
 
+      // Viewing this tab clears the badge (and the app-icon badge)
+      markNotificationsSeen();
+
       return () => {
         isMounted = false;
+        markNotificationsSeen();
         if (alertSubscription) supabase.removeChannel(alertSubscription);
       };
     }, [isDarkMode])
@@ -258,10 +272,14 @@ const NotificationsScreen = ({ navigation }: any) => {
       .sort((a, b) => new Date(b.rawDate || 0).getTime() - new Date(a.rawDate || 0).getTime());
   }, [supabaseAlerts, derivedPowerAlerts, dismissedIds, readIds]);
 
+  // Big box: always shown on All/Security — latest SOS + latest journey share, or an empty state
   const activeSosAlert = finalNotifications.find((n) => n.type === "sos");
+  const activeJourneyAlert = finalNotifications.find((n) => n.type === "journey");
+  const showFeatured = activeTab === "All" || activeTab === "Security";
 
   const standardNotifications = finalNotifications.filter((item) => {
-    if (activeSosAlert && item.id === activeSosAlert.id) return false;
+    if (showFeatured && activeSosAlert && item.id === activeSosAlert.id) return false;
+    if (showFeatured && activeJourneyAlert && item.id === activeJourneyAlert.id) return false;
     if (activeTab === "All") return true;
     if (activeTab === "Security") return item.category === "security";
     return item.category === "electricity";
@@ -289,7 +307,7 @@ const NotificationsScreen = ({ navigation }: any) => {
         const next = new Set(prev);
         let changed = false;
         finalNotifications.forEach((n) => { if (!next.has(n.id)) { next.add(n.id); changed = true; } });
-        if (changed) AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...next]));
+        if (changed) AsyncStorage.setItem(READ_KEY, JSON.stringify([...next])).then(notifyNotificationsChanged);
         return next;
       });
     });
@@ -299,8 +317,9 @@ const NotificationsScreen = ({ navigation }: any) => {
   const handleDismissSos = async (id: string) => {
     const newDismissed = new Set(dismissedIds); newDismissed.add(id); setDismissedIds(newDismissed);
     const newRead = new Set(readIds); newRead.add(id); setReadIds(newRead);
-    await AsyncStorage.setItem("strompulse_dismissed_alerts", JSON.stringify([...newDismissed]));
-    await AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...newRead]));
+    await AsyncStorage.setItem(DISMISSED_KEY, JSON.stringify([...newDismissed]));
+    await AsyncStorage.setItem(READ_KEY, JSON.stringify([...newRead]));
+    notifyNotificationsChanged();
   };
 
   // "Track Journey" → live journey map · "View Location" on SOS → emergency live-location map
@@ -317,7 +336,7 @@ const NotificationsScreen = ({ navigation }: any) => {
     setReadIds((prev) => {
       if (prev.has(item.id)) return prev;
       const next = new Set(prev); next.add(item.id);
-      AsyncStorage.setItem("strompulse_read_alerts", JSON.stringify([...next]));
+      AsyncStorage.setItem(READ_KEY, JSON.stringify([...next])).then(notifyNotificationsChanged);
       return next;
     });
     navigation.navigate("LiveTrackingScreen", {
@@ -328,7 +347,17 @@ const NotificationsScreen = ({ navigation }: any) => {
       initialLng: item.coords?.lng,
       alertTime: item.rawDate ? new Date(item.rawDate).toISOString() : undefined,
       alertMessage: item.body,
+      groupName: item.groupName,
+      recipientNames: item.recipientNames,
+      purpose: item.purpose,
     });
+  };
+
+  const sharedWithText = (item: any) => {
+    const n = item.recipientNames?.length || 0;
+    if (item.groupName) return `Shared with ${item.groupName}${n ? ` · ${n} people` : ""}`;
+    if (n > 1) return `Also sent to ${n - 1} other${n - 1 === 1 ? "" : "s"}`;
+    return null;
   };
 
   const renderSegmentedControl = () => (
@@ -405,42 +434,108 @@ const NotificationsScreen = ({ navigation }: any) => {
         )}
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}>
-          {activeSosAlert && (activeTab === "All" || activeTab === "Security") && (
-            <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} padding={20} marginBottom={24} borderWidth={2} borderColor="#EF4444" shadowColor="#EF4444" shadowOffset={{ width: 0, height: 4 }} shadowOpacity={0.15} shadowRadius={12} elevation={8}>
-              <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={16}>
-                <XStack alignItems="center" flex={1}>
-                  <YStack width={44} height={44} borderRadius={12} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} justifyContent="center" alignItems="center" marginRight={12}>
-                    <YStack width={26} height={26} borderRadius={6} backgroundColor="#EF4444" justifyContent="center" alignItems="center">
-                      <TText fontSize={9} fontFamily="Chirp-Heavy" color="#FFFFFF">SOS</TText>
-                    </YStack>
-                  </YStack>
-                  <YStack flex={1}>
-                    <YStack backgroundColor="rgba(239,68,68,0.15)" paddingHorizontal={6} paddingVertical={2} borderRadius={6} alignSelf="flex-start" marginBottom={4}>
-                      <TText color="#EF4444" fontSize={9} fontFamily="Chirp-Bold" letterSpacing={0.5}>EMERGENCY</TText>
-                    </YStack>
-                    <TText fontSize={16} fontFamily="Chirp-Heavy" color={theme.textPrimary}>{activeSosAlert.title}</TText>
-                  </YStack>
-                </XStack>
-                <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{activeSosAlert.time}</TText>
-              </XStack>
-              <TText fontSize={13} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={20} marginBottom={12}>{activeSosAlert.body}</TText>
-              <XStack alignItems="center" gap={6} marginBottom={16}>
-                <Feather name="radio" size={12} color="#EF4444" />
-                <TText fontSize={11} fontFamily="Chirp-Bold" color="#EF4444">Tap View Location to see where {activeSosAlert.senderName.split(" ")[0]} is right now</TText>
-              </XStack>
-              <XStack gap={12}>
-                <TouchableOpacity style={{ flex: 2 }} onPress={() => openTracking(activeSosAlert, "sos")}>
-                  <XStack backgroundColor="#EF4444" borderRadius={16} paddingVertical={14} justifyContent="center" alignItems="center">
-                    <Feather name="map-pin" size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <TText fontSize={14} fontFamily="Chirp-Bold" color="#FFFFFF">View Location</TText>
+          {showFeatured && (
+            <YStack backgroundColor={isDarkMode ? "#121A16" : "#FFFFFF"} borderRadius={24} marginBottom={24} borderWidth={1.5} borderColor={activeSosAlert ? "#EF4444" : activeJourneyAlert ? "#00C48A" : (isDarkMode ? "#2D3B34" : "#E2E8F0")} overflow="hidden" shadowColor={activeSosAlert ? "#EF4444" : "#00C48A"} shadowOffset={{ width: 0, height: 4 }} shadowOpacity={0.12} shadowRadius={12} elevation={6}>
+              {/* --- SOS half --- */}
+              {activeSosAlert && (
+                <YStack padding={18} backgroundColor={isDarkMode ? "rgba(239,68,68,0.06)" : "#FFF7F7"}>
+                  <XStack justifyContent="space-between" alignItems="center" marginBottom={10}>
+                    <XStack alignItems="center" gap={8}>
+                      <YStack width={26} height={26} borderRadius={7} backgroundColor="#EF4444" justifyContent="center" alignItems="center">
+                        <TText fontSize={8} fontFamily="Chirp-Heavy" color="#FFFFFF">SOS</TText>
+                      </YStack>
+                      <TText color="#EF4444" fontSize={10} fontFamily="Chirp-Bold" letterSpacing={1}>EMERGENCY · {activeSosAlert.time.toUpperCase()}</TText>
+                    </XStack>
+                    <TouchableOpacity onPress={() => handleDismissSos(activeSosAlert.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Feather name="x" size={16} color={theme.textSecondary} />
+                    </TouchableOpacity>
                   </XStack>
-                </TouchableOpacity>
-                <TouchableOpacity style={{ flex: 1 }} onPress={() => handleDismissSos(activeSosAlert.id)}>
-                  <YStack backgroundColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} borderRadius={16} paddingVertical={14} justifyContent="center" alignItems="center">
-                    <TText fontSize={14} fontFamily="Chirp-Bold" color={theme.textSecondary}>Dismiss</TText>
-                  </YStack>
-                </TouchableOpacity>
-              </XStack>
+                  <TText fontSize={15} fontFamily="Chirp-Heavy" color={theme.textPrimary} marginBottom={4}>{activeSosAlert.title}</TText>
+                  <TText fontSize={12} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={18} numberOfLines={3}>{activeSosAlert.body}</TText>
+                  {!!sharedWithText(activeSosAlert) && (
+                    <XStack alignItems="center" gap={5} marginTop={6}>
+                      <Feather name="users" size={11} color={theme.textSecondary} />
+                      <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{sharedWithText(activeSosAlert)}</TText>
+                    </XStack>
+                  )}
+                  <TouchableOpacity onPress={() => openTracking(activeSosAlert, "sos")} style={{ marginTop: 12 }}>
+                    <XStack backgroundColor="#EF4444" borderRadius={14} paddingVertical={12} justifyContent="center" alignItems="center" gap={8}>
+                      <Feather name="map-pin" size={15} color="#FFFFFF" />
+                      <TText fontSize={14} fontFamily="Chirp-Bold" color="#FFFFFF">View Location</TText>
+                    </XStack>
+                  </TouchableOpacity>
+                </YStack>
+              )}
+
+              {!activeSosAlert && (
+                <YStack padding={18}>
+                  <XStack alignItems="center" gap={8} marginBottom={8}>
+                    <YStack width={26} height={26} borderRadius={7} backgroundColor={isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2"} justifyContent="center" alignItems="center">
+                      <TText fontSize={8} fontFamily="Chirp-Heavy" color="#EF4444">SOS</TText>
+                    </YStack>
+                    <TText color="#EF4444" fontSize={10} fontFamily="Chirp-Bold" letterSpacing={1}>SOS ALERTS</TText>
+                  </XStack>
+                  <TText fontSize={14} fontFamily="Chirp-Heavy" color={theme.textPrimary} marginBottom={2}>No SOS alerts</TText>
+                  <TText fontSize={12} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={18}>
+                    If someone who added you as an emergency contact sends an SOS, it appears here with their live location.
+                  </TText>
+                  <XStack marginTop={12} backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} borderRadius={14} paddingVertical={12} justifyContent="center" alignItems="center" gap={8} opacity={0.7}>
+                    <Feather name="map-pin" size={15} color={theme.textSecondary} />
+                    <TText fontSize={14} fontFamily="Chirp-Bold" color={theme.textSecondary}>View Location</TText>
+                  </XStack>
+                </YStack>
+              )}
+
+              <YStack height={1} backgroundColor={isDarkMode ? "#2D3B34" : "#F1F5F9"} />
+
+              {/* --- Journey share half --- */}
+              {activeJourneyAlert && (
+                <YStack padding={18}>
+                  <XStack justifyContent="space-between" alignItems="center" marginBottom={10}>
+                    <XStack alignItems="center" gap={8}>
+                      <YStack width={26} height={26} borderRadius={13} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                        <Feather name="navigation" size={12} color="#FFF" />
+                      </YStack>
+                      <TText color="#00C48A" fontSize={10} fontFamily="Chirp-Bold" letterSpacing={1}>JOURNEY SHARE · {activeJourneyAlert.time.toUpperCase()}</TText>
+                    </XStack>
+                    <TouchableOpacity onPress={() => handleDismissSos(activeJourneyAlert.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Feather name="x" size={16} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                  </XStack>
+                  <TText fontSize={15} fontFamily="Chirp-Heavy" color={theme.textPrimary} marginBottom={4}>{activeJourneyAlert.title}</TText>
+                  <TText fontSize={12} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={18} numberOfLines={3}>{activeJourneyAlert.body}</TText>
+                  {!!sharedWithText(activeJourneyAlert) && (
+                    <XStack alignItems="center" gap={5} marginTop={6}>
+                      <Feather name="users" size={11} color={theme.textSecondary} />
+                      <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary}>{sharedWithText(activeJourneyAlert)}</TText>
+                    </XStack>
+                  )}
+                  <TouchableOpacity onPress={() => openTracking(activeJourneyAlert, "journey")} style={{ marginTop: 12 }}>
+                    <XStack backgroundColor="#00C48A" borderRadius={14} paddingVertical={12} justifyContent="center" alignItems="center" gap={8}>
+                      <Feather name="navigation" size={15} color="#FFFFFF" />
+                      <TText fontSize={14} fontFamily="Chirp-Bold" color="#FFFFFF">Follow the Journey</TText>
+                    </XStack>
+                  </TouchableOpacity>
+                </YStack>
+              )}
+              {!activeJourneyAlert && (
+                <YStack padding={18}>
+                  <XStack alignItems="center" gap={8} marginBottom={8}>
+                    <YStack width={26} height={26} borderRadius={13} backgroundColor={isDarkMode ? "rgba(0,196,138,0.15)" : "#ECFDF5"} justifyContent="center" alignItems="center">
+                      <Feather name="navigation" size={12} color="#00C48A" />
+                    </YStack>
+                    <TText color="#00C48A" fontSize={10} fontFamily="Chirp-Bold" letterSpacing={1}>JOURNEY SHARE</TText>
+                  </XStack>
+                  <TText fontSize={14} fontFamily="Chirp-Heavy" color={theme.textPrimary} marginBottom={2}>No journeys shared with you</TText>
+                  <TText fontSize={12} fontFamily="Chirp-Medium" color={theme.textSecondary} lineHeight={18}>
+                    When a contact or community shares a journey with you, you can follow their live movement from here.
+                  </TText>
+                  <XStack marginTop={12} backgroundColor={isDarkMode ? "#1A221E" : "#F1F5F9"} borderRadius={14} paddingVertical={12} justifyContent="center" alignItems="center" gap={8} opacity={0.7}>
+                    <Feather name="navigation" size={15} color={theme.textSecondary} />
+                    <TText fontSize={14} fontFamily="Chirp-Bold" color={theme.textSecondary}>Follow the Journey</TText>
+                  </XStack>
+                </YStack>
+              )}
             </YStack>
           )}
 
@@ -449,7 +544,7 @@ const NotificationsScreen = ({ navigation }: any) => {
               <ActivityIndicator size="small" color="#00C48A" />
               <TText marginTop={12} fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary}>Loading notifications...</TText>
             </YStack>
-          ) : Object.keys(groupedNotifs).length === 0 && !activeSosAlert ? (
+          ) : Object.keys(groupedNotifs).length === 0 && !showFeatured ? (
             <YStack alignItems="center" marginTop={60}>
               {activeTab === "Electricity" && devicesLoading ? <ActivityIndicator size="small" color="#00C48A" /> : (
                 <>
@@ -472,7 +567,9 @@ const NotificationsScreen = ({ navigation }: any) => {
                       </XStack>
                       <TText fontSize={13} fontFamily="Chirp-Regular" color={theme.textSecondary} lineHeight={20} paddingRight={4}>{item.body}</TText>
 
-                      {item.type === "journey" && <ActionPill label="Track Journey" icon="navigation" color="#00C48A" solid onPress={() => openTracking(item, "journey")} />}
+                      {!!sharedWithText(item) && <TText fontSize={11} fontFamily="Chirp-Medium" color={theme.textSecondary} marginTop={4}>{sharedWithText(item)}</TText>}
+                      {item.type === "journey" && <ActionPill label="Follow the Journey" icon="navigation" color="#00C48A" solid onPress={() => openTracking(item, "journey")} />}
+                      {item.type === "delay" && <ActionPill label="View Location" icon="clock" color="#F59E0B" solid onPress={() => openTracking(item, "journey")} />}
                       {item.type === "journey_end" && <ActionPill label="View Journey" icon="flag" color="#00C48A" onPress={() => openTracking(item, "journey")} />}
                       {item.type === "location" && <ActionPill label="View Location" icon="map-pin" color="#3B82F6" onPress={() => openTracking(item, "location")} />}
                       {item.type === "sos" && <ActionPill label="View Location" icon="alert-triangle" color="#EF4444" solid onPress={() => openTracking(item, "sos")} />}

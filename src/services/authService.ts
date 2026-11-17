@@ -9,8 +9,14 @@ import { User, AuthSession, ApiResponse } from "../types";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import * as ExpoAuthSession from "expo-auth-session";
+import { unregisterPushTokenAsync } from "../utils/pushRegistration";
+import { clearMyIdentityCache } from "../utils/myIdentity";
+import { keepTokensInSync } from "../utils/sessionGuard";
 
 WebBrowser.maybeCompleteAuthSession();
+
+// Supabase rotates tokens on every refresh — keep the app's saved copy current
+keepTokensInSync();
 
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
@@ -266,6 +272,11 @@ export class AuthService {
 
   static async logout(): Promise<ApiResponse<void>> {
     try {
+      // Stop this phone receiving the old account's SOS / journey alerts (must run BEFORE signOut,
+      // while we're still logged in), then forget the cached phone number.
+      await unregisterPushTokenAsync();
+      await clearMyIdentityCache();
+
       const { error } = await supabase.auth.signOut();
       if (error) console.warn("Supabase logout error:", error);
 

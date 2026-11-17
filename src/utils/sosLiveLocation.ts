@@ -5,6 +5,7 @@
 // so an SOS never pretends to be a journey (and vice-versa).
 import * as Location from "expo-location";
 import { supabase } from "../config/supabase";
+import { ensureSupabaseSession } from "./sessionGuard";
 
 const SOS_SHARE_DURATION_MS = 60 * 60 * 1000; // keep sharing for 1 hour after SOS
 const UPLOAD_EVERY_MS = 15 * 1000;
@@ -16,8 +17,8 @@ let sosColumnsAvailable = true;
 let sosPhones: string[] = []; // ONLY these people (the sender's emergency contacts) may see the live SOS location
 
 const getUserId = async () => {
-  const { data } = await supabase.auth.getSession();
-  return data?.session?.user?.id ?? null;
+  const session = await ensureSupabaseSession();
+  return session?.user?.id ?? null;
 };
 
 const writeLocation = async (userId: string, senderName: string, lat: number, lng: number, sosActive: boolean, startedAt?: string) => {

@@ -142,25 +142,53 @@ const SafetySettingsScreen = ({ navigation }: any) => {
 
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}>
 
-          {/* 1. EMERGENCY CONTACTS (top) */}
+          {/* 1. EMERGENCY CONTACTS (top) — same card as the old one on the Safety screen */}
           <SectionLabel>EMERGENCY CONTACTS</SectionLabel>
           <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("ContactsScreen")}>
-            <YStack backgroundColor={cardBg} borderRadius={24} borderWidth={1} borderColor="#00C48A" padding={20} marginBottom={32}>
-              <XStack alignItems="center">
-                <YStack width={40} height={40} borderRadius={20} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} justifyContent="center" alignItems="center" marginRight={16}>
-                  <Feather name="users" size={18} color="#00C48A" />
-                </YStack>
+            <YStack backgroundColor={cardBg} borderRadius={24} paddingVertical={16} paddingHorizontal={18} borderWidth={1} borderColor="#00C48A" marginBottom={12}>
+              <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={14}>
                 <YStack flex={1}>
-                  <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary} marginBottom={2}>Select Emergency Contacts</TText>
-                  <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary} numberOfLines={1}>
-                    {emergencyContacts.length > 0 ? `${emergencyContacts.map((c) => c.name.split(" ")[0]).join(", ")} (${emergencyContacts.length}/3)` : "No contacts selected yet"}
-                  </TText>
+                  <XStack alignItems="center" marginBottom={4}>
+                    <Feather name="users" size={16} color={theme.textPrimary} style={{ marginRight: 8 }} />
+                    <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary}>Emergency Contacts</TText>
+                  </XStack>
+                  <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{emergencyContacts.length} of 3 contacts will be alerted</TText>
                 </YStack>
-                <YStack width={32} height={32} borderRadius={16} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
-                  <Feather name="arrow-right" size={14} color="#FFF" />
-                </YStack>
+                <TText fontFamily="Chirp-Bold" fontSize={13} color="#00C48A">Manage</TText>
+              </XStack>
+              <XStack gap={16} alignItems="center">
+                {emergencyContacts.slice(0, 3).map((contact, i) => (
+                  <YStack key={contact.id || i} alignItems="center">
+                    <YStack width={48} height={48} borderRadius={24} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginBottom={6}>
+                      <TText fontFamily="Chirp-Heavy" fontSize={18} color={contact.color}>{contact.initial}</TText>
+                    </YStack>
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{contact.name.split(" ")[0]}</TText>
+                  </YStack>
+                ))}
+                {emergencyContacts.length < 3 && (
+                  <YStack alignItems="center">
+                    <YStack width={48} height={48} borderRadius={24} backgroundColor={inputBg} justifyContent="center" alignItems="center" marginBottom={6} borderWidth={1} borderColor={inputBorder} borderStyle="dashed">
+                      <Feather name="plus" size={18} color="#00C48A" />
+                    </YStack>
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Add</TText>
+                  </YStack>
+                )}
+              </XStack>
+              <XStack marginTop={14} paddingTop={10} borderTopWidth={1} borderColor={cardBorder} alignItems="flex-start" gap={8}>
+                <Feather name="info" size={12} color={theme.textSecondary} style={{ marginTop: 2 }} />
+                <TText flex={1} fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} lineHeight={16}>
+                  Contacts on StromPulse get an in-app alert. Others get WhatsApp when you're online, or SMS when you're offline.
+                </TText>
               </XStack>
             </YStack>
+          </TouchableOpacity>
+
+          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("CommunitiesScreen")}>
+            <XStack backgroundColor={cardBg} borderRadius={18} borderWidth={1} borderColor={cardBorder} paddingVertical={12} paddingHorizontal={16} alignItems="center" marginBottom={32}>
+              <Feather name="users" size={16} color="#00C48A" style={{ marginRight: 10 }} />
+              <TText flex={1} fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Also alert a whole community on SOS — turn it on inside the group.</TText>
+              <Feather name="chevron-right" size={16} color={theme.textSecondary} />
+            </XStack>
           </TouchableOpacity>
 
           {/* 2. ALERT DELIVERY */}

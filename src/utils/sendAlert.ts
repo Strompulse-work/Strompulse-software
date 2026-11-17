@@ -2,6 +2,7 @@
 import { supabase } from "../config/supabase";
 import { normalizePhone } from "./securityConfig";
 import { getMyIdentity, phoneKey } from "./myIdentity";
+import { ensureSupabaseSession } from "./sessionGuard";
 
 export type AlertType = "emergency" | "journey_start" | "journey_end" | "location_share";
 
@@ -31,10 +32,9 @@ const prepareRecipients = (recipients: string | string[], myKey = "") => {
 
 // getSession reads the saved login instantly (no network round-trip) — important for time-sensitive SOS.
 const getSenderId = async (): Promise<string | null> => {
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData?.session?.user?.id) return sessionData.session.user.id;
-  const { data: userData } = await supabase.auth.getUser();
-  return userData?.user?.id ?? null;
+  // Restores Supabase's session from the saved login if it went missing
+  const session = await ensureSupabaseSession();
+  return session?.user?.id ?? null;
 };
 
 /**
@@ -65,7 +65,7 @@ export async function sendPushAlert(
 
     const userId = await getSenderId();
     if (!userId) {
-      console.error("[sendPushAlert] No user logged in to send alert.");
+      console.warn("[sendPushAlert] Not signed in to Supabase — alert not sent. Sign out and sign in again.");
       return false;
     }
 

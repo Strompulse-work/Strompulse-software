@@ -27,7 +27,7 @@ const EmergencyDirectionScreen = ({ navigation, route }: any) => {
   const [etaText, setEtaText] = useState("--");
   const [distanceText, setDistanceText] = useState("--");
   const [steps, setSteps] = useState<{ text: string; distance: string }[]>([]);
-  const [showSteps, setShowSteps] = useState(false);
+  const [showSteps, setShowSteps] = useState(true); // directions are visible straight away
   const [routeError, setRouteError] = useState<string | null>(null);
 
   const fetchDirections = async (oLat: number, oLng: number, fit: boolean) => {
@@ -41,7 +41,7 @@ const EmergencyDirectionScreen = ({ navigation, route }: any) => {
       setRouteError(r.isEstimate ? "Live route unavailable — showing an estimate. Use Google Maps below for turn-by-turn." : null);
       if (fit && mapRef.current) {
         const pts = r.points.length > 1 ? r.points : [{ latitude: oLat, longitude: oLng }, { latitude: destLat, longitude: destLng }];
-        mapRef.current.fitToCoordinates(pts, { edgePadding: { top: 80, right: 50, bottom: 300, left: 50 }, animated: true });
+        mapRef.current.fitToCoordinates(pts, { edgePadding: { top: 80, right: 50, bottom: 440, left: 50 }, animated: true });
       }
     } finally {
       setLoading(false);
@@ -75,7 +75,7 @@ const EmergencyDirectionScreen = ({ navigation, route }: any) => {
   }, [destLat, destLng]);
 
   const recenter = () => {
-    if (routeCoords.length && mapRef.current) mapRef.current.fitToCoordinates(routeCoords, { edgePadding: { top: 80, right: 50, bottom: 300, left: 50 }, animated: true });
+    if (routeCoords.length && mapRef.current) mapRef.current.fitToCoordinates(routeCoords, { edgePadding: { top: 80, right: 50, bottom: 440, left: 50 }, animated: true });
   };
 
   const openExternal = () => {
@@ -158,13 +158,16 @@ const EmergencyDirectionScreen = ({ navigation, route }: any) => {
                   <XStack alignItems="center" justifyContent="space-between" paddingVertical={8}>
                     <XStack alignItems="center" gap={8} flex={1}>
                       <Feather name="corner-up-right" size={14} color="#00C48A" />
-                      <TText flex={1} fontFamily="Chirp-Bold" fontSize={13} color={theme.textPrimary} numberOfLines={1}>{steps[0].text}</TText>
+                      <TText flex={1} fontFamily="Chirp-Heavy" fontSize={12} color={theme.textPrimary} letterSpacing={0.5}>TURN-BY-TURN DIRECTIONS ({steps.length})</TText>
                     </XStack>
                     <Feather name={showSteps ? "chevron-down" : "chevron-up"} size={16} color={theme.textSecondary} />
                   </XStack>
                 </TouchableOpacity>
+                {!showSteps && (
+                  <TText fontFamily="Chirp-Bold" fontSize={13} color={theme.textPrimary} numberOfLines={1} marginBottom={4}>{steps[0].text}</TText>
+                )}
                 {showSteps && (
-                  <ScrollView style={{ maxHeight: 200 }} showsVerticalScrollIndicator={false}>
+                  <ScrollView style={{ maxHeight: 200 }} showsVerticalScrollIndicator nestedScrollEnabled>
                     {steps.map((s, i) => (
                       <XStack key={i} paddingVertical={8} borderTopWidth={1} borderColor={isDarkMode ? "#1F2E27" : "#F1F5F9"}>
                         <TText width={22} fontFamily="Chirp-Bold" fontSize={12} color="#00C48A">{i + 1}</TText>

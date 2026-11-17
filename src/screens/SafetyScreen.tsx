@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
-  Platform, StatusBar, Animated, SafeAreaView, Dimensions,
-  ScrollView, Alert, TouchableOpacity, Pressable, View, Image, Switch, StyleSheet
+  Platform, StatusBar, Animated, SafeAreaView, Dimensions, Easing,
+  ScrollView, Alert, TouchableOpacity, View, Image, Switch, StyleSheet, Modal, Vibration
 } from "react-native";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Feather } from "@expo/vector-icons";
@@ -10,7 +10,6 @@ import { useTheme } from "../theme/ThemeContext";
 import * as Location from "expo-location";
 import * as Linking from "expo-linking";
 import * as SMS from "expo-sms";
-import * as Clipboard from "expo-clipboard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import AuthService from "../services/authService";
@@ -18,6 +17,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { sendPushAlert } from "../utils/sendAlert";
 import { startSosLiveSharing, stopSosLiveSharing, isSosLiveSharing } from "../utils/sosLiveLocation";
 import { getMyIdentity } from "../utils/myIdentity";
+import { loadGroups, buildRecipients, SafetyGroup, GroupMember } from "../utils/safetyGroups";
+import { logSafetyEvent } from "../utils/safetyHistory";
 import { registerForPushNotificationsAsync } from "../utils/pushRegistration";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import {
@@ -29,6 +30,7 @@ import {
 const { width } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const JOURNEY_KEY = "strompulse_journey_active";
+const SOS_COUNTDOWN_SECONDS = 5;
 
 const GOOGLE_API_KEY = Platform.OS === "ios" ? "AIzaSyCeWigeIvMAGJ_X-qj8UqY6CoGTbzBSHfA" : "AIzaSyB76SNOlgP1dkPZXhlPPIU_650y45Cd1Mo";
 
@@ -44,16 +46,19 @@ const SafetyScreen = ({ navigation, route }: any) => {
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const cardBg = isDarkMode ? "#121A16" : "#FFFFFF";
   const divider = isDarkMode ? "#2D3B34" : "#E2E8F0";
+  const soft = isDarkMode ? "#1F2E27" : "#F1F5F9";
 
   const [isJourneyActive, setIsJourneyActive] = useState(false);
   const [alertSent, setAlertSent] = useState(false);
   const [sosChannels, setSosChannels] = useState<string[]>([]);
   const [sosWasOnline, setSosWasOnline] = useState(true);
   const [sosMessage, setSosMessage] = useState("");
+  const [sosRecipients, setSosRecipients] = useState<GroupMember[]>([]);
   const [sosLiveOn, setSosLiveOn] = useState(isSosLiveSharing());
   const [currentLocation, setCurrentLocation] = useState("Locating...");
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [emergencyContacts, setEmergencyContacts] = useState<any[]>([]);
+  const [sosGroups, setSosGroups] = useState<SafetyGroup[]>([]);
   const [settings, setSettings] = useState<SecuritySettings>(DEFAULT_SECURITY_SETTINGS);
   const [smsQuota, setSmsQuota] = useState<SmsQuota>({ used: 0, remaining: SMS_SOS_MONTHLY_LIMIT, limit: SMS_SOS_MONTHLY_LIMIT });
   const [user, setUser] = useState<any>(null);
@@ -67,6 +72,12 @@ const SafetyScreen = ({ navigation, route }: any) => {
   const [nearbyPolice, setNearbyPolice] = useState<any[]>([]);
   const [nearbyPharmacies, setNearbyPharmacies] = useState<any[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(true);
+
+  // SOS countdown (tap once → 5 s → send, unless cancelled)
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ringAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const fetchEmergencyPlaces = async (lat: number, lng: number) => {
     setNearbyLoading(true);
@@ -132,8 +143,12 @@ const SafetyScreen = ({ navigation, route }: any) => {
       await markAutoShareSlot(slot);
       const phones = contacts.map((c) => normalizePhone(c.phone));
       Promise.resolve(
-        sendPushAlert("location_share", `${name} shared their location`, `Scheduled location update: ${place}. ${googleMapsLink(coords.lat, coords.lng)}`, phones, { kind: "location", senderName: name, lat: coords.lat, lng: coords.lng })
+        sendPushAlert("location_share", `${name} shared their location`, `Scheduled location update: ${place}. ${googleMapsLink(coords.lat, coords.lng)}`, phones, {
+          kind: "location", senderName: name, lat: coords.lat, lng: coords.lng,
+          recipientNames: contacts.map((c) => c.name),
+        })
       ).catch(() => {});
+      logSafetyEvent({ type: "location_share", at: Date.now(), recipients: contacts.map((c) => ({ name: c.name, phone: c.phone })) });
     } catch {}
   };
 
@@ -166,6 +181,9 @@ const SafetyScreen = ({ navigation, route }: any) => {
         if (savedContacts) contacts = JSON.parse(savedContacts).filter((c: any) => c.isEmergency);
         if (active) setEmergencyContacts(contacts);
 
+        // Communities that the user chose to alert on SOS
+        loadGroups().then(({ mine }) => { if (active) setSosGroups(mine.filter((g) => g.alert_on_sos && g.members.length > 0)); }).catch(() => {});
+
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === "granted") {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -193,6 +211,18 @@ const SafetyScreen = ({ navigation, route }: any) => {
     }, [route.params])
   );
 
+  useEffect(() => () => { if (countdownTimer.current) clearInterval(countdownTimer.current); }, []);
+
+  // Gentle pulse on the SOS button
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulseAnim, { toValue: 1.06, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      Animated.timing(pulseAnim, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
   const displayAvatar = localAvatar || user?.avatar_url || user?.user_metadata?.avatar_url || null;
   const fullName = localName || user?.full_name || "Stromer";
 
@@ -214,13 +244,17 @@ const SafetyScreen = ({ navigation, route }: any) => {
   };
 
   // ---------------- SOS ----------------
-  const holdProgress = useRef(new Animated.Value(0)).current;
-  const BUTTON_SIZE = 130;
-  const CIRCLE_RADIUS = BUTTON_SIZE / 2 - 3;
-  const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS;
-  const strokeDashoffset = holdProgress.interpolate({ inputRange: [0, 1], outputRange: [CIRCLE_CIRCUMFERENCE, 0] });
+  const RING = 190;
+  const RING_R = RING / 2 - 8;
+  const RING_C = 2 * Math.PI * RING_R;
+  const ringOffset = ringAnim.interpolate({ inputRange: [0, 1], outputRange: [0, RING_C] });
 
-  const sendSmsSos = async (message: string): Promise<boolean> => {
+  const recipientsForSos = () => buildRecipients(
+    emergencyContacts.map((c) => ({ name: c.name, phone: c.phone })),
+    sosGroups,
+  );
+
+  const sendSmsSos = async (message: string, phones: string[]): Promise<boolean> => {
     const quota = await getSmsSosQuota();
     if (quota.remaining <= 0) {
       Alert.alert(
@@ -238,15 +272,14 @@ const SafetyScreen = ({ navigation, route }: any) => {
       Alert.alert("SMS unavailable", "This device can't send SMS. Please call emergency services directly.");
       return false;
     }
-    const { result } = await SMS.sendSMSAsync(emergencyContacts.map((c) => c.phone), message);
+    const { result } = await SMS.sendSMSAsync(phones, message);
     if (result === "cancelled") return false;
     const q = await consumeSmsSosQuota();
     setSmsQuota(q);
     return true;
   };
 
-  // Opens WhatsApp with the message ready. Tries the app link first, then the universal wa.me link
-  // (which works even when the phone hides app-to-app detection), so it no longer silently falls back to SMS.
+  // Opens WhatsApp with the message ready (app link first, then the universal wa.me link)
   const openWhatsApp = async (phone: string, message: string): Promise<boolean> => {
     const num = normalizePhone(phone, false);
     const text = encodeURIComponent(message);
@@ -265,6 +298,11 @@ const SafetyScreen = ({ navigation, route }: any) => {
 
   const fireSosProtocol = async () => {
     setAlertSent(true);
+    const recipients = recipientsForSos();
+    setSosRecipients(recipients);
+    const phones = recipients.map((r) => r.phone);
+    const groupNames = sosGroups.map((g) => g.name);
+
     const net = await NetInfo.fetch();
     // Only treat as offline when the phone is clearly offline (null/unknown counts as online)
     const online = net.isConnected !== false && net.isInternetReachable !== false;
@@ -282,72 +320,80 @@ const SafetyScreen = ({ navigation, route }: any) => {
     const channels: string[] = [];
 
     if (online) {
-      // 1) In-app alert to all emergency contacts (not awaited, so nothing is delayed)
+      // 1) In-app alert + push to every recipient (not awaited, so nothing is delayed)
       if (settings.notifyInApp) {
-        const phones = emergencyContacts.map((c) => normalizePhone(c.phone));
         Promise.resolve(
           sendPushAlert("emergency", `SOS alert from ${userName}`, message, phones, {
             kind: "sos", senderName: userName,
+            recipientNames: recipients.map((r) => r.name),
+            ...(groupNames.length ? { groupName: groupNames.join(", ") } : {}),
             ...(settings.locationSharing && currentCoords ? { lat: currentCoords.lat, lng: currentCoords.lng } : {}),
           })
         ).catch(() => {});
         channels.push("StromPulse in-app alert");
       }
-      // Live location for contacts who open the SOS in StromPulse (stops after 1 hour or "I'm Safe")
+      // Live location for recipients who open the SOS (stops after 1 hour or "I'm Safe")
       if (settings.locationSharing && currentCoords) {
-        startSosLiveSharing(userName, currentCoords, emergencyContacts.map((c) => normalizePhone(c.phone))).then((ok) => setSosLiveOn(ok)).catch(() => {});
+        startSosLiveSharing(userName, currentCoords, phones).then((ok) => setSosLiveOn(ok)).catch(() => {});
       }
       // 2) WhatsApp to the first emergency contact — others can be messaged from the SOS Sent screen
-      if (settings.notifyWhatsApp) {
-        const opened = await openWhatsApp(emergencyContacts[0].phone, message);
+      if (settings.notifyWhatsApp && recipients[0]) {
+        const opened = await openWhatsApp(recipients[0].phone, message);
         if (opened) channels.push("WhatsApp");
-        else if (settings.notifySms && (await sendSmsSos(message))) channels.push("SMS");
-      } else if (!settings.notifyInApp && settings.notifySms && (await sendSmsSos(message))) {
+        else if (settings.notifySms && (await sendSmsSos(message, phones))) channels.push("SMS");
+      } else if (!settings.notifyInApp && settings.notifySms && (await sendSmsSos(message, phones))) {
         channels.push("SMS");
       }
     } else if (settings.notifySms) {
       // Offline → SMS (needs network signal, not data)
-      if (await sendSmsSos(message)) channels.push("SMS");
+      if (await sendSmsSos(message, phones)) channels.push("SMS");
     }
 
     setSosChannels(channels);
-    holdProgress.setValue(0);
+    logSafetyEvent({ type: "sos", at: Date.now(), recipients, groupNames, channels });
   };
 
-  const triggerEmergencyProtocol = () => {
-    if (emergencyContacts.length === 0) {
-      holdProgress.setValue(0);
-      Alert.alert("No Emergency Contacts", "Add at least one emergency contact before using SOS.", [
+  const stopCountdown = () => {
+    if (countdownTimer.current) clearInterval(countdownTimer.current);
+    countdownTimer.current = null;
+    ringAnim.stopAnimation();
+    Vibration.cancel();
+    setCountdown(null);
+  };
+
+  const onSosPress = () => {
+    if (recipientsForSos().length === 0) {
+      Alert.alert("No Emergency Contacts", "Add at least one emergency contact (or a community set to receive SOS) before using SOS.", [
         { text: "Cancel", style: "cancel" },
         { text: "Add Contacts", onPress: () => navigation.navigate("ContactsScreen") },
       ]);
       return;
     }
+    ringAnim.setValue(0);
+    setCountdown(SOS_COUNTDOWN_SECONDS);
+    Vibration.vibrate(200);
+    Animated.timing(ringAnim, { toValue: 1, duration: SOS_COUNTDOWN_SECONDS * 1000, easing: Easing.linear, useNativeDriver: false }).start();
+    let left = SOS_COUNTDOWN_SECONDS;
+    countdownTimer.current = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        stopCountdown();
+        fireSosProtocol();
+      } else {
+        Vibration.vibrate(120);
+        setCountdown(left);
+      }
+    }, 1000);
+  };
+
+  const cancelSos = () => {
+    stopCountdown();
+    logSafetyEvent({ type: "sos_cancelled", at: Date.now() });
+  };
+
+  const sendSosNow = () => {
+    stopCountdown();
     fireSosProtocol();
-  };
-
-  const handlePressIn = () => {
-    Animated.timing(holdProgress, { toValue: 1, duration: 3000, useNativeDriver: false }).start(({ finished }) => {
-      if (finished) triggerEmergencyProtocol();
-    });
-  };
-
-  const handlePressOut = () => {
-    if (!alertSent) {
-      holdProgress.stopAnimation();
-      Animated.timing(holdProgress, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-    }
-  };
-
-  const copyLocation = async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Location needed", "Allow location access to copy your live location.");
-      return;
-    }
-    const loc = await Location.getCurrentPositionAsync({});
-    await Clipboard.setStringAsync(googleMapsLink(loc.coords.latitude, loc.coords.longitude));
-    Alert.alert("Link Copied", "Your current location link was copied to the clipboard.");
   };
 
   const openDirections = (place: any) => {
@@ -370,7 +416,7 @@ const SafetyScreen = ({ navigation, route }: any) => {
         <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
         <SafeAreaView style={{ flex: 1 }}>
           <XStack alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={16}>
-            <TouchableOpacity onPress={() => { setAlertSent(false); holdProgress.setValue(0); }} style={{ padding: 8, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 12, borderWidth: 1, borderColor: divider }}>
+            <TouchableOpacity onPress={() => setAlertSent(false)} style={{ padding: 8, backgroundColor: isDarkMode ? "#1A221E" : "#FFFFFF", borderRadius: 12, borderWidth: 1, borderColor: divider }}>
               <Feather name="chevron-left" size={20} color={theme.textPrimary} />
             </TouchableOpacity>
             <YStack marginLeft={16}>
@@ -379,27 +425,27 @@ const SafetyScreen = ({ navigation, route }: any) => {
             </YStack>
           </XStack>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 24 }}>
-            <YStack alignItems="center" marginTop={24} marginBottom={28}>
-              <YStack width={100} height={100} borderRadius={50} backgroundColor="#EF4444" justifyContent="center" alignItems="center" marginBottom={20}>
-                <Feather name="alert-triangle" size={48} color="#FFFFFF" />
+            <YStack alignItems="center" marginTop={16} marginBottom={24}>
+              <YStack width={96} height={96} borderRadius={48} backgroundColor="#EF4444" justifyContent="center" alignItems="center" marginBottom={18}>
+                <Feather name="alert-triangle" size={44} color="#FFFFFF" />
               </YStack>
               <TText fontFamily="Chirp-Heavy" fontSize={24} color={theme.textPrimary} marginBottom={8} textAlign="center">
                 {sosChannels.length > 0 ? "Broadcast Active" : "Alert Not Delivered"}
               </TText>
               <TText fontFamily="Chirp-Medium" fontSize={13} color={theme.textSecondary} textAlign="center" lineHeight={20}>
                 {sosChannels.length > 0
-                  ? `Your emergency contacts were alerted via ${sosChannels.join(", ")}.`
+                  ? `${sosRecipients.length} ${sosRecipients.length === 1 ? "person was" : "people were"} alerted via ${sosChannels.join(", ")}.`
                   : "No alert could be sent. Please call emergency services directly."}
               </TText>
             </YStack>
 
             {sosLiveOn && (
-              <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.10)" : "#FEECEC"} borderRadius={20} borderWidth={1} borderColor={isDarkMode ? "rgba(239,68,68,0.45)" : "#F8B4B4"} padding={16} marginBottom={16}>
+              <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.10)" : "#FEF2F2"} borderRadius={20} borderWidth={1} borderColor={isDarkMode ? "rgba(239,68,68,0.45)" : "#FECACA"} padding={16} marginBottom={16}>
                 <XStack alignItems="center" gap={10} marginBottom={10}>
                   <YStack width={10} height={10} borderRadius={5} backgroundColor="#DC2626" />
                   <YStack flex={1}>
                     <TText fontFamily="Chirp-Heavy" fontSize={14} color={theme.textPrimary}>Sharing your live location</TText>
-                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Contacts on StromPulse can see you move for the next hour</TText>
+                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>The people alerted can see you move for the next hour</TText>
                   </YStack>
                 </XStack>
                 <TouchableOpacity onPress={async () => { await stopSosLiveSharing(); setSosLiveOn(false); }}>
@@ -411,23 +457,11 @@ const SafetyScreen = ({ navigation, route }: any) => {
               </YStack>
             )}
 
-            <YStack backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor={divider} padding={16} marginBottom={16}>
-              <XStack alignItems="center" justifyContent="space-between">
-                <XStack alignItems="center" gap={10}>
-                  <Feather name="message-square" size={16} color="#3B82F6" />
-                  <TText fontFamily="Chirp-Bold" fontSize={13} color={theme.textPrimary}>SMS SOS this month</TText>
-                </XStack>
-                <TText fontFamily="Chirp-Heavy" fontSize={13} color={smsQuota.remaining > 0 ? "#00C48A" : "#EF4444"}>
-                  {smsQuota.remaining} of {smsQuota.limit} left
-                </TText>
-              </XStack>
-            </YStack>
-
-            {emergencyContacts.length > 0 && !!sosMessage && (
+            {sosRecipients.length > 0 && !!sosMessage && (
               <YStack backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor={divider} padding={16} marginBottom={16}>
-                <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1} marginBottom={12}>SEND TO EACH CONTACT</TText>
-                {emergencyContacts.map((c, i) => (
-                  <XStack key={c.id || i} alignItems="center" paddingVertical={8} borderTopWidth={i === 0 ? 0 : 1} borderColor={isDarkMode ? "#1F2E27" : "#F1F5F9"}>
+                <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textSecondary} letterSpacing={1} marginBottom={12}>SEND TO EACH PERSON</TText>
+                {sosRecipients.map((c, i) => (
+                  <XStack key={c.phone} alignItems="center" paddingVertical={8} borderTopWidth={i === 0 ? 0 : 1} borderColor={soft}>
                     <TText flex={1} fontFamily="Chirp-Bold" fontSize={14} color={theme.textPrimary} numberOfLines={1}>{c.name}</TText>
                     <TouchableOpacity onPress={() => openWhatsApp(c.phone, sosMessage)}>
                       <XStack backgroundColor="#25D366" borderRadius={12} paddingHorizontal={12} paddingVertical={8} alignItems="center" gap={6} marginRight={8}>
@@ -461,7 +495,7 @@ const SafetyScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             </XStack>
 
-            <TouchableOpacity onPress={() => { setAlertSent(false); holdProgress.setValue(0); }}>
+            <TouchableOpacity onPress={() => setAlertSent(false)}>
               <YStack backgroundColor={cardBg} borderWidth={1} borderColor={divider} borderRadius={20} paddingVertical={18} alignItems="center">
                 <TText fontFamily="Chirp-Bold" fontSize={15} color={theme.textPrimary}>Close Alert Interface</TText>
               </YStack>
@@ -472,97 +506,106 @@ const SafetyScreen = ({ navigation, route }: any) => {
     );
   }
 
-  // One compact row per category: just the closest place. The full top-3 list lives on EmergencyMapScreen.
+  // ---------------- Nearby help: closest of each, side by side ----------------
   const NEARBY_CATEGORIES = [
-    { key: "hospital", label: "CLOSEST HOSPITAL", icon: "plus", color: "#EF4444", list: nearbyHospitals },
-    { key: "pharmacy", label: "CLOSEST PHARMACY", icon: "package", color: "#8B5CF6", list: nearbyPharmacies },
-    { key: "police", label: "CLOSEST POLICE STATION", icon: "shield", color: "#3B82F6", list: nearbyPolice },
+    { key: "hospital", label: "HOSPITAL", icon: "plus", color: "#EF4444", list: nearbyHospitals },
+    { key: "pharmacy", label: "PHARMACY", icon: "package", color: "#8B5CF6", list: nearbyPharmacies },
+    { key: "police", label: "POLICE", icon: "shield", color: "#3B82F6", list: nearbyPolice },
   ];
 
   const openEmergencyMap = (focus?: string) =>
     navigation.navigate("EmergencyMapScreen", { userLat: currentCoords?.lat, userLng: currentCoords?.lng, focus });
 
-  const renderClosestRow = (cat: (typeof NEARBY_CATEGORIES)[number], isLast: boolean) => {
+  const renderClosestTile = (cat: (typeof NEARBY_CATEGORIES)[number]) => {
     const p = cat.list[0];
     return (
-      <TouchableOpacity key={cat.key} activeOpacity={0.8} onPress={() => openEmergencyMap(cat.key)}>
-        <XStack alignItems="center" paddingVertical={10} borderBottomWidth={isLast ? 0 : 1} borderColor={isDarkMode ? "#1F2E27" : "#F1F5F9"}>
-          <YStack width={36} height={36} borderRadius={18} backgroundColor={`${cat.color}1A`} justifyContent="center" alignItems="center" marginRight={12}>
-            <Feather name={cat.icon as any} size={16} color={cat.color} />
-          </YStack>
-          <YStack flex={1} paddingRight={8}>
-            <TText fontFamily="Chirp-Bold" fontSize={9} color={cat.color} letterSpacing={0.8} marginBottom={2}>{cat.label}</TText>
-            {nearbyLoading ? (
-              <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Searching...</TText>
-            ) : p ? (
-              <>
-                <TText fontFamily="Chirp-Heavy" fontSize={13} color={theme.textPrimary} numberOfLines={1}>{p.name}</TText>
-                <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{p.dist} km • ~{p.time} min</TText>
-              </>
-            ) : (
-              <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>None found within 8 km</TText>
-            )}
-          </YStack>
-          {p && !nearbyLoading && (
-            <TouchableOpacity onPress={() => openDirections(p)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-              <XStack backgroundColor="#00C48A" borderRadius={12} paddingHorizontal={10} paddingVertical={7} alignItems="center" gap={5}>
-                <Feather name="navigation" size={11} color="#FFF" />
-                <TText fontFamily="Chirp-Bold" fontSize={11} color="#FFF">Go</TText>
-              </XStack>
-            </TouchableOpacity>
+      <TouchableOpacity key={cat.key} activeOpacity={0.85} style={{ flex: 1 }} onPress={() => openEmergencyMap(cat.key)}>
+        <YStack flex={1} backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} borderRadius={14} padding={10} borderWidth={1} borderColor={soft}>
+          <XStack alignItems="center" gap={6} marginBottom={6}>
+            <YStack width={22} height={22} borderRadius={11} backgroundColor={`${cat.color}1A`} justifyContent="center" alignItems="center">
+              <Feather name={cat.icon as any} size={11} color={cat.color} />
+            </YStack>
+            <TText fontFamily="Chirp-Bold" fontSize={8} color={cat.color} letterSpacing={0.6}>{cat.label}</TText>
+          </XStack>
+          {nearbyLoading ? (
+            <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Searching...</TText>
+          ) : p ? (
+            <>
+              <TText fontFamily="Chirp-Heavy" fontSize={11} color={theme.textPrimary} numberOfLines={2} lineHeight={14} minHeight={28}>{p.name}</TText>
+              <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary} marginTop={2}>{p.dist} km · ~{p.time} min</TText>
+              <TouchableOpacity onPress={() => openDirections(p)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                <XStack marginTop={8} backgroundColor="#00C48A" borderRadius={10} paddingVertical={5} justifyContent="center" alignItems="center" gap={4}>
+                  <Feather name="navigation" size={10} color="#FFF" />
+                  <TText fontFamily="Chirp-Bold" fontSize={10} color="#FFF">Go</TText>
+                </XStack>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TText fontFamily="Chirp-Medium" fontSize={10} color={theme.textSecondary}>None within 8 km</TText>
           )}
-        </XStack>
+        </YStack>
       </TouchableOpacity>
     );
   };
 
-  const prefsBg = isDarkMode ? "#064E3B" : "#14532D";
-  const sosBg = isDarkMode ? "rgba(239,68,68,0.10)" : "#FEECEC";
-  const sosBorder = isDarkMode ? "rgba(239,68,68,0.45)" : "#F8B4B4";
-  const sosText = isDarkMode ? "#FCA5A5" : "#B91C1C";
+  const smsUsed = smsQuota.used > 0;
+  const sosNames = recipientsForSos().map((r) => r.name.split(" ")[0]);
+
+  const QuickCard = ({ icon, iconBg, iconColor, title, subtitle, onPress, badge }: any) => (
+    <TouchableOpacity activeOpacity={0.9} onPress={onPress}>
+      <XStack backgroundColor={cardBg} borderRadius={20} paddingVertical={12} paddingHorizontal={14} alignItems="center" marginBottom={10} borderWidth={1} borderColor="#00C48A">
+        <YStack width={40} height={40} borderRadius={20} backgroundColor={iconBg} justifyContent="center" alignItems="center" marginRight={12}>
+          <Feather name={icon} size={18} color={iconColor} />
+        </YStack>
+        <YStack flex={1}>
+          <XStack alignItems="center" gap={8}>
+            <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>{title}</TText>
+            {badge}
+          </XStack>
+          <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} numberOfLines={1}>{subtitle}</TText>
+        </YStack>
+        <YStack width={28} height={28} borderRadius={14} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+          <Feather name="arrow-right" size={13} color="#FFF" />
+        </YStack>
+      </XStack>
+    </TouchableOpacity>
+  );
 
   return (
     <YStack flex={1} backgroundColor={isDarkMode ? "#0B0F0D" : "#F8FAFC"}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
       <SafeAreaView style={{ flex: 1 }}>
-        <XStack justifyContent="space-between" alignItems="center" paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={16} borderBottomWidth={1} borderBottomColor={divider}>
-          <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
-          <YStack position="absolute" left={0} right={0} alignItems="center" pointerEvents="none">
-            <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 22 }} color={theme.textPrimary}>Strompulse</TText>
-          </YStack>
-          <TouchableOpacity onPress={() => toggleSidebar(true)} style={{ padding: 4 }}>
-            <Feather name="menu" size={24} color={theme.textPrimary} />
-          </TouchableOpacity>
-        </XStack>
+        {/* Header — "SAFETY & SECURITY" sits above the line */}
+        <YStack paddingHorizontal={24} paddingTop={Platform.OS === "android" ? 20 : 10} paddingBottom={12} borderBottomWidth={1} borderBottomColor={divider}>
+          <XStack justifyContent="space-between" alignItems="center">
+            <Image source={require("../../assets/images/strompulselogo.png")} style={{ width: 40, height: 40, resizeMode: "contain" }} />
+            <YStack position="absolute" left={0} right={0} alignItems="center" pointerEvents="none">
+              <TText style={{ fontFamily: "SoraTitle-Bold", fontSize: 22 }} color={theme.textPrimary}>Strompulse</TText>
+            </YStack>
+            <TouchableOpacity onPress={() => toggleSidebar(true)} style={{ padding: 4 }}>
+              <Feather name="menu" size={24} color={theme.textPrimary} />
+            </TouchableOpacity>
+          </XStack>
+          <XStack alignSelf="center" marginTop={8} backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} paddingHorizontal={12} paddingVertical={5} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#047857" : "#A7F3D0"} alignItems="center" gap={6}>
+            <YStack width={6} height={6} borderRadius={3} backgroundColor="#00C48A" />
+            <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A" letterSpacing={0.5}>SAFETY & SECURITY</TText>
+          </XStack>
+        </YStack>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
-          <YStack alignItems="center" marginBottom={14} marginTop={14}>
-            <XStack backgroundColor={isDarkMode ? "rgba(0,196,138,0.1)" : "#ECFDF5"} paddingHorizontal={12} paddingVertical={6} borderRadius={16} borderWidth={1} borderColor={isDarkMode ? "#047857" : "#A7F3D0"} alignItems="center" gap={6}>
-              <YStack width={6} height={6} borderRadius={3} backgroundColor="#00C48A" />
-              <TText fontFamily="Chirp-Bold" fontSize={11} color="#00C48A" letterSpacing={0.5}>SAFETY & SECURITY SYSTEM</TText>
-            </XStack>
-          </YStack>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 120 }}>
+          {/* 1. Security Preferences (white, like before) */}
+          <QuickCard
+            icon="settings" iconColor="#00C48A" iconBg={isDarkMode ? "rgba(0,196,138,0.2)" : "#C6E8D9"}
+            title="Security Preferences" subtitle="Contacts, alert delivery, emergency numbers"
+            onPress={() => navigation.navigate("SafetySettingsScreen")}
+          />
 
-          {/* 1. Security Preferences — deep green, first */}
-          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("SafetySettingsScreen")}>
-            <XStack backgroundColor={prefsBg} borderRadius={20} paddingVertical={14} paddingHorizontal={16} alignItems="center" marginBottom={12}>
-              <YStack width={42} height={42} borderRadius={12} backgroundColor="rgba(255,255,255,0.14)" justifyContent="center" alignItems="center" marginRight={14}>
-                <Feather name="settings" size={20} color="#FFFFFF" />
-              </YStack>
-              <YStack flex={1}>
-                <TText fontFamily="Chirp-Heavy" fontSize={16} color="#FFFFFF" marginBottom={2}>Security Preferences</TText>
-                <TText fontFamily="Chirp-Medium" fontSize={12} color="rgba(255,255,255,0.75)" numberOfLines={1}>Contacts, alert delivery, emergency numbers</TText>
-              </YStack>
-              <Feather name="chevron-right" size={20} color="#FFFFFF" />
-            </XStack>
-          </TouchableOpacity>
-
-          {/* 2. Quick actions */}
-          <XStack marginBottom={12} justifyContent="space-between" gap={8}>
+          {/* 2. Tools · Communities · Analytics */}
+          <XStack marginBottom={10} justifyContent="space-between" gap={8}>
             {[
-              { label: "Tools", icon: "shield", onPress: () => navigation.navigate("SafetyToolsScreen") },
-              { label: "Copy Location", icon: "copy", onPress: copyLocation },
-              { label: "Tips", icon: "file-text", onPress: () => navigation.navigate("SafetyTipsScreen") },
+              { label: "Tools", icon: "briefcase", onPress: () => navigation.navigate("SafetyToolsScreen") },
+              { label: "Communities", icon: "users", onPress: () => navigation.navigate("CommunitiesScreen") },
+              { label: "Analytics", icon: "bar-chart-2", onPress: () => navigation.navigate("SafetyAnalyticsScreen") },
             ].map((a) => (
               <TouchableOpacity key={a.label} onPress={a.onPress} style={{ flex: 1 }} activeOpacity={0.8}>
                 <XStack paddingVertical={10} alignItems="center" justifyContent="center" borderRadius={24} borderWidth={1} borderColor={divider} backgroundColor={cardBg} gap={6}>
@@ -574,58 +617,48 @@ const SafetyScreen = ({ navigation, route }: any) => {
           </XStack>
 
           {/* 3. Share My Journey */}
-          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("JourneyShareScreen", { isJourneyActive })}>
-            <XStack backgroundColor={cardBg} borderRadius={20} paddingVertical={14} paddingHorizontal={16} alignItems="center" marginBottom={12} borderWidth={1} borderColor="#00C48A">
-              <YStack width={42} height={42} borderRadius={21} backgroundColor={isDarkMode ? "rgba(0,196,138,0.2)" : "#C6E8D9"} justifyContent="center" alignItems="center" marginRight={14}>
-                <Feather name="navigation" size={18} color="#00C48A" />
+          <QuickCard
+            icon="navigation" iconColor="#00C48A" iconBg={isDarkMode ? "rgba(0,196,138,0.2)" : "#C6E8D9"}
+            title="Share My Journey" subtitle="Live trip tracking until you check in"
+            onPress={() => navigation.navigate("JourneyShareScreen", { isJourneyActive })}
+            badge={isJourneyActive ? (
+              <YStack backgroundColor="#00C48A" paddingHorizontal={6} paddingVertical={2} borderRadius={6}>
+                <TText fontFamily="Chirp-Bold" fontSize={9} color="#FFF">LIVE</TText>
               </YStack>
-              <YStack flex={1}>
-                <XStack alignItems="center" gap={8} marginBottom={2}>
-                  <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary}>Share My Journey</TText>
-                  {isJourneyActive && (
-                    <YStack backgroundColor="#00C48A" paddingHorizontal={6} paddingVertical={2} borderRadius={6}>
-                      <TText fontFamily="Chirp-Bold" fontSize={9} color="#FFF">LIVE</TText>
-                    </YStack>
-                  )}
-                </XStack>
-                <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Live trip tracking until you check in</TText>
-              </YStack>
-              <YStack width={30} height={30} borderRadius={15} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
-                <Feather name="arrow-right" size={14} color="#FFF" />
-              </YStack>
-            </XStack>
-          </TouchableOpacity>
+            ) : null}
+          />
 
-          {/* 4. SOS — light red */}
-          <YStack backgroundColor={sosBg} borderRadius={20} paddingVertical={18} paddingHorizontal={16} marginBottom={12} borderWidth={1} borderColor={sosBorder}>
-            <XStack alignItems="center" justifyContent="center" marginBottom={14}>
-              <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.18)" : "#FBD5D5"} paddingHorizontal={10} paddingVertical={4} borderRadius={8}>
-                <TText fontFamily="Chirp-Bold" fontSize={10} color={sosText} letterSpacing={0.8}>SOS · ONE-TIME EMERGENCY ALERT</TText>
+          {/* 4. SOS — tap once, 5 s to cancel */}
+          <YStack backgroundColor={cardBg} borderRadius={20} paddingVertical={14} paddingHorizontal={16} marginBottom={10} borderWidth={1} borderColor={isDarkMode ? "rgba(239,68,68,0.45)" : "#FECACA"} overflow="hidden">
+            {/* soft decorative corners, as in the reference */}
+            <View pointerEvents="none" style={{ position: "absolute", top: -40, left: -40, width: 110, height: 110, borderRadius: 55, backgroundColor: isDarkMode ? "rgba(239,68,68,0.08)" : "#FEF2F2" }} />
+            <View pointerEvents="none" style={{ position: "absolute", bottom: -50, right: -40, width: 130, height: 130, borderRadius: 65, backgroundColor: isDarkMode ? "rgba(0,196,138,0.06)" : "#F0FDF4" }} />
+
+            <XStack alignItems="center" justifyContent="center" marginBottom={10}>
+              {smsUsed && (
+                <XStack position="absolute" left={0} alignItems="center" gap={4} backgroundColor={smsQuota.remaining > 0 ? (isDarkMode ? "rgba(59,130,246,0.15)" : "#EFF6FF") : (isDarkMode ? "rgba(239,68,68,0.15)" : "#FEE2E2")} paddingHorizontal={7} paddingVertical={3} borderRadius={8}>
+                  <Feather name="message-square" size={9} color={smsQuota.remaining > 0 ? "#3B82F6" : "#EF4444"} />
+                  <TText fontFamily="Chirp-Bold" fontSize={9} color={smsQuota.remaining > 0 ? "#3B82F6" : "#EF4444"}>{smsQuota.remaining}/{smsQuota.limit} left</TText>
+                </XStack>
+              )}
+              <YStack backgroundColor={isDarkMode ? "rgba(239,68,68,0.18)" : "#FEE2E2"} paddingHorizontal={10} paddingVertical={4} borderRadius={8}>
+                <TText fontFamily="Chirp-Bold" fontSize={10} color="#DC2626" letterSpacing={0.8}>SOS · EMERGENCY ALERT</TText>
               </YStack>
             </XStack>
-            <View style={{ alignItems: "center", justifyContent: "center", height: 130, width: "100%", marginBottom: 14 }}>
-              <View style={{ position: "absolute", width: 130, height: 130, borderRadius: 65, borderWidth: 1, borderColor: isDarkMode ? "rgba(239,68,68,0.35)" : "#F8B4B4", backgroundColor: isDarkMode ? "rgba(239,68,68,0.12)" : "#FDDCDC" }} />
-              <Svg width={BUTTON_SIZE} height={BUTTON_SIZE} style={{ position: "absolute", zIndex: 10 }} pointerEvents="none">
-                <AnimatedCircle cx={BUTTON_SIZE / 2} cy={BUTTON_SIZE / 2} r={CIRCLE_RADIUS} stroke="#DC2626" strokeWidth="8" fill="none" strokeDasharray={CIRCLE_CIRCUMFERENCE} strokeDashoffset={strokeDashoffset} strokeLinecap="round" transform={`rotate(-90 ${BUTTON_SIZE / 2} ${BUTTON_SIZE / 2})`} />
-              </Svg>
-              <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} style={{ width: 100, height: 100, borderRadius: 50, zIndex: 20, overflow: "hidden" }}>
-                <YStack flex={1} backgroundColor="#DC2626" justifyContent="center" alignItems="center">
-                  <Feather name="phone-call" size={24} color="#FFFFFF" style={{ marginBottom: 4 }} />
-                  <TText fontFamily="Chirp-Heavy" fontSize={24} color="#FFFFFF" letterSpacing={1}>SOS</TText>
-                </YStack>
-              </Pressable>
-            </View>
-            <TText fontFamily="Chirp-Medium" fontSize={13} color={sosText} textAlign="center" marginBottom={12} paddingHorizontal={8}>
-              Hold the SOS button for 3 seconds to alert your emergency contacts
-            </TText>
-            <XStack justifyContent="center" alignItems="center" gap={6} backgroundColor={isDarkMode ? "rgba(239,68,68,0.12)" : "#FDDCDC"} borderRadius={12} paddingVertical={8}>
-              <Feather name="message-square" size={12} color={sosText} />
-              <TText fontFamily="Chirp-Bold" fontSize={11} color={sosText}>
-                {smsQuota.remaining} of {smsQuota.limit} SMS SOS alerts remaining this month
-              </TText>
-            </XStack>
+
+            <YStack alignItems="center" justifyContent="center" height={124}>
+              <View style={{ position: "absolute", width: 124, height: 124, borderRadius: 62, backgroundColor: isDarkMode ? "rgba(239,68,68,0.12)" : "#FEE2E2" }} />
+              <View style={{ position: "absolute", width: 106, height: 106, borderRadius: 53, backgroundColor: isDarkMode ? "rgba(239,68,68,0.2)" : "#FECACA" }} />
+              <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                <TouchableOpacity activeOpacity={0.85} onPress={onSosPress} style={{ width: 90, height: 90, borderRadius: 45, backgroundColor: "#DC2626", justifyContent: "center", alignItems: "center", shadowColor: "#DC2626", shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 }}>
+                  <Feather name="phone-call" size={20} color="#FFFFFF" style={{ marginBottom: 2 }} />
+                  <TText fontFamily="Chirp-Heavy" fontSize={22} color="#FFFFFF" letterSpacing={1}>SOS</TText>
+                </TouchableOpacity>
+              </Animated.View>
+            </YStack>
+
             {sosLiveOn && (
-              <XStack marginTop={10} alignItems="center" justifyContent="space-between" backgroundColor={cardBg} borderRadius={12} paddingVertical={8} paddingHorizontal={12} borderWidth={1} borderColor={sosBorder}>
+              <XStack marginTop={10} alignItems="center" justifyContent="space-between" backgroundColor={isDarkMode ? "#1A221E" : "#FFFFFF"} borderRadius={12} paddingVertical={8} paddingHorizontal={12} borderWidth={1} borderColor={isDarkMode ? "rgba(239,68,68,0.45)" : "#FECACA"}>
                 <XStack alignItems="center" gap={8} flex={1}>
                   <YStack width={8} height={8} borderRadius={4} backgroundColor="#DC2626" />
                   <TText fontFamily="Chirp-Bold" fontSize={11} color={theme.textPrimary} numberOfLines={1}>SOS live location is ON</TText>
@@ -637,22 +670,22 @@ const SafetyScreen = ({ navigation, route }: any) => {
             )}
           </YStack>
 
-          {/* 5. Nearby Help — closest of each; tap to see top 3 */}
-          <YStack backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor="#00C48A" paddingVertical={14} paddingHorizontal={16} marginBottom={12}>
+          {/* 5. Nearby Help — closest hospital, pharmacy & police in one row */}
+          <YStack backgroundColor={cardBg} borderRadius={20} borderWidth={1} borderColor="#00C48A" paddingVertical={12} paddingHorizontal={14}>
             <TouchableOpacity activeOpacity={0.8} onPress={() => openEmergencyMap()}>
-              <XStack justifyContent="space-between" alignItems="center" marginBottom={12}>
+              <XStack justifyContent="space-between" alignItems="center" marginBottom={10}>
                 <YStack flex={1}>
-                  <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary} marginBottom={2}>Nearby Help</TText>
-                  <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>Closest hospital, pharmacy & police</TText>
+                  <TText fontFamily="Chirp-Heavy" fontSize={15} color={theme.textPrimary}>Nearby Help</TText>
+                  <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Tap to see the 3 closest of each</TText>
                 </YStack>
-                <YStack width={30} height={30} borderRadius={15} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
-                  <Feather name="arrow-right" size={14} color="#FFF" />
+                <YStack width={28} height={28} borderRadius={14} backgroundColor="#00C48A" justifyContent="center" alignItems="center">
+                  <Feather name="arrow-right" size={13} color="#FFF" />
                 </YStack>
               </XStack>
             </TouchableOpacity>
 
             <TouchableOpacity activeOpacity={0.9} onPress={() => openEmergencyMap()}>
-              <YStack height={120} borderRadius={14} overflow="hidden" backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} marginBottom={6}>
+              <YStack height={96} borderRadius={14} overflow="hidden" backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} marginBottom={10}>
                 {currentCoords ? (
                   <MapView
                     style={{ ...StyleSheet.absoluteFillObject }}
@@ -681,57 +714,48 @@ const SafetyScreen = ({ navigation, route }: any) => {
               </YStack>
             </TouchableOpacity>
 
-            {NEARBY_CATEGORIES.map((cat, i) => renderClosestRow(cat, i === NEARBY_CATEGORIES.length - 1))}
-
-            <TouchableOpacity onPress={() => openEmergencyMap()}>
-              <XStack marginTop={8} paddingTop={10} borderTopWidth={1} borderColor={isDarkMode ? "#1F2E27" : "#F1F5F9"} justifyContent="center" alignItems="center" gap={6}>
-                <TText fontFamily="Chirp-Bold" fontSize={12} color="#00C48A">See 3 closest of each</TText>
-                <Feather name="chevron-right" size={14} color="#00C48A" />
-              </XStack>
-            </TouchableOpacity>
+            <XStack gap={8}>
+              {NEARBY_CATEGORIES.map(renderClosestTile)}
+            </XStack>
           </YStack>
-
-          {/* Emergency Contacts */}
-          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("ContactsScreen")}>
-            <YStack backgroundColor={cardBg} borderRadius={20} paddingVertical={14} paddingHorizontal={16} borderWidth={1} borderColor="#00C48A">
-              <XStack justifyContent="space-between" alignItems="flex-start" marginBottom={12}>
-                <YStack flex={1}>
-                  <XStack alignItems="center" marginBottom={4}>
-                    <Feather name="users" size={16} color={theme.textPrimary} style={{ marginRight: 8 }} />
-                    <TText fontFamily="Chirp-Heavy" fontSize={16} color={theme.textPrimary}>Emergency Contacts</TText>
-                  </XStack>
-                  <TText fontFamily="Chirp-Medium" fontSize={12} color={theme.textSecondary}>{emergencyContacts.length} of 3 contacts will be alerted</TText>
-                </YStack>
-                <TText fontFamily="Chirp-Bold" fontSize={13} color="#00C48A">Manage</TText>
-              </XStack>
-              <XStack gap={16} alignItems="center">
-                {emergencyContacts.slice(0, 3).map((contact, i) => (
-                  <YStack key={i} alignItems="center">
-                    <YStack width={48} height={48} borderRadius={24} backgroundColor={isDarkMode ? contact.bgDark : contact.bg} justifyContent="center" alignItems="center" marginBottom={6}>
-                      <TText fontFamily="Chirp-Heavy" fontSize={18} color={contact.color}>{contact.initial}</TText>
-                    </YStack>
-                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>{contact.name.split(" ")[0]}</TText>
-                  </YStack>
-                ))}
-                {emergencyContacts.length < 3 && (
-                  <YStack alignItems="center">
-                    <YStack width={48} height={48} borderRadius={24} backgroundColor={isDarkMode ? "#1A221E" : "#F8FAFC"} justifyContent="center" alignItems="center" marginBottom={6} borderWidth={1} borderColor={divider} borderStyle="dashed">
-                      <Feather name="plus" size={18} color="#00C48A" />
-                    </YStack>
-                    <TText fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary}>Add</TText>
-                  </YStack>
-                )}
-              </XStack>
-              <XStack marginTop={12} paddingTop={10} borderTopWidth={1} borderColor={isDarkMode ? "#1F2E27" : "#F1F5F9"} alignItems="flex-start" gap={8}>
-                <Feather name="info" size={12} color={theme.textSecondary} style={{ marginTop: 2 }} />
-                <TText flex={1} fontFamily="Chirp-Medium" fontSize={11} color={theme.textSecondary} lineHeight={16}>
-                  Contacts on StromPulse get an in-app alert. Others get WhatsApp when you're online, or SMS when you're offline.
-                </TText>
-              </XStack>
-            </YStack>
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
+
+      {/* ---------- SOS countdown (red, 5 s, cancel) ---------- */}
+      <Modal visible={countdown !== null} animationType="fade" transparent={false} onRequestClose={cancelSos} statusBarTranslucent>
+        <YStack flex={1} backgroundColor="#DC1F1F" alignItems="center" justifyContent="space-between" paddingTop={Platform.OS === "ios" ? 90 : 60} paddingBottom={Platform.OS === "ios" ? 50 : 30} paddingHorizontal={28}>
+          <YStack alignItems="center">
+            <TText fontFamily="Chirp-Heavy" fontSize={26} color="#FFFFFF" textAlign="center" marginBottom={8}>Sending an SOS alert</TText>
+            <TText fontFamily="Chirp-Medium" fontSize={15} color="rgba(255,255,255,0.9)" textAlign="center" lineHeight={22}>
+              {sosNames.length > 0
+                ? `Alerting ${sosNames.slice(0, 3).join(", ")}${sosNames.length > 3 ? ` +${sosNames.length - 3} more` : ""}${sosGroups.length ? ` (incl. ${sosGroups.map((g) => g.name).join(", ")})` : ""}`
+                : "Alerting your emergency contacts"}
+            </TText>
+          </YStack>
+
+          <YStack width={RING} height={RING} justifyContent="center" alignItems="center">
+            <Svg width={RING} height={RING} style={{ position: "absolute" }}>
+              <Circle cx={RING / 2} cy={RING / 2} r={RING_R} stroke="rgba(255,255,255,0.25)" strokeWidth={8} fill="none" />
+              <AnimatedCircle cx={RING / 2} cy={RING / 2} r={RING_R} stroke="#FFFFFF" strokeWidth={8} fill="none" strokeDasharray={RING_C} strokeDashoffset={ringOffset} strokeLinecap="round" transform={`rotate(-90 ${RING / 2} ${RING / 2})`} />
+            </Svg>
+            <YStack width={RING - 44} height={RING - 44} borderRadius={(RING - 44) / 2} backgroundColor="#E53935" justifyContent="center" alignItems="center" borderWidth={2} borderColor="rgba(255,255,255,0.35)">
+              <TText fontFamily="Chirp-Heavy" fontSize={64} color="#FFFFFF">{countdown ?? ""}</TText>
+            </YStack>
+          </YStack>
+
+          <YStack width="100%" alignItems="center">
+            <TText fontFamily="Chirp-Medium" fontSize={14} color="rgba(255,255,255,0.9)" marginBottom={14}>Are you sure you need help?</TText>
+            <TouchableOpacity onPress={cancelSos} style={{ width: "100%" }} activeOpacity={0.85}>
+              <YStack backgroundColor="#FFFFFF" borderRadius={28} paddingVertical={16} alignItems="center">
+                <TText fontFamily="Chirp-Heavy" fontSize={16} color="#DC1F1F">Cancel</TText>
+              </YStack>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={sendSosNow} style={{ marginTop: 16 }}>
+              <TText fontFamily="Chirp-Bold" fontSize={13} color="#FFFFFF" textDecorationLine="underline">Send now</TText>
+            </TouchableOpacity>
+          </YStack>
+        </YStack>
+      </Modal>
 
       {isSidebarOpen && (
         <YStack position="absolute" top={0} left={0} right={0} bottom={0} zIndex={99999}>

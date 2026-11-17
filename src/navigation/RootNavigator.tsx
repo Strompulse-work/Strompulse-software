@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from "react";
-import { Platform } from "react-native";
+import { Platform, Alert } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
 import { XStack, YStack, Text as TText } from "tamagui";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { supabase } from "../config/supabase";
-import { useAllGridDevices, parseStromTimestamp } from "../hooks/useDeviceData";
+import * as Notifications from "expo-notifications";
+import { useNavigation } from "@react-navigation/native";
+import { useAllGridDevices } from "../hooks/useDeviceData";
+import { useUnreadNotificationCount } from "../utils/notificationCenter";
+import { ensureSupabaseSession } from "../utils/sessionGuard";
+import AuthService from "../services/authService";
 
 import AuthNavigator from "./AuthNavigator";
 
@@ -39,6 +42,8 @@ import EmergencyDirectionScreen from "../screens/EmergencyDirectionScreen";
 // --- NEW SAFETY SUB-SCREENS ---
 import SafetyToolsScreen from "../screens/SafetyToolsScreen";
 import SafetyTipsScreen from "../screens/SafetyTipsScreen";
+import CommunitiesScreen from "../screens/CommunitiesScreen";
+import SafetyAnalyticsScreen from "../screens/SafetyAnalyticsScreen";
 
 // --- NEW PROFILE SUB-SCREENS ---
 import MyActivityScreen from "../screens/MyActivityScreen";
@@ -114,97 +119,84 @@ const TabIcon = ({
   );
 };
 
+// Push notifications already opened in this app session (so a cold-start tap isn't replayed)
+const handledPushIds = new Set<string>();
+
 const MainTabs = () => {
   const { isDarkMode } = useTheme();
-  const [unreadCount, setUnreadCount] = useState<number>(0);
   const { devices } = useAllGridDevices();
+  const navigation = useNavigation<any>();
 
-  // Handle immediate Supabase badge updates via a dedicated listener
+  // Real unread count: only alerts addressed to me + recent electricity events; cleared when the tab is opened
+  const unreadCount = useUnreadNotificationCount(devices);
+
+  // Make sure Supabase's own login is present (restores it from the saved login if it went missing),
+  // then register for push notifications
   useEffect(() => {
-    let isMounted = true;
-    
-    const alertSubscription = supabase
-      .channel('public:alerts:badge')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, payload => {
-        if (isMounted) {
-          // Instantly increment unread count to prevent delay!
-          setUnreadCount(prev => prev + 1);
-        }
-      })
-      .subscribe();
-
-    return () => {
-      isMounted = false;
-      supabase.removeChannel(alertSubscription);
-    };
-  }, []);
-
-  // --- NEW: Register for push notifications when tabs load ---
-  useEffect(() => {
-    registerForPushNotificationsAsync();
-  }, []);
-
-  // Handle background sync for Grid Outages & Storage
-  useEffect(() => {
-    let isMounted = true;
-
-    const computeUnread = async () => {
-      try {
-        const readData = await AsyncStorage.getItem("strompulse_read_alerts");
-        const dismissedData = await AsyncStorage.getItem("strompulse_dismissed_alerts");
-        const readSet = new Set(readData ? JSON.parse(readData) : []);
-        const dismissedSet = new Set(dismissedData ? JSON.parse(dismissedData) : []);
-
-        const { data: alerts } = await supabase
-          .from("alerts")
-          .select("id, created_at")
-          .order("created_at", { ascending: false })
-          .limit(30);
-
-        let unread = 0;
-
-        (alerts || []).forEach((item: any) => {
-          if (!dismissedSet.has(item.id) && !readSet.has(item.id)) {
-            unread += 1;
-          }
-        });
-
-        const now = Date.now();
-        (devices || []).forEach((device) => {
-          if (device.history) {
-            Object.keys(device.history).forEach((key) => {
-              const resDate = parseStromTimestamp(key);
-              if (resDate && (now - resDate.getTime()) < 15 * 60 * 1000) {
-                const resId = `power-restored-${device.id}-${key}`;
-                if (!dismissedSet.has(resId) && !readSet.has(resId)) unread += 1;
-              }
-            });
-          }
-
-          if (!device.isOnline && device.connectionState !== "checking") {
-            const outDate = parseStromTimestamp(device.updated_at) || new Date();
-            const outTime = new Date(outDate.getTime() + 60000);
-            if ((now - outTime.getTime()) < 15 * 60 * 1000) {
-              const outId = `outage-live-${device.id}-${device.updated_at}`;
-              if (!dismissedSet.has(outId) && !readSet.has(outId)) unread += 1;
-            }
-          }
-        });
-
-        if (isMounted) setUnreadCount(unread);
-      } catch (err) {
-        console.error("Error computing unread count:", err);
+    ensureSupabaseSession().then((session) => {
+      if (session) {
+        registerForPushNotificationsAsync(session.user.id);
+        return;
       }
+      Alert.alert(
+        "Please sign in again",
+        "Your login has expired, so SOS and journey alerts can't be sent or received. Sign out and sign back in to fix this.",
+        [
+          { text: "Later", style: "cancel" },
+          { text: "Sign out", style: "destructive", onPress: () => { AuthService.logout().catch(() => {}); } },
+        ]
+      );
+    });
+  }, []);
+
+  // Android notification channels + open the right screen when a push notification is tapped
+  useEffect(() => {
+    if (Platform.OS === "android") {
+      Notifications.setNotificationChannelAsync("sos", {
+        name: "SOS & safety alerts",
+        importance: Notifications.AndroidImportance.MAX,
+        sound: "default",
+        vibrationPattern: [0, 500, 250, 500],
+      }).catch(() => {});
+      Notifications.setNotificationChannelAsync("default", {
+        name: "General",
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: "default",
+      }).catch(() => {});
+    }
+
+    const openFromPush = (data: any) => {
+      if (!data) return;
+      const id = data.alertId || `${data.type}-${data.createdAt}`;
+      if (handledPushIds.has(id)) return;
+      handledPushIds.add(id);
+      const type = String(data.type || "");
+      const mode =
+        type === "emergency" ? (data.kind === "delay" ? "journey" : "sos")
+        : type.startsWith("journey") ? "journey"
+        : type.includes("location") ? "location"
+        : null;
+      if (!mode || !data.senderId) {
+        navigation.navigate("MainTabs", { screen: "Notifications" });
+        return;
+      }
+      navigation.navigate("LiveTrackingScreen", {
+        mode,
+        senderId: data.senderId,
+        senderName: data.senderName || "Contact",
+        initialLat: typeof data.lat === "number" ? data.lat : undefined,
+        initialLng: typeof data.lng === "number" ? data.lng : undefined,
+        alertTime: data.createdAt || undefined,
+        groupName: data.groupName || undefined,
+      });
     };
 
-    computeUnread();
-    const interval = setInterval(computeUnread, 5000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [devices]);
+    Notifications.getLastNotificationResponseAsync()
+      .then((res) => { if (res) openFromPush(res.notification.request.content.data); })
+      .catch(() => {});
+    const sub = Notifications.addNotificationResponseReceivedListener((res) => openFromPush(res.notification.request.content.data));
+    return () => sub.remove();
+  }, []);
 
   return (
     <Tab.Navigator
@@ -300,6 +292,8 @@ const RootNavigator = ({ isSignedIn }: { isSignedIn: boolean }) => {
       <Stack.Screen name="SafetySettingsScreen" component={SafetySettingsScreen} />
       <Stack.Screen name="SafetyToolsScreen" component={SafetyToolsScreen} />
       <Stack.Screen name="SafetyTipsScreen" component={SafetyTipsScreen} />
+      <Stack.Screen name="CommunitiesScreen" component={CommunitiesScreen} />
+      <Stack.Screen name="SafetyAnalyticsScreen" component={SafetyAnalyticsScreen} />
       <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} />
       <Stack.Screen name="AboutScreen" component={AboutScreen} />
       <Stack.Screen name="RequestDeviceScreen" component={RequestDeviceScreen} />

@@ -1,78 +1,80 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
+// supabase/functions/send-alert-push/index.ts
+// Triggered by a Database Webhook on INSERT into public.alerts.
+// Sends an Expo push notification ONLY to the people listed in alerts.recipient_phones
+// (matched against their verified phone number), never to the sender, never to anyone else.
+//
+// Deploy:  npx supabase functions deploy send-alert-push
+import { createClient } from "npm:@supabase/supabase-js@2";
 
-serve(async (req) => {
+const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+
+const stripLinks = (s: string) => (s || "").replace(/\s*https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+
+const channelFor = (type: string) => (type === "emergency" ? "sos" : "default");
+
+Deno.serve(async (req) => {
   try {
     const payload = await req.json();
-    const record = payload.record; 
+    const record = payload?.record ?? payload;
+    if (!record?.id) return new Response(JSON.stringify({ skipped: "no record" }), { status: 200 });
 
-    // 1. Only care about emergency and journey_start
-    if (record.type !== 'emergency' && record.type !== 'journey_start') {
-      return new Response("Ignored: Not an SOS or Journey", { status: 200 });
-    }
+    const phones: string[] = Array.isArray(record.recipient_phones)
+      ? record.recipient_phones
+      : typeof record.recipient_phones === "string"
+      ? record.recipient_phones.replace(/[{}"\[\] ]/g, "").split(",").filter(Boolean)
+      : [];
+    if (phones.length === 0) return new Response(JSON.stringify({ sent: 0, reason: "no recipients" }), { status: 200 });
 
-    const recipientPhones = record.recipient_phones || [];
-    if (recipientPhones.length === 0) {
-      return new Response("No phone numbers provided. SMS/WhatsApp handling only.", { status: 200 });
-    }
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: targets, error } = await supabase.rpc("push_targets", { p_phones: phones, p_sender: record.user_id ?? null });
+    if (error) throw error;
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const tokens = Array.from(new Set((targets || []).map((t: any) => t.push_token).filter((t: string) => t?.startsWith("ExponentPushToken") || t?.startsWith("ExpoPushToken"))));
+    if (tokens.length === 0) return new Response(JSON.stringify({ sent: 0, reason: "recipients have no app / push token" }), { status: 200 });
 
-    // 2. Look up the user_ids for the provided phone numbers
-    // Note: Ensure 'profiles' matches the name of the table where you store user phone numbers
-    const { data: matchedProfiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, phone')
-      .in('phone', recipientPhones);
-
-    if (profileError || !matchedProfiles || matchedProfiles.length === 0) {
-      return new Response("None of the contacts are registered Strompulse users", { status: 200 });
-    }
-
-    const targetUserIds = matchedProfiles.map(p => p.id);
-
-    // 3. Fetch push tokens ONLY for those matched user_ids
-    const { data: tokensData, error: tokenError } = await supabase
-      .from('user_tokens')
-      .select('push_token')
-      .in('user_id', targetUserIds)
-      .not('push_token', 'is', null);
-
-    if (tokenError || !tokensData || tokensData.length === 0) {
-      return new Response("Matched users do not have active push tokens", { status: 200 });
-    }
-
-    // 4. Build dynamic push notifications
-    const expoMessages = tokensData.map((t) => {
-      const isEmergency = record.type === 'emergency';
-      const emoji = isEmergency ? "🚨 " : "📍 ";
-      
-      const displayTitle = record.title ? (emoji + record.title) : (emoji + (isEmergency ? "EMERGENCY SOS" : "Journey Started"));
-      
-      return {
-        to: t.push_token,
-        sound: "default",
-        title: displayTitle,
-        body: record.message || "Tap to open Strompulse and view live details.",
-        data: { alertId: record.id, type: record.type },
-      };
-    });
-
-    // 5. Send to Expo
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
+    const data = record.data || {};
+    const type: string = record.type || "general";
+    const messages = tokens.map((to) => ({
+      to,
+      sound: "default",
+      priority: "high",
+      channelId: channelFor(type),
+      title: record.title || "StromPulse",
+      body: stripLinks(record.message).slice(0, 178),
+      data: {
+        alertId: record.id,
+        type,
+        senderId: record.user_id ?? null,
+        senderName: data.senderName ?? null,
+        lat: data.lat ?? null,
+        lng: data.lng ?? null,
+        groupName: data.groupName ?? null,
+        kind: data.kind ?? null,
+        createdAt: record.created_at ?? null,
       },
-      body: JSON.stringify(expoMessages),
-    });
+    }));
 
-    return new Response("Push notifications delivered successfully to contacts!", { status: 200 });
-  } catch (err) {
-    return new Response(`Error: ${err.message}`, { status: 500 });
+    let sent = 0;
+    const dead: string[] = [];
+    for (let i = 0; i < messages.length; i += 100) {
+      const chunk = messages.slice(i, i + 100);
+      const res = await fetch(EXPO_PUSH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(chunk),
+      });
+      const json = await res.json().catch(() => ({}));
+      (json?.data || []).forEach((r: any, idx: number) => {
+        if (r?.status === "ok") sent += 1;
+        else if (r?.details?.error === "DeviceNotRegistered") dead.push(chunk[idx].to);
+      });
+    }
+    // Remove tokens of uninstalled apps so they stop failing
+    if (dead.length) await supabase.from("user_tokens").delete().in("push_token", dead);
+
+    return new Response(JSON.stringify({ sent, removed: dead.length }), { status: 200, headers: { "Content-Type": "application/json" } });
+  } catch (e) {
+    console.error("[send-alert-push]", e);
+    return new Response(JSON.stringify({ error: String(e?.message || e) }), { status: 500 });
   }
 });
